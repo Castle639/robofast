@@ -23,6 +23,8 @@ Each line is one JSON object with ``t`` (ISO 8601, UTC) and ``kind``:
 * ``preempt`` -- a telescope asked to stop for a ToO (``policy``,
   ``accepted``);
 * ``outcome`` -- how an observation ended (``outcome``, ``frames``).
+* ``mode`` -- the enclosure's operating mode changed (docs/modes.md); once
+  told, every entry carries the ``mode`` it was made in.
 
 Inspect a night with ``python -m robofast_core.plan_record FILE`` (one line
 per entry), and re-run its decisions with ``--replay``: :func:`replay`
@@ -280,6 +282,8 @@ async def replay(entries: list[dict[str, Any]]) -> ReplayResult:
             sched.cancel(e["group"])
         elif kind == "held":
             sched.set_held(e["telescopes"])
+        elif kind == "mode":
+            sched.set_mode(e.get("mode"), {"observe": e.get("observe")})
         elif kind == "spectrograph":
             sched.set_spectrograph_available(bool(e["available"]), e.get("reason") or "")
         elif kind == "preempt":

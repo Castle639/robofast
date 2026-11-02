@@ -24,7 +24,7 @@ directory as the `rv-night` artifact.
 |---|---|
 | weather | the real weather bridge (`robofast_core.weather_bridge`, a child process) with the shipped `sites/minerva/weather.yaml`, reading a fake site Redis server and fake SAO weather pages |
 | enclosure | the Aqawan PAC simulator and the real Alpaca Dome server (`aqawan_server`) |
-| safety | the real supervisor (`supervisor_service`, a child process), with `sites/minerva/aqawan1.json`'s safety settings (park before close, the dome heartbeat) and shorter timings |
+| safety | the real supervisor (`supervisor_service`, a child process), with `sites/minerva/aqawan1.json`'s safety settings (park before close, the dome heartbeat) and shorter timings, in the `robotic` operating mode (the site's default is `attended`; docs/modes.md) |
 | T1, T2 | fake mounts served over Alpaca; simulated star-field imagers on simulated focusers (autofocus and imaging) |
 | guiders | one real guider service per telescope (`robofast_core.guider.service`, child processes): simulated FAU camera, tip/tilt and backlight |
 | KiwiSpec | the spectrograph PC simulator and the real KiwiSpec service (`kiwispec_service`, a child process) |

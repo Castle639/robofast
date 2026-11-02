@@ -29,7 +29,10 @@ fields)::
 
 ``observingconditions``, ``telescopes`` (needed for ``park_before_close``;
 no lease is granted unless every one reports ``AtPark``) and ``heartbeat``
-are optional; with ``heartbeat_interval`` set and no
+are optional; ``mode`` and ``modes`` are the enclosure's operating modes
+(:mod:`robofast_core.modes`, docs/modes.md), the active one kept in
+``mode_file`` (default ``modes/<name>.json`` under the data directory); with
+``heartbeat_interval`` set and no
 ``heartbeat`` entry, the pings go to the dome itself (the normal case; see
 :mod:`robofast_core.heartbeat_watchdog`). The process prints one JSON line,
 ``{"url": ..., "epoch": ...}``, on stdout once it is listening, logs to
@@ -73,6 +76,14 @@ is random per process start, so after a restart every old token is unknown
   ``duty`` action). With ``attended_only`` no lease is granted unless an
   operator is on duty (:mod:`robofast_core.safety`); 409 for a renewal by
   someone not on duty.
+* ``POST /mode`` ``{"operator", "mode", "reason"}`` -- switch the
+  enclosure's operating mode (docs/modes.md; the observer console's
+  ``mode`` action and ``python -m robofast_core.modes set``). Logged with who
+  and why; a switch to a mode under which the live lease may not go on
+  revokes it (the normal close); nothing opens by a switch. 400 for an
+  unknown mode or a missing name or reason. ``GET /status`` carries
+  ``mode``: the active mode, its policy, who switched to it, when and why,
+  and the modes defined.
 * ``POST /faults/clear`` ``{"operator", "reason"}`` -- an operator clears
   the enclosure's faults (``Action("ClearFaults")`` on the supervisor's
   privileged dome grant; logged). 409 if the dome refuses, e.g. because it
@@ -103,6 +114,7 @@ from urllib.parse import parse_qs, urlparse
 
 from robofast_core.alpaca import alpaca_owner
 from robofast_core.config import device_address, load_config, telescopes
+from robofast_core.modes import ModeStore, mode_path, modes_from_config
 from robofast_core.owner import DeviceError
 from robofast_core.safety import (
     OpenLease,
@@ -221,6 +233,12 @@ class SupervisorServer:
                 if op == "renew":
                     return 200, self.supervisor.duty_renew(operator)
                 raise _Error(400, 'duty: "op" is "on", "off" or "renew"')
+            if method == "POST" and parts == ["mode"]:
+                return 200, self.supervisor.set_mode(
+                    str(args["mode"]),
+                    str(args.get("operator") or ""),
+                    str(args.get("reason") or ""),
+                )
             if method == "POST" and parts == ["faults", "clear"]:
                 operator = str(args["operator"]).strip()
                 if not operator:
@@ -339,10 +357,18 @@ class SupervisorServer:
 # -- the process ------------------------------------------------------------------
 
 
-def build(config: dict[str, Any], timeline: Timeline) -> SafetySupervisor:
-    """A supervisor wired to the Alpaca devices named in ``config``."""
+def build(
+    config: dict[str, Any], timeline: Timeline, *, mode_store: ModeStore | None = None
+) -> SafetySupervisor:
+    """A supervisor wired to the Alpaca devices named in ``config``; its
+    mode kept in ``mode_store`` (default: the config's ``mode_file``)."""
     devices = config["devices"]
     scfg = SafetyConfig(**config.get("safety", {}))
+    modes = modes_from_config(
+        config, attended_floor=bool(scfg.attended_only), fault_action=bool(scfg.fault_action)
+    )
+    if mode_store is None:
+        mode_store = ModeStore(mode_path(config))
     timeout = scfg.dome_timeout
 
     def owner(name: str, kind: str, required: bool = False, **kw: Any):
@@ -379,6 +405,8 @@ def build(config: dict[str, Any], timeline: Timeline) -> SafetySupervisor:
         heartbeat=heartbeat,
         timeline=timeline,
         config=scfg,
+        modes=modes,
+        mode_store=mode_store,
     )
 
 

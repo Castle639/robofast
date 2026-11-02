@@ -522,6 +522,10 @@ class SimulatedNight:
             heartbeat_interval=1.0,
             heartbeat_timeout=10.0,
         )
+        # A robotic night (the site's default mode is the safe one,
+        # attended: docs/modes.md), its mode file in this run's directory.
+        cfg["mode"] = "robotic"
+        cfg["mode_file"] = str(Path(self.out).resolve() / "mode.json")
         return cfg
 
     def _start_supervisor(self) -> None:

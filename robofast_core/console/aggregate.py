@@ -418,6 +418,9 @@ class Aggregator:
                 f"lease #{(lease or {}).get('id')} revoked but unreleased "
                 f"({(lease or {}).get('holder')})",
             )
+        mode = sup.get("mode") if isinstance(sup.get("mode"), dict) else None
+        if mode is not None and mode.get("notice"):
+            alarm("mode", str(mode["notice"]), "warning")  # a notice: who switched, why
         hb = sup.get("pinged_ago")
         return {
             "reachable": True,
@@ -428,6 +431,7 @@ class Aggregator:
             "fault": sup.get("fault"),
             "shutter_hold_for": sup.get("shutter_hold_for"),
             "duty": sup.get("duty"),
+            "mode": mode,
             "heartbeat_age": None if hb is None else round(float(hb), 1),
             "enforced_ago": sup.get("enforced_ago"),
             "orphaned_for": sup.get("orphaned_for"),

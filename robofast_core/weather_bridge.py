@@ -23,6 +23,9 @@ Running it
     # serve Alpaca on the config's ``listen`` address (or --listen host:port)
     python -m robofast_core.weather_bridge --config sites/minerva/weather.yaml
 
+``--shadow`` is the bridge's own (the bridge alone, serving nothing); to run
+all of robofast beside a legacy system, serve the bridge and put the
+enclosure in its ``shadow`` operating mode (docs/modes.md).
 ``--once`` polls once, prints the line and exits (status 0 if safe, else 1);
 ``--json`` prints each poll's full status as one JSON object per line. The
 config format is described in ``docs/weather_bridge.md``; YAML (``.yaml``) and

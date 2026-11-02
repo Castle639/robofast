@@ -48,6 +48,7 @@ Homepage = "https://github.com/jdeast/robofast"
 # `python -m <module>`; the two spellings run the same main().
 [project.scripts]
 robofast-supervisor = "robofast_core.supervisor_service:main"
+robofast-mode = "robofast_core.modes:main"
 robofast-sequencer = "robofast_core.sequencer_service:main"
 robofast-when = "robofast_core.when:main"
 robofast-weather-bridge = "robofast_core.weather_bridge:main"

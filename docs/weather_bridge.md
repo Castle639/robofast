@@ -42,6 +42,13 @@ python -m robofast_core.weather_bridge --config sites/minerva/weather.yaml --sha
 python -m robofast_core.weather_bridge --config sites/minerva/weather.yaml
 ```
 
+`--shadow` is the bridge's own flag: it runs the weather bridge alone, with
+no Alpaca server, to compare its verdicts with the legacy system's. To run
+the whole of robofast alongside a legacy system -- the supervisor and the
+sequencer computing and logging what they would do, commanding nothing --
+serve the bridge normally and put the enclosure in its `shadow` operating
+mode (docs/modes.md).
+
 `--once` polls once, prints and exits (0 if safe); `--json` prints each poll
 as a JSON object; `--poll-interval` overrides the config. Dependencies:
 `pip install --group core` (astropy, httpx, PyYAML).

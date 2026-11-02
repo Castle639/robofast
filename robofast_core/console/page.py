@@ -433,8 +433,25 @@ function opButton(label, action, body, title, text, danger) {
     onclick: () => act(action, body, title, text, danger)}, label);
 }
 
+function modeText(m) {
+  if (!m) return "—";
+  return h("span", {title: m.description || ""}, h("strong", {}, m.mode),
+    m.by ? h("span", {class: "dim"}, " (" + m.by + (m.reason ? ": " + m.reason : "") + ")") : null,
+    m.fallback ? h("span", {class: "warn"}, " default: " + m.fallback) : null,
+    m.would_open === true ? h("span", {class: "dim"}, " — would open now") : null,
+    m.finishing_close ? h("span", {class: "warn"}, " — closing first") : null);
+}
+// One button per other mode (the supervisor checks and logs the switch).
+function modeButtons(name, m) {
+  if (!m || !m.modes) return [];
+  return Object.entries(m.modes).filter(([k]) => k !== m.mode).map(([k, d]) =>
+    opButton("mode: " + k, "mode", {enclosure: name, mode: k}, "Switch " + name + " to " + k,
+      d + ". A safer mode takes effect at once (a live lease is revoked: park and close);" +
+      " a less safe one opens only through the supervisor's own policy.", k === "robotic"));
+}
+
 function dutyText(d) {
-  if (!d || !d.attended_only) return "not needed (hardware heartbeat)";
+  if (!d || !d.attended_only) return d && !d.floor ? "not needed in this mode" : "not needed (hardware heartbeat)";
   if (!d.on_duty) return h("span", {class: "warn"}, "nobody: attended only, will not open");
   const left = d.expires_in;
   return d.on_duty + (left !== undefined && left < 0 ? " (EXPIRED)" : "") +
@@ -497,6 +514,7 @@ function render(doc) {
           (l.revoked ? ", revoked: " + fmt(l.reason) : "") + (l.quarantined ? ", QUARANTINED" : "") +
           (l.released ? ", released" : "")) : "none"],
         ["heartbeat", n.heartbeat_age === null || n.heartbeat_age === undefined ? "—" : fmt(n.heartbeat_age, 1) + " s ago"],
+        ["mode", modeText(n.mode)],
         ["operator duty", dutyText(n.duty)],
         ["holds", holds.length ? holds.map(([t, x]) => t + ": " + x.action + " by " + x.operator + " (" + x.reason + ")").join("; ") : "none"],
         ["sequencer", e.sequencer ? (e.sequencer.running ? "running" : e.sequencer.running === false ? h("span", {class: "bad"}, "not running") : "—") : "—"],
@@ -519,7 +537,8 @@ function render(doc) {
           : opButton("on duty", "duty", {enclosure: name, op: "on"}, "Go on duty at " + name,
               "You will be the operator on duty: this page renews it while it stays open." +
               " If it stops (page closed, network lost), an alarm, then the enclosure closes.", false))
-          : null));
+          : null),
+      h("div", {class: "actions"}, ...modeButtons(name, n.mode)));
   }));
 
   fill("telescope-body", encs.flatMap(([name, e]) => Object.entries(e.telescopes || {}).map(([t, x]) => {

@@ -93,6 +93,11 @@ class RemoteSupervisor:
     async def status(self) -> dict[str, Any]:
         return await self._call("GET", "/status")
 
+    async def mode_status(self) -> dict[str, Any] | None:
+        """The enclosure's operating mode (``GET /status``'s ``mode``; None
+        from a supervisor that has none). Raises if it cannot be read."""
+        return (await self.status()).get("mode")
+
     async def lease_status(self) -> dict[str, Any] | None:
         """The outstanding lease's state, or None (retrying through errors)."""
         while True:
