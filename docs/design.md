@@ -804,13 +804,29 @@ offered without a heartbeat); the enclosure's `shadow` mode is the
 documented way to shadow a legacy system with all of robofast (the weather
 bridge's `--shadow` stays the bridge's own flag).
 
-**(c) Sequences and plug-ins: site code without forking core (planned,
-steps 2 and 4).** Two mechanisms, for two kinds of difference:
+**(c) Sequences and plug-ins: site code without forking core (steps 2
+and 4, done).** Two mechanisms, for two kinds of difference:
 
-- *Sequences* (step 4): a site's or instrument's routine that is only an
-  ordering of existing operations (calibration stage, lamp on/off, wait,
-  expose, ...) is a step list in config, run as an observation kind: e.g.
-  the TRES ThAr and flat sets, MINERVA's iodine B-star calibration.
+- *Sequences* (step 4, docs/sequences.md): a site's or instrument's
+  routine that is only an ordering of existing operations (calibration
+  stage, filter, port, ADC, lamp on/off, focus, wait, camera frames, the
+  spectrograph's own calibration frames) is a named step list in the
+  enclosure config (`sequences`), run as an observation of kind
+  `sequence` from a static or calibration plan: e.g. the TRES ThAr and
+  flat sets (`sites/flwo60/flwo60.json`). Each step type is an entry of a
+  registry (`robofast_core.sequences.SEQUENCE_STEPS`), so a plug-in adds
+  steps. A sequence runs inside the sequencer's generation and grants like
+  any observation; its `cleanup` (lamps off, the stage out, ...) always
+  runs after its steps, with grants of its own, also when it is cancelled
+  (every lamp it switched on goes off first). Whole sequences are checked
+  when the config is loaded (unknown steps, devices and lamps the
+  telescope lacks, frame types the instrument does not take, lamp frames
+  with no lamp on, a lamp left on or kept on past its `max_on`) and again
+  against the devices before the first step. OCS requests keep their
+  parametric `arc` and `lamp_flat` kinds; mapping a request to a site's
+  sequence is an open question. MINERVA's iodine B-star calibration stays
+  a `SPECTRUM` with `extra_params.iodine` (it needs a target and guiding,
+  which a sequence's steps do not add).
 - *Plug-ins* (step 2; docs/plugins.md): what a site needs that is new
   code (plan types, observation kinds, instrument handlers such as
   KiwiSpec, TRES and the imager, weather sources, guider hardware, recovery
@@ -860,7 +876,7 @@ The plan, approved by JDE 2026-11-01:
    `file_ports`. The guard now also refuses a module named after a site
    outside `sites/` and `devices/`, and its allowlist is empty.
 3. **Done:** enclosure operating modes, (b) above (docs/modes.md).
-4. Config-defined sequences, (c) above.
+4. **Done:** config-defined sequences, (c) above (docs/sequences.md).
 
 A new site is a new config directory, plus any device servers it needs,
 plus (after step 2) any plug-ins it needs in its own package.
@@ -1116,7 +1132,7 @@ Each step is a CI-tested deliverable.
     hardware and request-importer registries; KiwiSpec out of the
     sequencer; Action names in config; the legacy importers under
     `robofast_core/sites/`) done; step 3 (operating modes, docs/modes.md)
-    done; config-defined sequences next.
+    and step 4 (config-defined sequences, docs/sequences.md) done.
 
 ## 9. Borrowed ideas
 

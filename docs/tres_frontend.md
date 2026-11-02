@@ -132,6 +132,11 @@ refused: not referenced or servo off), 7 (position out of limits), 10
   selects the instrument config's `calstage`, or else the lamp's own
   position from the telescope's `lamps` entry, before the lamp is switched
   on, so lamp light reaches the fibers only with the stage in place.
+* **Sequences** (docs/sequences.md): the TRES ThAr and flat sets are also
+  config-defined sequences in `sites/flwo60/flwo60.json` (`tres_thar`,
+  `tres_flat`: stage in, lamp on, frames, lamp off, stage out; placeholder
+  values), whose cleanup puts the stage `out` whenever the sequence ends,
+  cancelled or not, with a grant of its own.
 
 ## 6. Redis transition shim (optional, off by default)
 

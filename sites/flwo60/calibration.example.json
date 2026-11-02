@@ -1,0 +1,19 @@
+{
+ "_note": [
+  "A calibration plan for the FLWO 60-inch with the TRES sequences of flwo60.json (docs/sequences.md):",
+  "  python -m robofast_core.sequencer_service --config sites/flwo60/flwo60.json --plan sites/flwo60/calibration.example.json",
+  "Biases and darks, then the ThAr and flat sequences, all with the dome closed (dark sequences: no sky light). Placeholder values, unconfirmed."
+ ],
+ "type": "calibration",
+ "biases": 10,
+ "darks": [
+  [
+   60,
+   5
+  ]
+ ],
+ "sequences": [
+  "tres_thar",
+  "tres_flat"
+ ]
+}

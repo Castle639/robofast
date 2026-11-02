@@ -230,6 +230,15 @@ The safety supervisor does not command the lamps (it commands only the
 enclosure, design.md 3.3); a lamp left on is caught by the sequencer's
 cleanup and, failing that, by the switch's own max-on limit.
 
+**Sequences.** A site's fixed calibration procedure (the TRES ThAr and flat
+sets) can also be a config-defined sequence (docs/sequences.md): lamp
+steps switch a lamp on (then its warm-up) and off, under the same rules --
+the switch's `max_on` checked before any lamp goes on (and, with
+`lamps.lamps.<name>.max_on` repeated in the enclosure config, when the
+config is loaded), each lamp frame checked to have its lamp, every lamp
+the sequence switched on switched off on every way out through a grant of
+its own, and `LampsOff` in every cleanup.
+
 ## 5. Running and testing
 
 ```

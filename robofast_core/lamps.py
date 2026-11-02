@@ -10,7 +10,7 @@ TRES: ThAr and incandescent lamps on a Pulizzi power switch) has a
       "status_action": "Status",       # optional: the switch's action names
       "off_action": "LampsOff",        #   (defaults: robofast's lamp server's)
       "lamps": {
-        "ThAr1": {"warmup": 60, "calstage": "in"},
+        "ThAr1": {"warmup": 60, "calstage": "in", "max_on": 1800},
         "Incand": {"warmup": 30, "calstage": "in"}
       }
     }
@@ -19,7 +19,10 @@ The names are the switch's outlet names (``Action("Status")``). ``warmup``
 is how long the lamp burns before the first exposure; ``calstage`` the
 calibration-stage position the lamp light needs (selected **before** the
 lamp is switched on; an observation's own ``calstage`` wins; null: leave
-the stage alone).
+the stage alone). ``max_on`` (optional) repeats the switch's own limit, so a
+config-defined sequence that would keep the lamp on longer is refused when
+the config is loaded (docs/sequences.md); the switch's limit is checked
+again before any lamp is switched on.
 
 The switch is :mod:`robofast_core.devices.pulizzi_server` (an Alpaca
 Switch with the ``Status``, ``LampsOff`` and ``LampReplaced`` actions);
@@ -43,6 +46,9 @@ class LampSpec:
     warmup: float = 0.0
     #: Calibration-stage position for this lamp's light (None: leave it).
     calstage: str | None = None
+    #: The switch's max-on time for it, repeated here so sequences are
+    #: checked when the config is loaded (None: checked only at run time).
+    max_on: float | None = None
 
 
 @dataclass
@@ -85,13 +91,18 @@ class LampSetup:
             if name.startswith("_"):
                 continue
             spec = {k: v for k, v in dict(spec or {}).items() if not k.startswith("_")}
-            if set(spec) - {"warmup", "calstage"}:
-                raise ValueError(
-                    f"lamps.lamps.{name}: unknown keys {sorted(set(spec) - {'warmup', 'calstage'})}"
-                )
+            keys = {"warmup", "calstage", "max_on"}
+            if set(spec) - keys:
+                raise ValueError(f"lamps.lamps.{name}: unknown keys {sorted(set(spec) - keys)}")
             ls = LampSpec(**spec)
             if not isinstance(ls.warmup, int | float) or not 0 <= ls.warmup <= 3600:
                 raise ValueError(f"lamps.lamps.{name}.warmup: 0 to 3600 s")
+            if ls.max_on is not None and (
+                isinstance(ls.max_on, bool)
+                or not isinstance(ls.max_on, int | float)
+                or not ls.max_on > 0
+            ):
+                raise ValueError(f"lamps.lamps.{name}.max_on: seconds, > 0")
             if ls.calstage is not None and not isinstance(ls.calstage, str):
                 raise ValueError(f"lamps.lamps.{name}.calstage: a position name or null")
             lamps[str(name)] = ls

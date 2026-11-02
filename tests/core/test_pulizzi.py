@@ -644,7 +644,14 @@ def test_lamp_setup_validation():
     with pytest.raises(ValueError, match="warmup"):
         LampSetup.from_dict({"switch": "h:1/0", "lamps": {"a": {"warmup": -1}}})
     with pytest.raises(ValueError, match="unknown keys"):
-        LampSetup.from_dict({"switch": "h:1/0", "lamps": {"a": {"max_on": 5}}})
+        LampSetup.from_dict({"switch": "h:1/0", "lamps": {"a": {"colour": "red"}}})
+    # max_on repeats the switch's limit, for checking sequences (docs/sequences.md).
+    assert (
+        LampSetup.from_dict({"switch": "h:1/0", "lamps": {"a": {"max_on": 5}}}).lamps["a"].max_on
+        == 5
+    )
+    with pytest.raises(ValueError, match="max_on"):
+        LampSetup.from_dict({"switch": "h:1/0", "lamps": {"a": {"max_on": 0}}})
     with pytest.raises(ValueError, match="off_action"):
         LampSetup.from_dict({"switch": "h:1/0", "lamps": {"a": {}}, "off_action": ""})
 

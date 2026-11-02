@@ -147,6 +147,11 @@ class Observation:
     #: sequencer selects the calibration stage, switches the lamp on, waits
     #: its warm-up, takes ``count`` frames and switches it off again.
     lamp: str | None = None
+    #: For ``kind="sequence"`` (docs/sequences.md): the name of one of the
+    #: enclosure config's ``sequences``, a step list the sequencer runs (the
+    #: calibration stage, lamps, waits, frames, ...). Its ``light`` is the
+    #: definition's (set by the sequencer when it receives the observation).
+    sequence: str | None = None
 
     def __post_init__(self) -> None:
         kind = OBSERVATION_KINDS.get(self.kind)
@@ -178,7 +183,7 @@ class Observation:
 #: Observation fields that belong to one kind or a few (each kind's
 #: :attr:`~robofast_core.kinds.ObservationKind.fields`); another kind
 #: refuses them. ``autofocus`` is advisory and accepted on any kind.
-_KIND_FIELDS = ("pointing", "flats", "rotator", "spectrum", "lamp", "calibration")
+_KIND_FIELDS = ("pointing", "flats", "rotator", "spectrum", "lamp", "calibration", "sequence")
 
 
 @dataclass
@@ -304,6 +309,7 @@ class CalibrationPlan(_Queues):
         darks: Iterable[Sequence[float]] = (),
         spectrograph: Iterable[dict[str, Any]] = (),
         spectrograph_telescope: str | None = None,
+        sequences: Iterable[str | dict[str, Any]] = (),
     ) -> None:
         frames = [Observation("bias", exptime=0.0, count=biases, light=False)] if biases else []
         for exptime, count in darks:
@@ -332,6 +338,26 @@ class CalibrationPlan(_Queues):
                     calibration=spec,
                 ),
             )
+        for i, entry in enumerate(sequences):
+            # A config-defined sequence (docs/sequences.md): a name (on every
+            # telescope), or {"sequence": name, "telescopes": [...]}; the
+            # sequencer service checks the names and that each is dark.
+            if isinstance(entry, str):
+                entry = {"sequence": entry}
+            if not isinstance(entry, dict) or set(entry) - {"sequence", "telescopes"}:
+                raise ValueError(
+                    f"calibration plan: sequences[{i}]: a name or {{'sequence', 'telescopes'}}"
+                )
+            name = entry.get("sequence")
+            if not isinstance(name, str) or not name:
+                raise ValueError(f"calibration plan: sequences[{i}]: a sequence name")
+            on = entry.get("telescopes") or list(telescopes)
+            for tel in on:
+                if tel not in queues:
+                    raise ValueError(f"calibration plan: sequences[{i}]: unknown telescope {tel!r}")
+                queues[tel].append(
+                    Observation(name, exptime=0.0, light=False, kind="sequence", sequence=name)
+                )
         super().__init__(queues)
 
 
