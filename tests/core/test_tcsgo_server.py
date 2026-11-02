@@ -49,7 +49,7 @@ from robofast_core.devices.tcsgo_server import (
     TCSGOServer,
     to_j2000,
 )
-from robofast_core.devices.tcsgo_sim import TCSGOSim
+from robofast_core.devices.tcsgo_sim import SIM_SERVER_SITE, TCSGOSim
 from robofast_core.safety import ENCLOSURE_MEMBERS
 from robofast_core.sequencer import TelescopeUnit
 from robofast_core.testing.checks import wait_until
@@ -71,6 +71,7 @@ TCS_FAST = dict(connect_timeout=1.0, command_timeout=1.0, ack_window=0.02, min_i
 def server_config(sim: TCSGOSim, **kw) -> TCSGOConfig:
     base = {
         "name": "test",
+        **SIM_SERVER_SITE,
         "listen": "127.0.0.1:0",
         "tcs": {"host": "127.0.0.1", "port": sim.port, **TCS_FAST},
         "status_max_age": 0.05,
@@ -383,7 +384,9 @@ def test_server_refuses_a_non_loopback_tcs(tmp_path):
         with pytest.raises(HardwareNotAllowed):
             TCSGOServer(cfg, hardware=hardware)
     path = tmp_path / "tcsgo.json"
-    path.write_text(json.dumps({"tcs": {"host": NOT_LOOPBACK, "port": 5003}}))
+    path.write_text(
+        json.dumps({"name": "t", **SIM_SERVER_SITE, "tcs": {"host": NOT_LOOPBACK, "port": 5003}})
+    )
     proc = subprocess.run(
         [sys.executable, "-m", "robofast_core.devices.tcsgo_server", "--config", str(path)],
         cwd=ROOT,
@@ -396,7 +399,14 @@ def test_server_refuses_a_non_loopback_tcs(tmp_path):
     with pytest.raises(ValueError, match="unknown config keys"):
         TCSGOConfig.from_dict({"allow_hardwar": True})
     with pytest.raises(ValueError, match="park_command"):
-        TCSGOConfig.from_dict({"park_command": "stow"})
+        TCSGOConfig.from_dict({"name": "t", **SIM_SERVER_SITE, "park_command": "stow"})
+    # Site values have no defaults (docs/design.md 3.10).
+    with pytest.raises(ValueError, match=r"missing required key\(s\) name, latitude, longitude"):
+        TCSGOConfig.from_dict({})
+    site = {k: v for k, v in SIM_SERVER_SITE.items() if k != "focus_max"}
+    with pytest.raises(ValueError, match=r"focuser: true.: missing required key\(s\) focus_max"):
+        TCSGOConfig.from_dict({"name": "t", **site})
+    assert not TCSGOConfig.from_dict({"name": "t", **site, "focuser": False}).focuser
 
 
 def test_shipped_flwo60_configs():

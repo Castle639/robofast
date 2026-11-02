@@ -128,6 +128,7 @@ def serve():
 
     def build(sim: dict | None = None, **kw) -> TRESFrontEndServer:
         d = {
+            "name": "t",
             "listen": "127.0.0.1:0",
             "port": {"type": "sim", "sim": {"velocity": 50.0, **(sim or {})}},
             "positions": POSITIONS,
@@ -304,12 +305,16 @@ def test_hardware_needs_the_config_and_the_flag():
 def test_config_validation():
     with pytest.raises(ValueError, match="unknown config keys"):
         TRESFrontEndConfig.from_dict({"bogus": 1})
+    with pytest.raises(ValueError, match=r"missing required key\(s\) positions"):
+        TRESFrontEndConfig.from_dict({"name": "t"})
     with pytest.raises(ValueError, match="closer than"):
-        TRESFrontEndConfig.from_dict({"positions": {"a": 1.0, "b": 1.01}})
+        TRESFrontEndConfig.from_dict({"name": "t", "positions": {"a": 1.0, "b": 1.01}})
     with pytest.raises(ValueError, match="not a number"):
-        TRESFrontEndConfig.from_dict({"positions": {"a": "x"}})
+        TRESFrontEndConfig.from_dict({"name": "t", "positions": {"a": "x"}})
     with pytest.raises(ValueError, match="legacy_redis"):
-        TRESFrontEndConfig.from_dict({"legacy_redis": {"bogus": 1}})
+        TRESFrontEndConfig.from_dict(
+            {"name": "t", "positions": {"a": 1.0}, "legacy_redis": {"bogus": 1}}
+        )
 
 
 def test_shipped_site_configs():
@@ -418,6 +423,8 @@ async def test_shim_survives_a_dead_redis(serve, fake_redis):
 
 def test_shim_never_reaches_a_non_loopback_redis_without_permission():
     d = {
+        "name": "t",
+        "positions": {"out": 0.0},
         "listen": "127.0.0.1:0",
         "port": {"type": "sim"},
         "legacy_redis": {"host": "192.0.2.10"},  # TEST-NET: never contacted
@@ -443,7 +450,9 @@ def test_request_calstage_round_trip():
     ic = InstrumentConfig.from_dict(d, "ic")
     assert ic.calstage == "sky" and ic.filter is None
     assert ic.to_dict()["optical_elements"] == {"calstage": "sky"}
-    assert TelescopeLimits.from_dict({"calstage": ["out", "sky"]}, "t").calstage == ["out", "sky"]
+    assert TelescopeLimits.from_dict(
+        {"instruments": ["tres"], "min_alt": 20, "max_alt": 90, "calstage": ["out", "sky"]}, "t"
+    ).calstage == ["out", "sky"]
 
 
 def _events(rig, what: str) -> list:

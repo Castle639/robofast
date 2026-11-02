@@ -382,8 +382,11 @@ def _spectrum(**conf) -> dict:
     ],
 )
 def test_lamp_calibrations_are_refused_with_the_reason(conf):
-    with pytest.raises(ValueError, match="iodine only"):
+    """The reason says how to ask for a lamp; it names no site (the site's
+    own advice is the request API's, from the enclosure config)."""
+    with pytest.raises(ValueError, match=r"optical_elements\.lamp.*lists that lamp") as err:
         RequestGroup.from_dict(_spectrum(**conf))
+    assert "MINERVA" not in str(err.value) and "iodine" not in str(err.value)
 
 
 def test_iodine_calibration_examples():

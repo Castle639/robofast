@@ -122,7 +122,7 @@ async def test_plans_load(tmp_path):
     lamp = json.loads((SITE / "requests.example.json").read_text())["groups"][0]
     lamp = {**lamp, "id": "ARC1"}
     lamp["requests"][0]["configurations"][0]["type"] = "ARC"
-    with pytest.raises(ValueError, match="iodine only"):
+    with pytest.raises(ValueError, match=r"optical_elements\.lamp"):
         await plan.submit(lamp)
     plan = load_plan(SITE / "calibration.example.json", ["t1", "t2"])
     first = await plan.peek("t1")
@@ -147,7 +147,13 @@ def test_request_api_config_loads(tmp_path):
     cfg["audit_log"] = str(tmp_path / "audit.jsonl")
     (tmp_path / "api.json").write_text(json.dumps(cfg))
     _, spec, base = load_api_config(tmp_path / "api.json")
-    assert build_enclosures(spec, base)["aqawan1"].telescopes == ["t1", "t2"]
+    enc = build_enclosures(spec, base)["aqawan1"]
+    assert enc.telescopes == ["t1", "t2"]
+    # MINERVA's advice for a lamp calibration is MINERVA's own config, not
+    # core's: other sites' enclosures do not carry it.
+    assert "iodine" in enc.help["no_lamps"]
+    for other in ("mearth_south/mearth_south.json", "flwo60/flwo60.json"):
+        assert "iodine" not in json.dumps(json.loads((SITE.parent / other).read_text()))
 
 
 def test_console_config_loads(tmp_path):

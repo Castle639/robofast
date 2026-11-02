@@ -239,12 +239,22 @@ class FakeFeed:
         pass
 
 
+#: The site values an ADC config must give (no defaults in core).
+ADC_SITE = {
+    "name": "t",
+    "latitude": 31.6809,
+    "instruments": {"tres": {}, "fast": {}},
+    "instrument": "tres",
+}
+
+
 @pytest.fixture
 def serve():
     servers: list[ADCServer] = []
 
     def build(feed: FakeFeed | None = None, sim: dict | None = None, **kw) -> ADCServer:
         d = {
+            **ADC_SITE,
             "listen": "127.0.0.1:0",
             "port": {"type": "sim", "sim": {"speed": 20000.0, **(sim or {})}},
             "trust_counter": True,
@@ -607,7 +617,9 @@ def test_config_validation():
         ({"port": {"sim": {"bogus": 1}}}, "port.sim"),
     ):
         with pytest.raises(ValueError, match=match):
-            ADCConfig.from_dict(bad)
+            ADCConfig.from_dict({**ADC_SITE, **bad})
+    with pytest.raises(ValueError, match=r"missing required key\(s\) latitude, instruments"):
+        ADCConfig.from_dict({"name": "t", "instrument": "tres"})
 
 
 def test_shipped_site_configs():
@@ -654,7 +666,7 @@ async def test_reads_robofasts_own_telescope_server():
     """The feed against the TCSGO server on its simulated TCS: the input
     the ADC uses on the 60-inch, with no legacy software in between."""
     from robofast_core.devices.tcsgo_server import TCSGOConfig, TCSGOServer
-    from robofast_core.devices.tcsgo_sim import TCSGOSim
+    from robofast_core.devices.tcsgo_sim import SIM_SERVER_SITE, TCSGOSim
 
     sim = TCSGOSim().start()
     server = None
@@ -664,6 +676,7 @@ async def test_reads_robofasts_own_telescope_server():
             TCSGOConfig.from_dict(
                 {
                     "name": "t",
+                    **SIM_SERVER_SITE,
                     "listen": "127.0.0.1:0",
                     "tcs": {
                         "host": "127.0.0.1",

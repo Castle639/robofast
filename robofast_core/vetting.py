@@ -65,6 +65,7 @@ from robofast_core.catalog import (
     propagate,
     separation,
 )
+from robofast_core.config import require_keys
 from robofast_core.photometry import PortPhotometry
 
 log = logging.getLogger(__name__)
@@ -89,10 +90,13 @@ FLAGS = (
 
 @dataclass(frozen=True)
 class PortGeometry:
-    """One port's camera, for vetting (module doc)."""
+    """One port's camera, for vetting (module doc). ``shape``,
+    ``plate_scale`` and ``photometry`` (with the telescope's aperture) are
+    the port's own: required, no defaults (docs/design.md 3.10)."""
 
-    shape: tuple[int, int] = (1216, 1936)
-    plate_scale: float = 0.265
+    shape: tuple[int, int] = field(kw_only=True)
+    plate_scale: float = field(kw_only=True)
+    photometry: PortPhotometry = field(kw_only=True)
     fiber: tuple[float, float] | None = None
     #: Position angle of +y (deg E of N); None: unknown (any rotation).
     pa: float | None = None
@@ -101,16 +105,18 @@ class PortGeometry:
     exposure: float = 0.5
     seeing: float = 1.5
     sky: float = 21.0
-    photometry: PortPhotometry = field(default_factory=PortPhotometry)
 
     @classmethod
-    def from_dict(cls, d: Mapping[str, Any]) -> PortGeometry:
+    def from_dict(cls, d: Mapping[str, Any], what: str = "vetting port") -> PortGeometry:
         d = {k: v for k, v in dict(d).items() if not k.startswith("_")}
         known = set(cls.__dataclass_fields__)
         if set(d) - known:
-            raise ValueError(f"vetting port: unknown keys {sorted(set(d) - known)}")
-        if "photometry" in d:
+            raise ValueError(f"{what}: unknown keys {sorted(set(d) - known)}")
+        require_keys(d, ("shape", "plate_scale", "photometry"), what)
+        try:
             d["photometry"] = PortPhotometry.from_dict(d["photometry"])
+        except ValueError as exc:
+            raise ValueError(f"{what}: {exc}") from None
         if "shape" in d:
             d["shape"] = (int(d["shape"][0]), int(d["shape"][1]))
         if d.get("fiber") is not None:
@@ -449,7 +455,10 @@ class Vetter:
 
         d = {k: v for k, v in dict(d).items() if not k.startswith("_")}
         catalog = catalog_from_config(d.pop("catalog", None), base=base)
-        ports = {k: PortGeometry.from_dict(v) for k, v in (d.pop("ports", {}) or {}).items()}
+        ports = {
+            k: PortGeometry.from_dict(v, f"vetting ports.{k}")
+            for k, v in (d.pop("ports", {}) or {}).items()
+        }
         return cls(catalog, ports, VettingConfig.from_dict(d))
 
     def port(self, telescope: str | None, name: str) -> PortGeometry | None:

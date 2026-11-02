@@ -76,6 +76,7 @@ PAC_FAST = dict(connect_timeout=1.0, command_timeout=2.0, resend_after=0.15, idl
 def server_config(sim: AqawanSim, **kw) -> AqawanConfig:
     base = {
         "name": "test",
+        "open_order": [1, 2],
         "listen": "127.0.0.1:0",
         "pac": {"host": "127.0.0.1", "port": sim.port, **PAC_FAST},
         "status_max_age": 0.1,
@@ -215,7 +216,7 @@ async def test_open_refused_by_interlocks(make_rig, inject, why):
 
 async def test_doors_are_not_interlocked_by_default(make_rig):
     """Door state does not matter for observing (JDE, 2026-10-31)."""
-    assert AqawanConfig().interlock_doors == ()
+    assert AqawanConfig("a", (1, 2)).interlock_doors == ()
     rig = make_rig({"heartbeat_timeout": None})
     rig.sim.set_door("EntryDoor1", "OPEN")
     rig.sim.set_door("PanelDoor", "OPEN")
@@ -504,7 +505,11 @@ def test_server_refuses_a_non_loopback_pac(tmp_path):
             AqawanServer(cfg, hardware=hardware)
     # The CLI exits non-zero before listening.
     path = tmp_path / "aqawan.json"
-    path.write_text(json.dumps({"pac": {"host": NOT_LOOPBACK, "port": 22004}}))
+    path.write_text(
+        json.dumps(
+            {"name": "a", "open_order": [2, 1], "pac": {"host": NOT_LOOPBACK, "port": 22004}}
+        )
+    )
     proc = subprocess.run(
         [sys.executable, "-m", "robofast_core.devices.aqawan_server", "--config", str(path)],
         cwd=ROOT,
@@ -516,6 +521,9 @@ def test_server_refuses_a_non_loopback_pac(tmp_path):
     assert proc.returncode == 2 and "not loopback" in proc.stderr
     with pytest.raises(ValueError, match="unknown config keys"):
         AqawanConfig.from_dict({"allow_hardwar": True})
+    # Site values have no defaults (docs/design.md 3.10).
+    with pytest.raises(ValueError, match=r"missing required key\(s\) open_order"):
+        AqawanConfig.from_dict({"name": "aqawan1"})
 
 
 async def test_heartbeat_stop_closes(make_rig):

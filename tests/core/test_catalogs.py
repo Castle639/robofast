@@ -40,6 +40,9 @@ from robofast_core.sequencer_service import load_plan
 
 ROOT = Path(__file__).resolve().parents[2]
 SITE = ROOT / "sites" / "flwo60"
+#: The FLWO 60-inch with TRES (sites/flwo60/): no defaults in core.
+TI = {"telescope": "tillinghast", "instrument": "tres"}
+TI_ARGS = ("--telescope", "tillinghast", "--instrument", "tres")
 
 CANONICAL = """\
 !P.I.: A. Nobody
@@ -386,7 +389,7 @@ def test_load_by_suffix(tmp_path):
 
 def test_to_requests_valid_under_the_request_model():
     tl = parse_mct(CANONICAL, "synthetic")
-    groups = to_requests(tl, exposure_time=600, exposure_count=2)
+    groups = to_requests(tl, **TI, exposure_time=600, exposure_count=2)
     loaded = load_request_groups(groups)
     assert [g.id for g in loaded] == [f"synthetic-{n}" for n in (1, 2, 3, 5, 6)]
     g = loaded[1]
@@ -415,14 +418,14 @@ def test_private_lists_need_consent():
     tl = parse_mct(CANONICAL, "s")
     tl.private = True
     with pytest.raises(ValueError, match="private"):
-        to_requests(tl)
-    assert len(to_requests(tl, include_private=True)) == 5
+        to_requests(tl, **TI)
+    assert len(to_requests(tl, **TI, include_private=True)) == 5
     with pytest.raises(ValueError, match="exposure_time"):
-        to_requests(parse_mct(CANONICAL), exposure_time=0)
+        to_requests(parse_mct(CANONICAL), **TI, exposure_time=0)
 
 
 def test_requests_run_on_the_flwo60_dispatch_plan(tmp_path):
-    groups = to_requests(parse_mct(CANONICAL, "synthetic"))
+    groups = to_requests(parse_mct(CANONICAL, "synthetic"), **TI)
     (tmp_path / "requests.example.json").write_text(json.dumps({"groups": groups}))
     shutil.copy(SITE / "dispatch.example.json", tmp_path / "dispatch.example.json")
     plan = load_plan(tmp_path / "dispatch.example.json", ["tillinghast"])
@@ -458,18 +461,20 @@ def test_command_line(tmp_path):
     assert p.returncode == 0 and p.stdout == CANONICAL
 
     p = _cli("import", "prog.mct", "--to-requests", cwd=tmp_path)
+    assert p.returncode == 2 and "needs --telescope and --instrument" in p.stderr
+    p = _cli("import", "prog.mct", "--to-requests", *TI_ARGS, cwd=tmp_path)
     assert p.returncode == 0, p.stderr
     assert len(load_request_groups(json.loads(p.stdout)["groups"])) == 5
 
     p = _cli("import", "bad.mct", cwd=tmp_path)
     assert p.returncode == 2 and "bad.mct:1: RA hours '12.5'" in p.stderr
 
-    p = _cli("import", "hidden.sec", "--to-requests", cwd=tmp_path)
+    p = _cli("import", "hidden.sec", "--to-requests", *TI_ARGS, cwd=tmp_path)
     assert p.returncode == 2 and "does not decrypt" in p.stderr
     p = _cli("import", "hidden.sec", cwd=tmp_path)
     assert p.returncode == 0 and json.loads(p.stdout)["sealed"]["size"] == 3
 
-    p = _cli("import", "prog.mct", "--private", "--to-requests", cwd=tmp_path)
+    p = _cli("import", "prog.mct", "--private", "--to-requests", *TI_ARGS, cwd=tmp_path)
     assert p.returncode == 2 and "private" in p.stderr
 
     p = _cli("check", "prog.mct", "box.off", "hidden.sec", "bad.mct", cwd=tmp_path)

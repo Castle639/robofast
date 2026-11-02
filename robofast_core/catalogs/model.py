@@ -36,11 +36,9 @@ from typing import Any
 #: Version tag of the JSON form written by :meth:`TargetList.to_dict` & co.
 FORMAT = "robofast-catalog/1"
 
-#: Defaults for :func:`to_requests` (the FLWO 60-inch with TRES; the names in
-#: sites/flwo60/). TRES catalogs carry no exposure times: the default is a
-#: placeholder to be replaced per program.
-DEFAULT_TELESCOPE = "tillinghast"
-DEFAULT_INSTRUMENT = "tres"
+#: Default exposure time for :func:`to_requests`: TRES catalogs carry none,
+#: so this is a placeholder to be replaced per program. The telescope and
+#: instrument have no defaults (site names: docs/design.md 3.10).
 DEFAULT_EXPOSURE_TIME = 300.0
 
 
@@ -287,8 +285,8 @@ def _ident(text: str) -> str:
 def to_requests(
     tl: TargetList,
     *,
-    telescope: str = DEFAULT_TELESCOPE,
-    instrument: str = DEFAULT_INSTRUMENT,
+    telescope: str,
+    instrument: str,
     exposure_time: float = DEFAULT_EXPOSURE_TIME,
     exposure_count: int = 1,
     include_private: bool = False,

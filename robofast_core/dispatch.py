@@ -176,7 +176,7 @@ from collections.abc import Callable, Iterable, Sequence
 from dataclasses import asdict, dataclass, field, fields, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 from robofast_core import sky
 from robofast_core.plan import Idle, Observation
@@ -234,13 +234,16 @@ def _moon_illumination(sky_now: sky.SkyNow) -> float:
 
 @dataclass
 class TelescopeLimits:
-    """What one telescope can do. The altitude defaults are the legacy
-    MINERVA ``scheduler.ini`` values (MINALT, MAXALT), which the legacy code
-    read but never applied."""
+    """What one telescope can do. ``instruments``, ``min_alt`` and
+    ``max_alt`` are site values and have no defaults: a dispatch plan must
+    give them for every telescope (docs/design.md 3.10)."""
 
-    instruments: list[str] = field(default_factory=lambda: ["imager"])
-    min_alt: float = 21.0
-    max_alt: float = 83.0
+    #: Keys a dispatch plan's telescope entry must give.
+    REQUIRED: ClassVar[tuple[str, ...]] = ("instruments", "min_alt", "max_alt")
+
+    instruments: list[str]
+    min_alt: float
+    max_alt: float
     #: Hour angle limits, hours.
     min_ha: float = -12.0
     max_ha: float = 12.0
@@ -263,6 +266,9 @@ class TelescopeLimits:
         unknown = set(d) - known
         if unknown:
             raise ValueError(f"{what}: unknown keys {sorted(unknown)}")
+        missing = [k for k in cls.REQUIRED if k not in d]
+        if missing:
+            raise ValueError(f"{what}: missing required key(s) {', '.join(missing)}")
         limits = cls(**d)
         if limits.min_alt >= limits.max_alt or limits.min_ha >= limits.max_ha:
             raise ValueError(f"{what}: empty altitude or hour-angle range")
@@ -1718,9 +1724,9 @@ def dispatch_from_config(
     the site's mean solar time.
 
     Relative paths are relative to ``base`` (the config file's directory).
-    Every telescope of the enclosure gets limits (default
-    :class:`TelescopeLimits` where ``telescopes`` does not name it); naming a
-    telescope the enclosure lacks is an error.
+    ``telescopes`` must give every telescope of the enclosure its
+    :class:`TelescopeLimits` (``instruments``, ``min_alt`` and ``max_alt``
+    at least); a telescope it omits, or one the enclosure lacks, is an error.
     """
     config = dict(config)
     config.pop("_note", None)
@@ -1732,8 +1738,14 @@ def dispatch_from_config(
     unknown = set(tel_cfg) - set(telescopes)
     if unknown:
         raise ValueError(f"dispatch plan: unknown telescopes {sorted(unknown)}")
+    missing = [t for t in telescopes if t not in tel_cfg]
+    if missing:
+        raise ValueError(
+            f"dispatch plan: 'telescopes' has no entry for {missing} (each needs "
+            f"{', '.join(TelescopeLimits.REQUIRED)})"
+        )
     limits = {
-        t: TelescopeLimits.from_dict(tel_cfg.get(t, {}), f"dispatch plan: telescopes.{t}")
+        t: TelescopeLimits.from_dict(tel_cfg[t], f"dispatch plan: telescopes.{t}")
         for t in telescopes
     }
     groups: list[RequestGroup] = []
