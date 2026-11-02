@@ -262,23 +262,46 @@ def test_a_clean_stop_writes_the_hours(serve, tmp_path):  # noqa: F811
 
 
 def test_a_crashed_server_loses_at_most_its_flush_interval(serve, tmp_path):  # noqa: F811
+    """After every sight of the burning lamp, the file (what a crash right
+    then would leave) is behind the hours in memory by less than one flush
+    interval. Event-driven: the tracker's clock is the unit's status time,
+    so a slow or starved poller on a loaded host changes how many sights
+    there are, never the bound."""
     path, copy = tmp_path / "hours.json", tmp_path / "after-crash.json"
-    s = serve(hours_file=str(path), hours_flush=0.2)
+    flush = 0.2
+    s = serve(hours_file=str(path), hours_flush=flush)
+    hours = s.lamps.hours
+    status_time = [hours.clock()]
+    hours.clock = lambda: status_time[0]  # the tracker on the unit's clock
+    sights: list[tuple[float, float, dict]] = []  # (at, seconds in memory, the file)
+    observe = hours.observe
+
+    def watched(name: str, on: bool, at: float | None = None) -> None:
+        if at is not None:
+            status_time[0] = max(status_time[0], at)
+        observe(name, on, at)
+        if name == "ThAr1" and on and path.exists():
+            shutil.copy(path, copy)  # the file as a crash right now would leave it
+            sights.append((status_time[0], hours.lamps[name].seconds, saved(copy)[name]))
+
+    hours.observe = watched
     c = Client(s).connect()
     c.put("setswitch", Id=0, State=True)
-    t0 = time.monotonic()
-    time.sleep(0.8)
-    shutil.copy(path, copy)  # the file as a crash right now would leave it
-    burned = time.monotonic() - t0
-    d = json.loads(copy.read_text())["lamps"]["ThAr1"]
-    # At most a flush interval, plus slack for a loaded test machine (the
-    # exact bound is checked on a fake clock above).
-    assert d["on"] is True and burned - 0.2 - 0.5 <= d["seconds"] <= burned
+    # Several flush intervals of burn, however long the host takes to show them.
+    wait_until_sync(lambda: len(sights) > 1 and sights[-1][0] - sights[0][0] >= 5 * flush, 30.0)
+    s.stop()
+    res = 0.05 + 1e-9  # the file keeps seconds to 0.1
+    for _at, seconds, d in sights:
+        assert d["on"] is True and d["cycles"] == 1
+        assert seconds - flush - res < d["seconds"] <= seconds + res
+    assert sights[-1][1] >= 4 * flush  # it did burn, and was flushed meanwhile
+    d = sights[-1][2]
     # A new server on that file, the lamp still on: the same burn goes on.
     s2 = serve(hours_file=str(copy), sim={"on": [2]})
     c2 = Client(s2).connect()
-    time.sleep(0.3)
-    assert c2.status()["outlets"][0]["cycles"] == 1
+    wait_until_sync(lambda: c2.status()["outlets"][0]["cycles"] == 1, 10.0)
+    lamp2 = s2.lamps.hours.lamps["ThAr1"]
+    wait_until_sync(lambda: lamp2.seconds >= d["seconds"] + 0.2, 30.0)
     s2.stop()
     after = json.loads(copy.read_text())["lamps"]["ThAr1"]
     assert after["cycles"] == 1 and after["seconds"] >= d["seconds"] + 0.2
