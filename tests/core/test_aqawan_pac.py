@@ -294,13 +294,13 @@ def test_check_success():
         check_success("X", "Shutter1=OP")
 
 
-def test_hardware_addresses_are_refused_by_default():
-    assert check_pac_address("127.0.0.1", allow_hardware=False) == "127.0.0.1"
-    assert check_pac_address("localhost", allow_hardware=False) in ("127.0.0.1", "::1")
+def test_hardware_addresses_are_refused_by_default(make_sim):
+    sim = make_sim()
+    assert check_pac_address("127.0.0.1", sim.port, allow_hardware=False) == "127.0.0.1"
     with pytest.raises(HardwareNotAllowed, match="not loopback"):
-        check_pac_address(NOT_LOOPBACK, allow_hardware=False)
+        check_pac_address(NOT_LOOPBACK, 22004, allow_hardware=False)
     # Allowed only when the caller says so (no connection is made here).
-    assert check_pac_address(NOT_LOOPBACK, allow_hardware=True) == NOT_LOOPBACK
+    assert check_pac_address(NOT_LOOPBACK, 22004, allow_hardware=True) == NOT_LOOPBACK
     with pytest.raises(HardwareNotAllowed):
         PACClient(NOT_LOOPBACK, 22004)
     with pytest.raises(ValueError):

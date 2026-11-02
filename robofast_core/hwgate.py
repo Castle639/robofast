@@ -81,7 +81,13 @@ def resolve(host: str, *, what: str, proto: str = "tcp") -> list[ipaddress._Base
 
 
 def check_endpoint(
-    host: str, port: int, *, allow_hardware: bool, what: str, proto: str = "tcp"
+    host: str,
+    port: int,
+    *,
+    allow_hardware: bool,
+    what: str,
+    proto: str = "tcp",
+    allow_absent: bool = False,
 ) -> str:
     """Resolve ``host`` once and return the IP literal to connect to.
 
@@ -90,6 +96,11 @@ def check_endpoint(
     verified simulator (:func:`is_simulator`); otherwise
     :class:`HardwareNotAllowed`. The caller connects to the returned literal,
     so a later DNS change cannot redirect it.
+
+    ``allow_absent``: nothing listening on ``port`` yet is accepted (nothing
+    can be sent to it). Only for a caller whose client re-verifies before
+    every connection (:class:`SimulatorGuard`); a one-shot check must not
+    pass it, or a tunnel opened later would get through.
     """
     addrs = resolve(host, what=what, proto=proto)
     ip = str(addrs[0])
@@ -102,12 +113,17 @@ def check_endpoint(
             f"{what} host {host!r} ({', '.join(map(str, addrs))}) is not loopback: refusing to"
             " talk to real hardware without allow_hardware in the config AND --hardware"
         )
-    require_simulator(ip, port, what=what, proto=proto)
+    require_simulator(ip, port, what=what, proto=proto, allow_absent=allow_absent)
     return ip
 
 
-def require_simulator(ip: str, port: int, *, what: str, proto: str = "tcp") -> None:
-    """:class:`HardwareNotAllowed` unless ``ip:port`` is a verified simulator."""
+def require_simulator(
+    ip: str, port: int, *, what: str, proto: str = "tcp", allow_absent: bool = False
+) -> None:
+    """:class:`HardwareNotAllowed` unless ``ip:port`` is a verified simulator
+    (or, with ``allow_absent``, nothing listens there at all)."""
+    if allow_absent and _no_listener(ip, port, proto):
+        return
     if not is_simulator(ip, port, proto=proto):
         raise HardwareNotAllowed(
             f"{what} at {ip}:{port}/{proto} is loopback but not a simulator robofast could verify"
@@ -115,6 +131,40 @@ def require_simulator(ip: str, port: int, *, what: str, proto: str = "tcp") -> N
             " hardware looks exactly like this): refusing without allow_hardware in the config"
             " AND --hardware"
         )
+
+
+class SimulatorGuard:
+    """Re-verifies, before each new connection, that ``ip:port`` is still the
+    simulator verified at construction (a client that connects per command
+    must not end up talking to a tunnel that took the port after the
+    simulator went away).
+
+    With ``hardware`` (the gate open) it does nothing. Otherwise the first
+    check is :func:`require_simulator`; later ones only re-read the socket
+    tables and repeat the full check if the listening socket changed. Nothing
+    listening at all passes (the connection will be refused and nothing can
+    be sent); the next listener is verified before it is used.
+    """
+
+    def __init__(self, ip: str, port: int, *, hardware: bool, what: str, proto: str = "tcp"):
+        self.ip, self.port, self.proto, self.what = ip, int(port), proto, what
+        self.hardware = hardware
+        self._inodes: set[str] | None = None
+        self.check()
+
+    def check(self) -> None:
+        if self.hardware:
+            return
+        inodes = _listening_inodes(self.ip, self.port, self.proto)
+        if self._inodes is not None and inodes == self._inodes:
+            return
+        self._inodes = None
+        if not inodes and _no_listener(self.ip, self.port, self.proto):
+            # Nothing listening (a simulator restarting): the connection will
+            # be refused, and nothing can be sent. Verify the next listener.
+            return
+        require_simulator(self.ip, self.port, what=self.what, proto=self.proto)
+        self._inodes = inodes
 
 
 def check_url(url: str, *, allow_hardware: bool, what: str) -> str:
@@ -174,6 +224,20 @@ class SimulatorRegistration:
 
 
 # -- verification (the server's side) ------------------------------------------------
+
+
+def _proc_ok(proto: str) -> bool:
+    return (_PROC / "net" / proto).exists()
+
+
+def _no_listener(ip: str, port: int, proto: str) -> bool:
+    """Nothing bound to ``port`` for ``ip`` (and ``/proc`` can say so)."""
+    try:
+        if not ipaddress.ip_address(ip).is_loopback:
+            return False
+    except ValueError:
+        return False
+    return _proc_ok(proto) and not _listening_inodes(ip, port, proto)
 
 
 def _listening_inodes(ip: str, port: int, proto: str) -> set[str]:

@@ -54,8 +54,10 @@ This client
   prompts and echoed command lines are skipped.
 * "Urgent" commands (closing, STOP) pre-empt a routine exchange in flight, so
   a close never waits behind a slow ``STATUS``.
-* :func:`check_pac_address` refuses any non-loopback PAC unless hardware use
-  is explicitly allowed (the server requires a config flag *and* a CLI flag).
+* :func:`check_pac_address` refuses any PAC that is not a verified simulator
+  unless hardware use is explicitly allowed (the server requires a config
+  flag *and* a CLI flag; :mod:`robofast_core.hwgate`). A loopback address is
+  not enough: an SSH tunnel puts the real PAC on ``127.0.0.1``.
 """
 
 from __future__ import annotations
@@ -64,10 +66,10 @@ import asyncio
 import ipaddress
 import logging
 import re
-import socket
 import time
 from dataclasses import dataclass, field
 
+from robofast_core import hwgate
 from robofast_core.cancel import stop_task
 from robofast_core.owner import DeviceError, DeviceTimeout
 
@@ -183,31 +185,28 @@ class PACPreempted(PACError):
     """An urgent command (a close or STOP) cut this exchange short."""
 
 
-class HardwareNotAllowed(Exception):
-    """A non-loopback PAC address without explicit permission."""
+class HardwareNotAllowed(hwgate.HardwareNotAllowed):
+    """A PAC that may be real hardware, without explicit permission."""
 
 
 # -- addresses ------------------------------------------------------------------
 
 
-def check_pac_address(host: str, *, allow_hardware: bool) -> str:
+def check_pac_address(host: str, port: int, *, allow_hardware: bool) -> str:
     """Resolve ``host`` once and return the IP literal to connect to.
 
-    Unless ``allow_hardware``, every address ``host`` resolves to must be
-    loopback; otherwise :class:`HardwareNotAllowed`. The caller connects to
-    the returned literal, so a later DNS change cannot redirect it.
+    Unless ``allow_hardware``, ``host:port`` must be a verified simulator
+    (loopback, and the listening socket registered by a robofast simulator:
+    :func:`robofast_core.hwgate.check_endpoint`); otherwise
+    :class:`HardwareNotAllowed`. The caller connects to the returned literal,
+    so a later DNS change cannot redirect it.
     """
     try:
-        infos = socket.getaddrinfo(host, None, type=socket.SOCK_STREAM)
-    except socket.gaierror as exc:
-        raise HardwareNotAllowed(f"cannot resolve PAC host {host!r}: {exc}") from exc
-    addrs = [ipaddress.ip_address(str(info[4][0]).split("%")[0]) for info in infos]
-    if not allow_hardware and not all(a.is_loopback for a in addrs):
-        raise HardwareNotAllowed(
-            f"PAC host {host!r} ({', '.join(map(str, addrs))}) is not loopback: refusing to"
-            " talk to real hardware without allow_hardware in the config AND --hardware"
+        return hwgate.check_endpoint(
+            host, port, allow_hardware=allow_hardware, what="PAC", allow_absent=True
         )
-    return str(addrs[0])
+    except hwgate.HardwareNotAllowed as exc:
+        raise HardwareNotAllowed(str(exc)) from None
 
 
 # -- reply parsing --------------------------------------------------------------
@@ -402,7 +401,8 @@ class PACClient:
 
     ``host`` must already have passed :func:`check_pac_address` (the server
     does that); the constructor re-checks that it is an IP literal and,
-    unless ``allow_hardware``, loopback.
+    unless ``allow_hardware``, a verified simulator, and every new
+    connection re-verifies it (:class:`robofast_core.hwgate.SimulatorGuard`).
     """
 
     def __init__(
@@ -417,9 +417,11 @@ class PACClient:
         max_attempts: int = 3,
         idle_end: float = 0.3,
     ) -> None:
-        addr = ipaddress.ip_address(host)  # ValueError for a hostname
-        if not allow_hardware and not addr.is_loopback:
-            raise HardwareNotAllowed(f"PAC {host} is not loopback")
+        ipaddress.ip_address(host)  # ValueError for a hostname
+        try:
+            self._guard = hwgate.SimulatorGuard(host, port, hardware=allow_hardware, what="PAC")
+        except hwgate.HardwareNotAllowed as exc:
+            raise HardwareNotAllowed(str(exc)) from None
         if max_attempts < 1:
             raise ValueError("max_attempts must be >= 1")
         self.host = host
@@ -473,6 +475,10 @@ class PACClient:
             ) from None
 
     async def _exchange(self, command: str) -> str:
+        try:
+            self._guard.check()
+        except hwgate.HardwareNotAllowed as exc:
+            raise PACError(f"PAC {command}: {exc}") from None
         try:
             async with asyncio.timeout(self.connect_timeout):
                 reader, writer = await asyncio.open_connection(self.host, self.port)

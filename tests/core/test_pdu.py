@@ -81,9 +81,8 @@ def test_credentials_file(tmp_path):
 
 
 def test_hardware_gate():
-    assert check_pdu_address("127.0.0.1", allow_hardware=False) == "127.0.0.1"
     with pytest.raises(HardwareNotAllowed, match="loopback"):
-        check_pdu_address("192.0.2.10", allow_hardware=False)  # TEST-NET-1, never contacted
+        check_pdu_address("192.0.2.10", 161, allow_hardware=False)  # TEST-NET-1, never contacted
     cfg = PDUConfig.from_dict({"pdu": {"host": "192.0.2.10"}, "allow_hardware": True})
     with pytest.raises(HardwareNotAllowed):
         PDUServer(cfg, hardware=False, credentials=CREDS)  # the config alone is not enough

@@ -64,6 +64,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
+from robofast_core import hwgate
 from robofast_core.devices.kiwispec_client import (
     ACK_FMT,
     COMMAND_FMT,
@@ -278,6 +279,7 @@ class KiwiSpecSim:
             self._spec_connection, self.host, self.spec_port, backlog=1
         )
         self.spec_port = self._spec_server.sockets[0].getsockname()[1]
+        self._spec_reg = hwgate.SimulatorRegistration(self.spec_port)
         self.crashed = False
 
     async def _start_camera(self) -> None:
@@ -285,11 +287,13 @@ class KiwiSpecSim:
             self._camera_connection, self.host, self.camera_port
         )
         self.camera_port = self._camera_server.sockets[0].getsockname()[1]
+        self._camera_reg = hwgate.SimulatorRegistration(self.camera_port)
 
     async def _stop_spec(self) -> None:
         server, self._spec_server = self._spec_server, None
         if server is not None:
             server.close()
+            self._spec_reg.close()
         for w in list(self._conns):
             w.close()
         self._unhang.set()
@@ -303,6 +307,7 @@ class KiwiSpecSim:
         server, self._camera_server = self._camera_server, None
         if server is not None:
             server.close()
+            self._camera_reg.close()
         for w in list(self._camera_conns):
             w.close()
         acq, self.acquisition = self.acquisition, None

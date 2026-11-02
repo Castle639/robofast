@@ -478,6 +478,7 @@ class TRESFrontEndServer(ThreadingHTTPServer):
 
     def __init__(self, config: TRESFrontEndConfig, *, hardware: bool = False) -> None:
         allow = config.allow_hardware and hardware
+        self._allow_hardware = allow
         if config.port.type == "serial" and not allow:
             raise HardwareNotAllowed(
                 f"port {config.port.device!r} is real hardware: it needs allow_hardware in the"
@@ -491,12 +492,14 @@ class TRESFrontEndServer(ThreadingHTTPServer):
         redis_ip = None
         if self.redis_config is not None:
             try:
-                redis_ip = check_tcs_address(self.redis_config.host, allow_hardware=allow)
-            except TCSHardwareNotAllowed:
-                raise HardwareNotAllowed(
-                    f"legacy_redis host {self.redis_config.host!r} is not loopback (or does not"
-                    " resolve): a real Redis needs allow_hardware in the config AND --hardware"
-                ) from None
+                redis_ip = check_tcs_address(
+                    self.redis_config.host,
+                    self.redis_config.port,
+                    allow_hardware=allow,
+                    what="legacy_redis",
+                )
+            except TCSHardwareNotAllowed as exc:
+                raise HardwareNotAllowed(str(exc)) from None
         self.transport: Transport = make_transport(config.port)
         host, _, port = config.listen.rpartition(":")
         try:
@@ -531,7 +534,12 @@ class TRESFrontEndServer(ThreadingHTTPServer):
         rc = self.redis_config
         if rc is not None and redis_ip is not None:
             keys = LegacyKeys(
-                redis_ip, rc.port, rc.db, {rc.command_key, rc.status_key}, timeout=rc.timeout
+                redis_ip,
+                rc.port,
+                rc.db,
+                {rc.command_key, rc.status_key},
+                timeout=rc.timeout,
+                allow_hardware=self._allow_hardware,
             )
             self.mirror = LegacyCalstageMirror(
                 keys,

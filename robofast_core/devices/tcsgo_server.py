@@ -59,8 +59,10 @@ Actions (telescope)
 
 Safety
 ------
-The TCS address must be loopback (a simulator) unless the config says
-``"allow_hardware": true`` **and** the command line passes ``--hardware``.
+The TCS must be a verified simulator (loopback, and the port registered by a
+robofast simulator: :mod:`robofast_core.hwgate`; an SSH tunnel to the real
+TCS is loopback too) unless the config says ``"allow_hardware": true``
+**and** the command line passes ``--hardware``.
 The address is resolved once at startup; only that literal is contacted.
 
 Running
@@ -188,7 +190,7 @@ class TCSGOConfig:
     #: Metres; null where unknown (Alpaca ApertureDiameter not implemented).
     aperture_diameter: float | None
     tcs: TCSConfig = field(default_factory=TCSConfig)
-    #: Must be true (and ``--hardware`` given) for a non-loopback TCS.
+    #: Must be true (and ``--hardware`` given) for a TCS that is not a verified simulator.
     allow_hardware: bool = False
     listen: str = "127.0.0.1:11140"
     #: Equinox sent with #6 (and reported as EquatorialSystem J2000).
@@ -774,9 +776,9 @@ class TCSGOServer(ThreadingHTTPServer):
         if config.allow_hardware != hardware:
             log.info(
                 "hardware use needs allow_hardware in the config AND --hardware;"
-                " only a loopback TCS is allowed now"
+                " only a verified simulator TCS is allowed now"
             )
-        self.tcs_ip = check_tcs_address(config.tcs.host, allow_hardware=allow)
+        self.tcs_ip = check_tcs_address(config.tcs.host, config.tcs.port, allow_hardware=allow)
         if allow:
             log.warning("HARDWARE MODE: TCS at %s:%d", self.tcs_ip, config.tcs.port)
         host, _, port = config.listen.rpartition(":")
@@ -1241,7 +1243,7 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument(
         "--hardware",
         action="store_true",
-        help="allow a non-loopback TCS (the config must also say allow_hardware)",
+        help="allow a real TCS (the config must also say allow_hardware)",
     )
     ap.add_argument("--listen", help="host:port, overriding the config")
     ap.add_argument("--log-level", default="INFO")

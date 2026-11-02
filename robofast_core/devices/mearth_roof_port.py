@@ -69,6 +69,7 @@ import time
 from dataclasses import dataclass
 from typing import Protocol
 
+from robofast_core import hwgate
 from robofast_core.owner import DeviceError, DeviceTimeout
 
 log = logging.getLogger(__name__)
@@ -108,7 +109,7 @@ class RoofPortTimeout(RoofPortError, DeviceTimeout):
     """A port operation did not finish in time."""
 
 
-class HardwareNotAllowed(Exception):
+class HardwareNotAllowed(hwgate.HardwareNotAllowed):
     """A real port without explicit permission."""
 
 

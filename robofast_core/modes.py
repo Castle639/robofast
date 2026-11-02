@@ -32,7 +32,12 @@ field; ``null`` removes a built-in. Each mode (:class:`ModePolicy`):
   ``duty_grace``, as before; ``alarm``: it only raises the critical alarm),
   ``duty_ttl`` and ``duty_grace`` (null: the ``safety`` entry's);
 * ``fault_auto_clear`` -- the supervisor's automatic fault clearing (null:
-  the ``safety`` entry's; true needs ``safety.fault_action``).
+  the ``safety`` entry's; true needs ``safety.fault_action``);
+* ``intervene`` -- a ``watch`` mode still closes an enclosure found open
+  (by anyone) while an enforced close condition is active: the weather
+  verdict unsafe, or an enclosure fault (default true for ``shadow``; JDE
+  2026-11-02: "if there's an active safety risk, it should intervene
+  immediately"). Ignored by a ``command`` mode, which closes anyway.
 
 The other checks are not per mode: the weather verdict and its staleness,
 enclosure faults, the shutter's health, the lease and its renewal, the park
@@ -103,6 +108,7 @@ class ModePolicy:
     duty_ttl: float | None = None
     duty_grace: float | None = None
     fault_auto_clear: bool | None = None
+    intervene: bool = False
     description: str = ""
 
     def as_json(self) -> dict[str, Any]:
@@ -143,9 +149,10 @@ BUILTIN_MODES: dict[str, ModePolicy] = {
         attended_only=False,
         enclosure="watch",
         fault_auto_clear=False,
+        intervene=True,
         description=(
-            "compute and log what robofast would do; command nothing that moves"
-            " (the enclosure is watched, never commanded)"
+            "compute and log what robofast would do; command nothing that moves,"
+            " except to close an open enclosure on an active safety risk (rain, a fault)"
         ),
     ),
 }
@@ -172,7 +179,7 @@ def _policy(name: str, entry: dict[str, Any], base: ModePolicy | None, where: st
         if key == "like":
             continue
         at = f"{where}.{key}"
-        if key in ("open", "requests", "attended_only"):
+        if key in ("open", "requests", "attended_only", "intervene"):
             if not isinstance(value, bool):
                 raise ValueError(f"{at}: true or false")
         elif key == "fault_auto_clear":

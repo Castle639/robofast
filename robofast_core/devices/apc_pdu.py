@@ -27,6 +27,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from robofast_core import hwgate
 from robofast_core.devices.snmp import (
     GET,
     RESPONSE,
@@ -82,6 +83,7 @@ class APCPDU:
         *,
         timeout: float = 2.0,
         retries: int = 2,
+        allow_hardware: bool = False,
     ) -> None:
         self.snmp = SNMPClient(
             host,
@@ -90,6 +92,7 @@ class APCPDU:
             write_community=credentials.write,
             timeout=timeout,
             retries=retries,
+            allow_hardware=allow_hardware,
         )
 
     async def describe(self) -> str:
@@ -159,11 +162,13 @@ class APCPDUSim:
             Proto, local_addr=(self.host, self.port)
         )
         self.port = self._transport.get_extra_info("sockname")[1]
+        self._registration = hwgate.SimulatorRegistration(self.port, proto="udp")
         return self
 
     def close(self) -> None:
         if self._transport is not None:
             self._transport.close()
+            self._registration.close()
 
     @property
     def address(self) -> str:

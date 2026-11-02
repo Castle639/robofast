@@ -62,6 +62,7 @@ import threading
 import time
 from dataclasses import dataclass
 
+from robofast_core import hwgate
 from robofast_core.devices.aqawan_pac import COMMANDS, TelnetFilter
 
 log = logging.getLogger(__name__)
@@ -431,11 +432,13 @@ class AqawanSim:
         self._stopping = asyncio.Event()
         self._server = await asyncio.start_server(self._session, self.host, self.port)
         self.port = self._server.sockets[0].getsockname()[1]
+        registration = hwgate.SimulatorRegistration(self.port)
         ticker = asyncio.create_task(self._ticker())
         self._ready.set()
         try:
             await self._stopping.wait()
         finally:
+            registration.close()
             ticker.cancel()
             self._server.close()
             with contextlib.suppress(Exception):

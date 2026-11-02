@@ -22,8 +22,6 @@ from __future__ import annotations
 
 import asyncio
 import heapq
-import ipaddress
-import socket
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -31,12 +29,14 @@ from typing import Protocol, runtime_checkable
 
 import numpy as np
 
+from robofast_core import hwgate
+
 
 class GuiderError(Exception):
     """A guider part failed (camera, centroider, device)."""
 
 
-class HardwareNotAllowed(GuiderError):
+class HardwareNotAllowed(GuiderError, hwgate.HardwareNotAllowed):
     """A real (non-simulated) device backend was configured without both
     ``allow_hardware: true`` in the config and ``--hardware``."""
 
@@ -56,16 +56,19 @@ def check_hardware(what: str, *, allowed: bool) -> None:
 
 
 def check_address(address: str, what: str, *, allowed: bool) -> None:
-    """A ``host:port`` network device: loopback is always allowed (a
-    simulator); anything else needs hardware use allowed."""
-    host = address.rsplit(":", 1)[0].strip("[]")
+    """A ``host:port`` network device: without hardware use allowed, it must
+    be a verified simulator (loopback, and the port held by a registered
+    robofast simulator or OmniSim: :mod:`robofast_core.hwgate`). Loopback
+    alone is not enough: an SSH tunnel to a real camera's ASCOM Remote is
+    loopback too."""
+    host, _, port = address.rpartition(":")
+    host = host.strip("[]")
     try:
-        infos = socket.getaddrinfo(host, None, type=socket.SOCK_STREAM)
-        addrs = [ipaddress.ip_address(str(i[4][0]).split("%")[0]) for i in infos]
-    except (socket.gaierror, ValueError) as exc:
-        raise HardwareNotAllowed(f"{what}: cannot resolve {host!r}: {exc}") from exc
-    if not all(a.is_loopback for a in addrs):
-        check_hardware(f"{what} at {address}", allowed=allowed)
+        hwgate.check_endpoint(host, int(port), allow_hardware=allowed, what=what)
+    except ValueError as exc:
+        raise HardwareNotAllowed(f"{what}: bad address {address!r}: {exc}") from exc
+    except hwgate.HardwareNotAllowed as exc:
+        raise HardwareNotAllowed(str(exc)) from None
 
 
 # -- clocks -------------------------------------------------------------------------
