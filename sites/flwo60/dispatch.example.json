@@ -42,7 +42,7 @@
   },
   "telescopes": {
     "tillinghast": {"instruments": ["tres"], "min_alt": 20, "max_alt": 90,
-                    "calstage": ["out", "sky", "science", "in", "block_sky", "block_science"],
+                    "calstage": ["out", "sky", "science", "block_sky", "block_science"],
                     "lamps": ["ThAr1", "ThAr2", "Incand", "Incand2"],
                     "sequences": ["tres_thar", "tres_flat"]}
   },

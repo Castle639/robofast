@@ -5,7 +5,7 @@
     "Hardware is NOT allowed: allow_hardware stays false until every item under 'Confirm on the mountain' in docs/tres_frontend.md is checked.",
     "Then: allow_hardware true here AND --hardware on the command line, on the front-end computer the controller is plugged into.",
     "port.device is a placeholder for that computer's serial device for the controller.",
-    "positions (mm): out/sky/science are the 2021 public tres-guider values, unconfirmed; in, block_sky, block_science are unknown (null: refused until set).",
+    "positions (mm), from the live TRES system 2026-11-02, confirm: science 3.05 (lamp light into the science fiber), sky 8.0 (into the sky fiber), out 24.99, block_sky 15.65, block_science 0. The stage is a PI M-112.22S1.",
     "legacy_redis: the transition shim, off (null). See the doc before turning it on; it must never point at a shared server without JDE's approval."
   ],
   "name": "flwo60-tres",
@@ -14,12 +14,11 @@
   "port": {"type": "serial", "device": "/dev/ttyUSB0", "baud": 115200, "timeout": 2.0},
   "axis": "1",
   "positions": {
-    "out": 0.0,
-    "sky": 10.0,
-    "science": 20.0,
-    "in": null,
-    "block_sky": null,
-    "block_science": null
+    "out": 24.99,
+    "sky": 8.0,
+    "science": 3.05,
+    "block_sky": 15.65,
+    "block_science": 0.0
   },
   "tolerance": 0.01,
   "focuser": true,

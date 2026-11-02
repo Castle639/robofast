@@ -37,11 +37,24 @@ In the enclosure config (the file the supervisor and the sequencer read):
   checked against what that type takes;
 * `description` -- for people; keys starting with `_` are comments.
 
-`sites/flwo60/flwo60.json` has the TRES ThAr and flat sets
-(`tres_thar`, `tres_flat`, made from the generic templates below; every
-value a placeholder, unconfirmed), and
-`sites/flwo60/calibration.example.json` runs them after the biases and
-darks.
+`sites/flwo60/flwo60.json` has the TRES calibrations, all made from the
+generic templates below, with the observers' values from the live TRES
+system (2026-11-02, to confirm):
+
+* the nightly set, which `sites/flwo60/calibration.example.json` runs in
+  order with the dome closed: `tres_bias` (5 biases), `tres_thar_science`
+  and `tres_thar_sky` (ThAr, 5 x 10 s through the object and the sky
+  fiber), `tres_flat_science` and `tres_flat_sky` (11 x 0.05 s each), with
+  20 s between the groups (`wait_after`);
+* `tres_thar`, the per-target ThAr (1 x 5 s on the science fiber), and
+  `tres_flat`, which requests may name (below).
+
+Not yet done for TRES: the CCD is read 2x2 binned, and a sequence does not
+set binning (the camera's own setting is used); and the observers accept a
+per-target ThAr only if its line counts are 15k-135k. **TODO**: an
+acceptance check on the arc's line counts, failing (and so retrying) an
+arc outside the range; robofast takes the frame and does not look at it
+yet.
 
 ## Templates: generic sequences
 
@@ -63,10 +76,10 @@ the steps out:
 
 | Template | Parameters (required in bold) | Steps |
 |---|---|---|
-| `arc_set` | **`lamp`**, **`exptime`**, **`count`**, `warmup`, `calstage`, `calstage_after`, `filter`, `object`, `instrument` | the stage to `calstage`, the filter, the lamp on (its `warmup`), `count` `ARC` frames, the lamp off, the stage to `calstage_after`; cleanup: the stage to `calstage_after` |
+| `arc_set` | **`lamp`**, **`exptime`**, **`count`**, `warmup`, `calstage`, `calstage_after`, `filter`, `object`, `instrument`, `wait_after` | the stage to `calstage`, the filter, the lamp on (its `warmup`), `count` `ARC` frames, the lamp off, the stage to `calstage_after`, a wait of `wait_after` s; cleanup: the stage to `calstage_after` |
 | `lamp_flat_set` | the same | the same with `LAMP_FLAT` frames |
-| `bias_set` | **`count`**, `filter`, `object`, `instrument` | the filter, `count` `BIAS` frames |
-| `dark_set` | **`exptime`**, **`count`**, `filter`, `object`, `instrument` | the filter, `count` `DARK` frames |
+| `bias_set` | **`count`**, `filter`, `object`, `instrument`, `wait_after` | the filter, `count` `BIAS` frames, the wait |
+| `dark_set` | **`exptime`**, **`count`**, `filter`, `object`, `instrument`, `wait_after` | the filter, `count` `DARK` frames, the wait |
 
 An optional parameter left out is null, and a null leaves out what it
 fills: a step whose step type's value is null (no `calstage`: the stage is

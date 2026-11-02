@@ -8,7 +8,7 @@
     "tillinghast.telescope: the TCSGO server (sites/flwo60/tcsgo.json listens on 11140).",
     "tillinghast.camera: the TRES CCD's Alpaca camera (to be written; placeholder).",
     "tillinghast.calstage: the TRES front end's calibration stage (sites/flwo60/tres_frontend.json listens on 11160; docs/tres_frontend.md).",
-    "tillinghast.lamps: the TRES calibration lamps on the Pulizzi switch (sites/flwo60/pulizzi.json listens on 11170; docs/pulizzi.md): ARC and LAMP_FLAT requests. warmup (s) and calstage per lamp are placeholders ('in' is unconfirmed, and null in tres_frontend.json until its mm value is known, so lamp frames fail until then).",
+    "tillinghast.lamps: the TRES calibration lamps on the Pulizzi switch (sites/flwo60/pulizzi.json listens on 11170; docs/pulizzi.md): ARC and LAMP_FLAT requests. calstage per lamp: 'science' (lamp light into the science fiber; tres_frontend.json). warmup (s) per lamp: placeholders, unconfirmed.",
     "tillinghast.adc: the atmospheric dispersion corrector's tracking switch (sites/flwo60/adc.json listens on 11180; docs/adc.md): tracking on before light frames, off (prisms neutral) at cleanup.",
     "dome: the 60-inch dome's Alpaca server; the TCSGO server's dome/0 if the TCS drives the dome (unconfirmed), else its own server.",
     "safetymonitor, observingconditions: a weather bridge for Mt. Hopkins (placeholder).",
@@ -18,7 +18,10 @@
     "site: the 60-inch on Mt. Hopkins, approximate (public).",
     "mode: attended (JDE 2026-10-31: the dome has no watchdog). The enclosure is attended_only, so the built-in robotic mode is not offered here and no mode may open without an operator on duty (docs/modes.md); engineering (manual control only) and shadow (log what it would do, command nothing) are.",
     "lamps.lamps.*.max_on: repeats each outlet's max_on in pulizzi.json (placeholders there too), so the sequences below are checked against it when this file is loaded; the switch's own limit is checked again before a lamp goes on.",
-    "sequences (docs/sequences.md): the TRES calibration sets, made from robofast's generic templates arc_set and lamp_flat_set (the stage in, the lamp on and its warm-up, the frames, the lamp off, the stage out; the stage out again in the cleanup), run by observations of kind 'sequence' (calibration.example.json runs them with the dome closed). EVERY VALUE IS A PLACEHOLDER, UNCONFIRMED: the exposure times and counts, the warm-ups, the lamp choice, and the calibration stage's 'in' position (null in tres_frontend.json, so these fail before any lamp goes on until it is set). Each ends with its lamps off and the stage out, and its cleanup puts the stage out whatever happened (cancelled, failed); every lamp it switched on is switched off first."
+    "sequences (docs/sequences.md): the TRES calibrations, made from robofast's generic templates arc_set, lamp_flat_set and bias_set (the stage to a fiber, the lamp on and its warm-up, the frames, the lamp off, the stage out, a wait; the stage out again in the cleanup), run by observations of kind 'sequence'.",
+    "The observers' values, from the live TRES system 2026-11-02, confirm: the nightly calibration (calibration.example.json, with the dome closed) is 5 biases, ThAr 5 x 10 s on the science (object) fiber and 5 x 10 s on the sky fiber, flats 11 x 0.05 s on each fiber, 20 s waits between the groups. Per target: ThAr 5 s (tres_thar, which requests may name), accepted if its line counts are 15k-135k (TODO: robofast does not check this yet; docs/sequences.md). The CCD is read 2x2 binned (TODO: the sequences do not set binning; the camera's own setting is used).",
+    "Placeholders, unconfirmed: the lamp warm-ups, the lamp choice (ThAr1, Incand), and the flat exposure and count for the per-request tres_flat (the nightly 11 x 0.05 s).",
+    "Each ends with its lamps off and the stage out, and its cleanup puts the stage out whatever happened (cancelled, failed); every lamp it switched on is switched off first."
   ],
   "name": "flwo60",
   "listen": "127.0.0.1:8160",
@@ -33,10 +36,10 @@
                     "limits": {"min_alt": 20.0, "max_alt": 90.0},
                     "calstage": "127.0.0.1:11160/0", "adc": "127.0.0.1:11180/0",
                     "lamps": {"switch": "127.0.0.1:11170/0", "frame_overhead": 30,
-                              "lamps": {"ThAr1": {"warmup": 60, "calstage": "in", "max_on": 1800},
-                                        "ThAr2": {"warmup": 60, "calstage": "in", "max_on": 1800},
-                                        "Incand": {"warmup": 30, "calstage": "in", "max_on": 1800},
-                                        "Incand2": {"warmup": 30, "calstage": "in", "max_on": 1800}}}}
+                              "lamps": {"ThAr1": {"warmup": 60, "calstage": "science", "max_on": 1800},
+                                        "ThAr2": {"warmup": 60, "calstage": "science", "max_on": 1800},
+                                        "Incand": {"warmup": 30, "calstage": "science", "max_on": 1800},
+                                        "Incand2": {"warmup": 30, "calstage": "science", "max_on": 1800}}}}
   },
   "mode": "attended",
   "safety": {
@@ -48,16 +51,45 @@
   },
   "sequences": {
     "tres_thar": {
-      "description": "TRES ThAr arcs (placeholder values, unconfirmed)",
+      "description": "TRES ThAr for a target: 1 x 5 s on the science fiber (from the live TRES system 2026-11-02, confirm)",
       "template": "arc_set", "instrument": "camera_spectrograph",
-      "lamp": "ThAr1", "warmup": 60, "exptime": 30, "count": 3, "object": "ThAr",
-      "calstage": "in", "calstage_after": "out"
+      "lamp": "ThAr1", "warmup": 60, "exptime": 5, "count": 1, "object": "ThAr",
+      "calstage": "science", "calstage_after": "out"
     },
     "tres_flat": {
-      "description": "TRES fiber flats on the incandescent lamp (placeholder values, unconfirmed)",
+      "description": "TRES flats on the science fiber, the nightly 11 x 0.05 s (placeholder for requests)",
       "template": "lamp_flat_set", "instrument": "camera_spectrograph",
-      "lamp": "Incand", "warmup": 30, "exptime": 10, "count": 5, "object": "flat",
-      "calstage": "in", "calstage_after": "out"
+      "lamp": "Incand", "warmup": 30, "exptime": 0.05, "count": 11, "object": "flat",
+      "calstage": "science", "calstage_after": "out"
+    },
+    "tres_bias": {
+      "description": "TRES nightly biases: 5 (from the live TRES system 2026-11-02, confirm)",
+      "template": "bias_set", "instrument": "camera_spectrograph",
+      "count": 5, "object": "bias", "wait_after": 20
+    },
+    "tres_thar_science": {
+      "description": "TRES nightly ThAr, object fiber: 5 x 10 s (from the live TRES system 2026-11-02, confirm)",
+      "template": "arc_set", "instrument": "camera_spectrograph",
+      "lamp": "ThAr1", "warmup": 60, "exptime": 10, "count": 5, "object": "ThAr",
+      "calstage": "science", "calstage_after": "out", "wait_after": 20
+    },
+    "tres_thar_sky": {
+      "description": "TRES nightly ThAr, sky fiber: 5 x 10 s (from the live TRES system 2026-11-02, confirm)",
+      "template": "arc_set", "instrument": "camera_spectrograph",
+      "lamp": "ThAr1", "warmup": 60, "exptime": 10, "count": 5, "object": "ThAr",
+      "calstage": "sky", "calstage_after": "out", "wait_after": 20
+    },
+    "tres_flat_science": {
+      "description": "TRES nightly flats, object fiber: 11 x 0.05 s (from the live TRES system 2026-11-02, confirm)",
+      "template": "lamp_flat_set", "instrument": "camera_spectrograph",
+      "lamp": "Incand", "warmup": 30, "exptime": 0.05, "count": 11, "object": "flat",
+      "calstage": "science", "calstage_after": "out", "wait_after": 20
+    },
+    "tres_flat_sky": {
+      "description": "TRES nightly flats, sky fiber: 11 x 0.05 s (from the live TRES system 2026-11-02, confirm)",
+      "template": "lamp_flat_set", "instrument": "camera_spectrograph",
+      "lamp": "Incand", "warmup": 30, "exptime": 0.05, "count": 11, "object": "flat",
+      "calstage": "sky", "calstage_after": "out"
     }
   },
   "sequencer_name": "flwo60-sequencer",
@@ -69,5 +101,7 @@
     "max_consecutive_errors": 3,
     "idle_release_after": 900
   },
-  "plan": {"type": "calibration", "biases": 10, "darks": [[60, 5]]}
+  "plan": {"type": "calibration",
+           "sequences": ["tres_bias", "tres_thar_science", "tres_thar_sky",
+                         "tres_flat_science", "tres_flat_sky"]}
 }

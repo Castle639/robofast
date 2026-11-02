@@ -163,22 +163,45 @@ def test_bad_sequences_are_refused_with_the_steps_path(seq, tel, match):
 
 
 def test_the_shipped_tres_sequences_and_calibration_plan():
+    """The observers' calibrations (flwo60.json): the nightly biases, ThAr
+    and flats on each fiber with 20 s between groups, and the per-target
+    ThAr, all from the generic templates."""
     cfg = load_config(ROOT / "sites/flwo60/flwo60.json")
     seqs = sequences_from_config(cfg)
-    assert set(seqs) == {"tres_thar", "tres_flat"}
-    for seq in seqs.values():
+    nightly = ["tres_bias", "tres_thar_science", "tres_thar_sky", "tres_flat_science"]
+    nightly.append("tres_flat_sky")
+    assert set(seqs) == {"tres_thar", "tres_flat", *nightly}
+    for name, seq in seqs.items():
         assert not seq.light and seq.instrument == "camera_spectrograph"
-        assert seq.steps[0].params == "in" and seq.steps[-1].params == "out"
+        if name == "tres_bias":
+            assert [s.type for s in seq.steps] == ["expose", "wait"] and not seq.cleanup
+            assert seq.steps[0].params["n"] == 5 and seq.steps[1].params == 20
+            continue
+        fiber = "sky" if name.endswith("_sky") else "science"
+        assert seq.steps[0].params == fiber
         assert [s.params for s in seq.cleanup] == ["out"]
+        frames = next(s.params for s in seq.steps if s.type == "expose")
+        assert (frames["exptime"], frames["n"]) == {
+            "tres_thar": (5, 1),
+            "tres_thar_science": (10, 5),
+            "tres_thar_sky": (10, 5),
+        }.get(name, (0.05, 11))
+        # 20 s between the nightly groups; nothing after the last.
+        waits = [s.params for s in seq.steps if s.type == "wait"]
+        assert waits == ([20] if name in nightly[:-1] else [])
+    stage = json.loads((ROOT / "sites/flwo60/tres_frontend.json").read_text())["positions"]
+    assert stage == {
+        "out": 24.99,
+        "sky": 8.0,
+        "science": 3.05,
+        "block_sky": 15.65,
+        "block_science": 0.0,
+    }
     entry = json.loads((ROOT / "sites/flwo60/calibration.example.json").read_text())
-    plan = plan_from_config(entry, ["tillinghast"])
-    check_plan_sequences(plan, seqs)
-    assert [o.name for o in plan.queues["tillinghast"]] == [
-        "bias",
-        "dark60",
-        "tres_thar",
-        "tres_flat",
-    ]
+    for plan_entry in (entry, cfg["plan"]):
+        plan = plan_from_config(plan_entry, ["tillinghast"])
+        check_plan_sequences(plan, seqs)
+        assert [o.name for o in plan.queues["tillinghast"]] == nightly
     # MINERVA defines none: its calibrations are the calibration plan's, unchanged.
     assert sequences_from_config(load_config(ROOT / "sites/minerva/aqawan1.json")) == {}
 
@@ -509,6 +532,28 @@ def test_a_site_template_overrides_a_built_in_and_adds_its_own():
         sequences_from_config(cfg)
 
 
+def test_wait_after_pauses_after_a_generic_set_and_is_dropped_when_null():
+    """``wait_after`` (every built-in template): a wait after the set, for
+    the pause between a night's calibration groups; left out, no wait."""
+    cfg = config(
+        {
+            "a": {"template": "arc_set", "lamp": "ThAr1", "exptime": 1, "count": 1},
+            "b": {"template": "bias_set", "count": 2, "wait_after": 20},
+            "f": {
+                "template": "lamp_flat_set",
+                "lamp": "ThAr1",
+                "exptime": 1,
+                "count": 1,
+                "wait_after": 5,
+            },
+        }
+    )
+    seqs = sequences_from_config(cfg)
+    assert "wait" not in [s.type for s in seqs["a"].steps]
+    assert seqs["b"].steps[-1].type == "wait" and seqs["b"].steps[-1].params == 20
+    assert seqs["f"].steps[-1].params == 5
+
+
 def test_a_plug_in_adds_a_template():
     from robofast_core.sequences import REQUIRED, SEQUENCE_TEMPLATES, SequenceTemplate
 
@@ -571,7 +616,7 @@ def test_the_shipped_flwo60_sequences_are_the_generic_sets_and_requestable(tmp_p
 
     cfg = load_config(ROOT / "sites/flwo60/flwo60.json")
     seqs = sequences_from_config(cfg)
-    assert {s.template for s in seqs.values()} == {"arc_set", "lamp_flat_set"}
+    assert {s.template for s in seqs.values()} == {"arc_set", "lamp_flat_set", "bias_set"}
     for name in ("dispatch.example.json", "requests.example.json"):
         shutil.copy(ROOT / "sites/flwo60" / name, tmp_path / name)
     plan = plan_from_config(

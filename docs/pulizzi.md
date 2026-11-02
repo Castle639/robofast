@@ -277,8 +277,9 @@ Until each is checked, `allow_hardware` stays false.
 7. Each lamp's rated duty, a safe `max_on`, its warm-up time, and TRES's
    usual ThAr and flat sequences (count, exposure), so they fit in
    `max_on`.
-8. Which calibration-stage position each lamp needs (`in`, unconfirmed;
-   `docs/tres_frontend.md` question 4), and whether the bench's
+8. Which calibration-stage position each lamp needs (now `science`, and
+   `sky` for the sky-fiber calibrations, from the live TRES system
+   2026-11-02, to confirm; `docs/tres_frontend.md` question 4), and whether the bench's
    calibration box is also involved (question 10 there).
 9. The transition: the legacy program holds the serial line while the TCS
    window runs, so only one of them can drive the unit at a time.
