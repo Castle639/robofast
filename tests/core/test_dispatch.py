@@ -384,6 +384,79 @@ async def test_a_cadence_pool_shares_the_nightly_maximum():
         make([group("x", cadence={"pool": "bstars"})])
 
 
+async def test_a_soft_pool_limit_demotes_instead_of_refusing():
+    # MINERVA's B stars: past the night's one, another is taken only when
+    # nothing else is observable (better than idling; legacy divided its
+    # weight by 1e6), never ahead of any eligible request.
+    soft = {"min_interval": 0, "max_per_night": 1, "pool": "bstars", "limit": "soft"}
+    clock = Clock()
+    d = make(
+        [
+            group("b1", cadence=soft, priority=5.0),
+            group("b2", cadence=soft, priority=5.0),
+            group("rv", cadence={"min_interval": 3600, "max_per_night": 2}, priority=0.1),
+        ],
+        clock=clock,
+        limits={"t1": tlimits()},
+    )
+    assert not by_id(d)["b2-r"].demoted
+    obs = await run_visit(d)  # b1: highest priority, nothing demoted yet
+    assert obs.name.startswith("b1")
+    b2 = by_id(d)["b2-r"]
+    assert b2.ok and b2.demoted == "cadence: 1 visits of pool 'bstars' tonight already"
+    assert not b2.reasons
+    # Any other eligible request wins, however low its priority.
+    obs = await run_visit(d)
+    assert obs.name.startswith("rv")
+    # Now rv is too soon, so the only observable request is a demoted B
+    # star: it is taken rather than idle, and the record says why.
+    assert "too soon" in _reasons(d, "rv-r")
+    obs = await run_visit(d)
+    assert obs.name.startswith("b")
+    assert d.pool_visits_tonight("bstars") == 2
+    clock.t = NIGHT + timedelta(days=1)
+    assert not by_id(d)["b2-r"].demoted  # a new night counts afresh
+
+
+async def test_a_soft_limit_never_beats_an_eligible_request():
+    soft = {"min_interval": 0, "max_per_night": 1, "pool": "bstars", "limit": "soft"}
+    clock = Clock()
+    d = make(
+        [
+            group("b1", cadence=soft, priority=100.0),
+            group("b2", cadence=soft, priority=100.0),
+            group("img", priority=0.01),
+        ],
+        clock=clock,
+        limits={"t1": tlimits()},
+    )
+    assert (await run_visit(d)).name.startswith("b1")
+    # img (priority 0.01) beats b2 (priority 100, demoted), on every
+    # telescope that can take it.
+    cands = by_id(d)
+    assert cands["b2-r"].score > cands["img-r"].score and cands["b2-r"].demoted
+    assert (await run_visit(d)).name.startswith("img")
+    # Per-request (no pool) soft limits work the same way.
+    d = make(
+        [group("a", cadence={"min_interval": 0, "max_per_night": 1, "limit": "soft"})],
+        clock=Clock(),
+        limits={"t1": tlimits()},
+    )
+    await run_visit(d)
+    assert by_id(d)["a-r"].demoted == "cadence: 1 visits tonight already"
+    assert (await run_visit(d)).name.startswith("a")
+
+
+def test_a_cadence_limit_must_be_hard_or_soft():
+    with pytest.raises(ValueError, match="limit: 'sometimes'"):
+        make([group("x", cadence={"max_per_night": 1, "limit": "sometimes"})])
+    with pytest.raises(ValueError, match="a limit applies to max_per_night"):
+        make([group("x", cadence={"limit": "soft"})])
+    # A hard limit is the default and is not written back out.
+    d = make([group("x", cadence={"max_per_night": 1, "limit": "hard"})])
+    assert d.requests["x-r"].cadence.to_dict() == {"min_interval": 0.0, "max_per_night": 1}
+
+
 async def test_one_request_on_one_telescope_at_a_time():
     d = make([group("a", count=2, ics=[ic(1), ic(2)])])
     obs = await d.next_observation("t1")

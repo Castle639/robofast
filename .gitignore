@@ -19,3 +19,8 @@ __pycache__/
 *.egg-info/
 build/
 dist/
+# Service-account keys and other secrets live in /etc/robofast/secrets/,
+# never in a work tree (docs/deploy.md); a backstop against `git add -A`.
+*service-account*.json
+*service_account*.json
+secrets/

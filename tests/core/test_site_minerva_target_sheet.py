@@ -107,6 +107,7 @@ def test_bstars_share_one_visit_a_night():
             "min_interval": 10800.0,
             "max_per_night": 1,
             "pool": "bstars",
+            "limit": "soft",  # a second B star rather than idle (legacy)
         }
         ic = r["configurations"][0]["instrument_configs"][0]
         assert ic["extra_params"] == {"iodine": True}
@@ -118,6 +119,12 @@ def test_bstars_share_one_visit_a_night():
         instruments={"spectrograph": {"type": "kiwispec"}},
     )
     assert all(r.cadence.pool == "bstars" for r in d.requests.values())
+    assert all(r.cadence.limit == "soft" for r in d.requests.values())
+    # A list may keep the hard limit.
+    hard = ms.convert(table("bstars"), replace(spec("bstars"), limit="hard"))
+    assert "limit" not in hard.groups[0]["requests"][0]["extra_params"]["cadence"]
+    with pytest.raises(ms.SheetError, match="limit 'maybe'"):
+        replace(spec("bstars"), limit="maybe")
 
 
 def ms_site():
@@ -153,7 +160,9 @@ def test_cell_values_keep_full_precision():
 
 def test_site_example_config_loads():
     cfg = ms.SheetConfig.load(SITE / "target_sheet.example.json")
-    assert set(cfg.enabled()) == {"targets", "bstars"}  # the red list is off
+    # The red-side list is retired: not in the example at all.
+    assert set(cfg.lists) == {"targets", "bstars"} == set(cfg.enabled())
+    assert cfg.lists["bstars"].limit == "soft"
     assert cfg.lists["bstars"].kind == "bstars" and cfg.lists["bstars"].tab == "B stars"
     assert cfg.key_file == Path("/etc/robofast/secrets/minerva_sheets.json")
     # The public example carries placeholders only, and fetch refuses them.
@@ -176,9 +185,67 @@ def test_config_errors(tmp_path):
 def test_key_path_from_the_environment(monkeypatch):
     cfg = config(Path("/nonexistent"))
     monkeypatch.delenv(ms.KEY_ENV, raising=False)
-    assert cfg.key_path() == Path("/etc/robofast/secrets/k.json")
+    monkeypatch.setenv(ms.GOOGLE_KEY_ENV, "/google/k.json")
+    assert cfg.key_path() == Path("/etc/robofast/secrets/k.json")  # config over Google's
     monkeypatch.setenv(ms.KEY_ENV, "/elsewhere/k.json")
     assert cfg.key_path() == Path("/elsewhere/k.json")
+    monkeypatch.delenv(ms.KEY_ENV)
+    cfg = replace(cfg, key_file=None)
+    assert cfg.key_path() == Path("/google/k.json")
+    monkeypatch.delenv(ms.GOOGLE_KEY_ENV)
+    assert cfg.key_path() is None
+
+
+def dummy_key(where: Path, mode: int = 0o600) -> Path:
+    """A stand-in key file: not a key, only its metadata is checked."""
+    where.mkdir(parents=True, exist_ok=True)
+    key = where / "dummy-sa.json"
+    key.write_text('{"note": "not a key"}')
+    key.chmod(mode)
+    return key
+
+
+def test_a_key_others_can_read_is_refused(tmp_path):
+    ok = dummy_key(tmp_path / "ok")
+    assert ms.check_key_file(ok) == ok.resolve()
+    for mode in (0o640, 0o604, 0o620, 0o644):
+        with pytest.raises(ms.KeyFileRefused, match="chmod 600"):
+            ms.check_key_file(dummy_key(tmp_path / f"m{mode:o}", mode))
+    with pytest.raises(ms.SheetUnavailable, match="not found"):
+        ms.check_key_file(tmp_path / "missing.json")
+
+
+def test_a_key_inside_a_git_work_tree_is_refused(tmp_path, monkeypatch):
+    repo = tmp_path / "checkout"
+    (repo / ".git").mkdir(parents=True)
+    key = dummy_key(repo / "sites" / "minerva")
+    with pytest.raises(ms.KeyFileRefused, match="inside the git work tree"):
+        ms.check_key_file(key)
+    # A worktree's .git is a file; a symlink from outside does not hide it.
+    wt = tmp_path / "worktree"
+    wt.mkdir()
+    (wt / ".git").write_text("gitdir: elsewhere\n")
+    inside = dummy_key(wt)
+    link = tmp_path / "outside" / "k.json"
+    link.parent.mkdir()
+    link.symlink_to(inside)
+    with pytest.raises(ms.KeyFileRefused, match="git work tree"):
+        ms.check_key_file(link)
+    # $CREDENTIALS_DIRECTORY (systemd LoadCredential=) is expanded.
+    monkeypatch.setenv("CREDENTIALS_DIRECTORY", str(tmp_path / "creds"))
+    dummy_key(tmp_path / "creds")
+    assert ms.check_key_file(Path("$CREDENTIALS_DIRECTORY/dummy-sa.json")).name == "dummy-sa.json"
+
+
+def test_a_refused_key_is_an_error_not_a_fallback(tmp_path, monkeypatch):
+    # Even with a snapshot to fall back to, a world-readable key stops the
+    # load: the config is wrong, and silently serving old lists hides it.
+    cfg = config(tmp_path)
+    ms.load(cfg, offline=False, client=live_client(), now=NOW)
+    monkeypatch.delenv(ms.KEY_ENV, raising=False)
+    cfg = replace(cfg, key_file=dummy_key(tmp_path / "keys", 0o644))
+    with pytest.raises(ms.KeyFileRefused, match="group or others"):
+        ms.load(cfg, offline=False, now=NOW)
 
 
 # -- fetching (a fake gspread) -----------------------------------------------------
@@ -300,7 +367,7 @@ def test_client_uses_the_read_only_scope(tmp_path, monkeypatch):
 def test_client_without_gspread(monkeypatch, tmp_path):
     monkeypatch.setitem(sys.modules, "gspread", None)
     with pytest.raises(ms.SheetUnavailable, match="pip install --group sheets"):
-        ms._client(tmp_path / "key.json")
+        ms._client(dummy_key(tmp_path))
 
 
 # -- snapshots and the fallback ----------------------------------------------------
@@ -419,5 +486,6 @@ def test_cli_offline_and_snapshot(tmp_path, capsys, monkeypatch):
     assert f"snapshot {loaded.path}" in capsys.readouterr().out
     # fetch with no key file: an error, no fallback, exit 2.
     monkeypatch.delenv(ms.KEY_ENV, raising=False)
+    monkeypatch.delenv(ms.GOOGLE_KEY_ENV, raising=False)
     assert ms.main(["fetch", "--config", str(cfile)]) == 2
     assert "no service-account key" in capsys.readouterr().err
