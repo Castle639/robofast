@@ -90,7 +90,8 @@ def test_the_shipped_site_configs():
     for path, offered in [
         ("sites/minerva/aqawan1.json", {"robotic", "attended", "engineering", "shadow"}),
         ("sites/flwo60/flwo60.json", {"attended", "engineering", "shadow"}),
-        ("sites/mearth_south/mearth_south.json", {"attended", "engineering", "shadow"}),
+        # No watchdog, but the site opts in to running unattended (JDE 2026-11-02).
+        ("sites/mearth_south/mearth_south.json", {"robotic", "attended", "engineering", "shadow"}),
     ]:
         config = load_config(ROOT / path)
         scfg = SafetyConfig(**config["safety"])
@@ -98,7 +99,10 @@ def test_the_shipped_site_configs():
             config, attended_floor=bool(scfg.attended_only), fault_action=bool(scfg.fault_action)
         )
         assert set(ms.modes) == offered, path
-        assert ms.default == "attended" and ms.configured, path  # the safe default
+        # MINERVA (a hardware heartbeat) starts robotic; the others attended.
+        want = "robotic" if "minerva" in path else "attended"
+        assert ms.default == want and ms.configured, path
+        assert scfg.unwatched is ("mearth" in path), path
 
 
 def test_which_leases_survive_a_switch():

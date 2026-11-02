@@ -52,6 +52,7 @@ h3 { font-size: 15px; margin: 10px 0 4px; }
 .kv dd { margin: 0; overflow-wrap: anywhere; }
 .badge { display: inline-block; padding: 1px 8px; border-radius: 10px; font-weight: 600;
   border: 1px solid currentColor; font-size: 13px; }
+.unwatched { border: 2px solid var(--bad); padding: 6px 8px; border-radius: 6px; }
 .ok { color: var(--ok); } .warn { color: var(--warn); } .bad { color: var(--bad); }
 .big { font-size: 20px; font-weight: 700; }
 button, input, textarea, select { font: inherit; color: var(--text); background: var(--btn);
@@ -441,6 +442,15 @@ function modeText(m) {
     m.would_open === true ? h("span", {class: "dim"}, " — would open now") : null,
     m.finishing_close ? h("span", {class: "warn"}, " — closing first") : null);
 }
+// Unattended with no hardware watchdog (the site's opt-in; docs/modes.md):
+// shown for as long as the mode allows it, never dismissable.
+function unwatchedBanner(m) {
+  const u = m && m.unwatched;
+  if (!u) return null;
+  if (u.active) return h("p", {class: "bad unwatched"}, h("strong", {}, "WARNING: " + u.text));
+  return h("p", {class: "warn"}, "This site lets the enclosure run unattended with no hardware" +
+    " watchdog in another mode; this mode needs an operator on duty.");
+}
 // One button per other mode (the supervisor checks and logs the switch).
 function modeButtons(name, m) {
   if (!m || !m.modes) return [];
@@ -507,6 +517,7 @@ function render(doc) {
     const holds = Object.entries(n.holds || {});
     return h("div", {}, title(name),
       h("div", {class: "big"}, badge(fmt(n.shutter), n.shutter === "CLOSED" ? "ok" : (!n.shutter || n.shutter === "ERROR") ? "bad" : "warn")),
+      unwatchedBanner(n.mode),
       kv([
         ["fault", n.fault ? h("span", {class: "bad"}, n.fault) : "none"],
         ["open allowed", fmt(n.open_allowed)],
