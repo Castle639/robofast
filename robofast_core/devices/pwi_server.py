@@ -1,0 +1,1340 @@
+"""Alpaca Telescope, Focuser and Rotator server for a PlaneWave CDK700 under PWI.
+
+PWI is reached through :mod:`robofast_core.devices.pwi_client`, either PWI4
+(``"backend": "pwi4"``, HTTP port 8220) or the legacy PWI2 (``"pwi2"``,
+44444). The command mapping, what is confirmed and what is assumed are in
+``docs/pwi.md``.
+
+Devices
+-------
+* ``telescope/0`` (ITelescopeV4, alt-az). ``SlewToCoordinatesAsync`` (J2000
+  RA/Dec; needs tracking on, as ASCOM requires) and ``SlewToAltAzAsync``
+  (needs tracking off) are **refused** unless the target's altitude is
+  within [``min_alt``, ``max_alt``] (computed here from PWI's sidereal time
+  and the configured latitude, J2000 precessed to date), the mount is
+  connected in PWI and both axis motors are enabled. ``AbortSlew`` stops the
+  mount (PWI ``stop``, which also stops tracking). ``Park`` slews to
+  (``park_alt``, ``park_az``) with tracking off; ``Unpark`` only clears the
+  parked state. ``FindHome`` runs PWI's home search (``AtHome`` is true
+  after it until the mount moves). ``PulseGuide`` is a PWI RA/Dec offset of
+  ``guide_rate`` (RA coordinate or Dec) arcsec/s times the duration (needs tracking). No sync, no
+  MoveAxis.
+* ``focuser/0`` (IFocuserV4, absolute, microns): the focuser **on the current
+  M3 port** (PWI2 ``focuserN``; PWI4 the GUI-selected focuser, which follows
+  the M3 with "Select from M3"). ``Move`` refused outside
+  [``focus_min``, ``focus_max``] or while the M3 is between ports.
+  ``Halt`` stops it. Off with ``"focuser": false``.
+* ``rotator/0`` (IRotatorV4): the rotator on the current M3 port, in
+  mechanical degrees (``Sync`` sets an in-memory offset for ``Position``).
+  PWI4 reports only Rotator index 0's angle, so with PWI4 the rotator
+  reads only while the M3 is on ``rotator_status_port``. Off with
+  ``"rotator": false``.
+
+Actions (telescope)
+-------------------
+* ``SelectPort`` (:data:`PORT_ACTION`, the sequencer's ``port_action``):
+  parameter ``"1"``/``"2"`` or a name from ``ports`` (e.g. ``"imager"``).
+  Moves the M3 and waits until PWI reports the port (``m3_timeout``;
+  on a timeout it sends ``m3 stop`` and fails).
+* ``Offset``: ``{"east": E, "north": N}`` arcsec on the sky; RA offset
+  ``E / cos(Dec)``. Needs tracking; refused beyond ``max_offset``.
+* ``MountConnect``: PWI connects to the mount controller (moves nothing).
+* ``MotorsEnable`` / ``MotorsDisable``: enable / disable both axes.
+  **Enabling is never implicit**: nothing here enables motors, homes or
+  moves on its own, and connecting (Alpaca or PWI) never does.
+* ``Stop``: mount stop, accepted even while not connected.
+* ``Status``: JSON of PWI's status (typed) and the server's state.
+
+Safety
+------
+* The hardware gate (:mod:`robofast_core.hwgate`): PWI must be a verified
+  simulator unless the config says ``"allow_hardware": true`` **and** the
+  command line passes ``--hardware``.
+* A limit watch reads PWI every ``watch_interval`` s and sends ``stop`` if
+  the mount is moving further outside [``min_alt`` - ``limit_margin``,
+  ``max_alt`` + ``limit_margin``] (a tracked target setting, a slew the
+  limits did not foresee). It only ever stops.
+* Every request to PWI has a timeout; every Alpaca request is bounded by
+  ``request_timeout``.
+
+Running::
+
+    python -m robofast_core.devices.pwi_server --config t1_pwi.json [--hardware]
+
+prints one JSON line, ``{"url": ..., "pwi": ...}``, once listening.
+"""
+
+from __future__ import annotations
+
+import argparse
+import asyncio
+import concurrent.futures
+import contextlib
+import dataclasses
+import json
+import logging
+import math
+import signal
+import sys
+import threading
+import time
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass, field
+from http.server import ThreadingHTTPServer
+from typing import Any
+
+from robofast_core import hwgate
+from robofast_core.config import load_device_config, require_keys
+from robofast_core.devices.aqawan_server import (
+    ACTION_NOT_IMPLEMENTED,
+    DRIVER_ERROR,
+    INVALID_OPERATION,
+    INVALID_VALUE,
+    NOT_CONNECTED,
+    NOT_IMPLEMENTED,
+    UINT32_MAX,
+    AlpacaException,
+    _BadRequest,
+    _bool_param,
+    _Discovery,
+)
+from robofast_core.devices.pwi_client import (
+    BACKENDS,
+    PWI2_PORT,
+    PWI4_PORT,
+    PWIClient,
+    PWIError,
+    PWIStatus,
+    PWITimeout,
+    make_client,
+)
+from robofast_core.devices.tcsgo_server import (
+    COMMON_NAMES,
+    _float_param,
+    _Handler,
+    _int_param,
+    _now_stamp,
+)
+from robofast_core.devices.tcsgo_sim import hadec_to_altaz
+
+log = logging.getLogger(__name__)
+
+DRIVER_VERSION = "0.1.0"
+PARKED = 0x408
+PWI_TIMEOUT = 0x502
+#: The Alpaca Action that selects an M3 port (the sequencer's ``port_action``).
+PORT_ACTION = "SelectPort"
+TELESCOPE_ACTIONS = (
+    PORT_ACTION,
+    "Offset",
+    "MountConnect",
+    "MotorsEnable",
+    "MotorsDisable",
+    "Stop",
+    "Status",
+)
+
+
+# -- configuration ----------------------------------------------------------------
+
+
+@dataclass
+class PWIEndpoint:
+    host: str = "127.0.0.1"
+    #: Default: 8220 (PWI4) or 44444 (PWI2).
+    port: int | None = None
+    #: Per request (connect + reply), s.
+    timeout: float = 5.0
+    connect_timeout: float = 2.0
+
+
+#: Site and telescope values a PWI config must give (no defaults;
+#: docs/design.md 3.10). ``focus_min``/``focus_max`` too while ``focuser``.
+REQUIRED = (
+    "name",
+    "backend",
+    "latitude",
+    "longitude",
+    "elevation",
+    "min_alt",
+    "max_alt",
+    "park_alt",
+    "park_az",
+)
+
+
+@dataclass
+class PWIConfig:
+    name: str
+    #: "pwi4" or "pwi2".
+    backend: str
+    latitude: float
+    longitude: float
+    elevation: float
+    #: Slew targets outside [min_alt, max_alt] (deg) are refused here.
+    min_alt: float
+    max_alt: float
+    #: Park position (alt, az deg); must be inside the limits.
+    park_alt: float
+    park_az: float
+    pwi: PWIEndpoint = field(default_factory=PWIEndpoint)
+    #: Must be true (and ``--hardware`` given) for anything but a simulator.
+    allow_hardware: bool = False
+    listen: str = "127.0.0.1:11120"
+    focuser: bool = True
+    #: The focuser's travel, microns (required while ``focuser``).
+    focus_min: float = 0.0
+    focus_max: float = 0.0
+    rotator: bool = True
+    #: PWI4 reports only Rotator index 0's angle: the port it is on.
+    rotator_status_port: int = 1
+    #: Port names for SelectPort (``{"imager": 1, "fau": 2}``); "1"/"2" always work.
+    ports: dict[str, int] = field(default_factory=dict)
+    m3_timeout: float = 30.0
+    #: Offset action bound, arcsec per axis.
+    max_offset: float = 600.0
+    #: PulseGuide: arcsec/s applied as a PWI offset, and the longest pulse.
+    guide_rate: float = 7.5
+    max_pulse_ms: int = 10000
+    #: The limit watch: margin (deg) and interval (s); interval 0 turns it off.
+    limit_margin: float = 1.0
+    watch_interval: float = 0.5
+    #: PWI2 cannot say whether an untracked mount moves: faster than this
+    #: (deg/s, between two reads) counts as slewing.
+    moving_speed: float = 0.02
+    #: Slewing is reported true this long after a motion command (s).
+    slew_report_min: float = 1.0
+    park_tolerance: float = 0.5
+    #: Reads reuse a PWI reply this recent (s).
+    status_max_age: float = 0.3
+    #: Bound on each Alpaca request (s).
+    request_timeout: float = 10.0
+    aperture_diameter: float | None = None
+    focal_length: float | None = None
+    #: robofast-pwi-jog: largest relative move per axis (deg) and its timeout.
+    max_jog_deg: float = 1.0
+    jog_timeout: float = 60.0
+    #: UDP port for Alpaca discovery (32227 is standard); None: off.
+    discovery_port: int | None = None
+
+    @property
+    def pwi_port(self) -> int:
+        if self.pwi.port is not None:
+            return int(self.pwi.port)
+        return PWI4_PORT if self.backend == "pwi4" else PWI2_PORT
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> PWIConfig:
+        d = {k: v for k, v in d.items() if not k.startswith("_")}
+        names = {f.name for f in dataclasses.fields(cls)}
+        unknown = set(d) - names
+        if unknown:
+            raise ValueError(f"unknown config keys: {sorted(unknown)}")
+        require_keys(d, REQUIRED)
+        if d.get("focuser", True):
+            require_keys(d, ("focus_min", "focus_max"), "config (focuser: true)")
+        pwi = {k: v for k, v in d.pop("pwi", {}).items() if not k.startswith("_")}
+        pnames = {f.name for f in dataclasses.fields(PWIEndpoint)}
+        if set(pwi) - pnames:
+            raise ValueError(f"unknown pwi keys: {sorted(set(pwi) - pnames)}")
+        cfg = cls(pwi=PWIEndpoint(**pwi), **d)
+        if cfg.backend not in BACKENDS:
+            raise ValueError(f"backend must be one of {BACKENDS}")
+        if not -5.0 <= cfg.min_alt < cfg.max_alt <= 90.0:
+            raise ValueError("need -5 <= min_alt < max_alt <= 90")
+        if not cfg.min_alt <= cfg.park_alt <= cfg.max_alt:
+            raise ValueError("park_alt must be within [min_alt, max_alt]")
+        if cfg.focuser and cfg.focus_max <= cfg.focus_min:
+            raise ValueError("focus_max must exceed focus_min")
+        if cfg.focuser and cfg.focus_min < 0:
+            raise ValueError("focus_min must be >= 0 (Alpaca positions are not negative)")
+        for name, port in cfg.ports.items():
+            if port not in (1, 2):
+                raise ValueError(f"ports.{name}: {port} is not 1 or 2")
+        if not 0 < cfg.max_jog_deg <= 10.0:
+            raise ValueError("max_jog_deg must be in (0, 10]")
+        return cfg
+
+
+def _sep_deg(alt1: float, az1: float, alt2: float, az2: float) -> float:
+    a1, a2 = math.radians(alt1), math.radians(alt2)
+    c = math.sin(a1) * math.sin(a2) + math.cos(a1) * math.cos(a2) * math.cos(
+        math.radians(az1 - az2)
+    )
+    return math.degrees(math.acos(max(-1.0, min(1.0, c))))
+
+
+def j2000_to_date(ra_h: float, dec: float) -> tuple[float, float]:
+    """Mean J2000 RA/Dec precessed to now (FK5), for altitude checks."""
+    from astropy import units as u
+    from astropy.coordinates import FK5, SkyCoord
+    from astropy.time import Time
+
+    c = SkyCoord(ra_h * 15 * u.deg, dec * u.deg, frame=FK5(equinox="J2000"))
+    d = c.transform_to(FK5(equinox=Time.now()))
+    return d.ra.deg / 15.0, d.dec.deg
+
+
+def target_altaz(ra_h: float, dec: float, lst_h: float, lat: float) -> tuple[float, float]:
+    """Alt/az (deg) of a J2000 RA/Dec at local sidereal time ``lst_h``."""
+    ra_d, dec_d = j2000_to_date(ra_h, dec)
+    return hadec_to_altaz(lst_h - ra_d, dec_d, lat)
+
+
+# -- the mount logic -------------------------------------------------------------------
+
+
+class PWIMount:
+    """Telescope, focuser and rotator logic over a :class:`PWIClient` (one loop)."""
+
+    def __init__(self, client: PWIClient, config: PWIConfig) -> None:
+        self.pwi = client
+        self.config = config
+        self._st: PWIStatus | None = None
+        self._st_at = -1e9
+        self._prev: tuple[float, float, float] | None = None  # (t, alt, az)
+        self.speed = 0.0  # deg/s between the last two fresh reads
+        self._lock = asyncio.Lock()
+        self._moving_since = -1e9
+        self._homing_since: float | None = None
+        self._home_at: tuple[float, float] | None = None
+        #: "unknown", "parking", "parked", "unparked".
+        self.park_state = "unknown"
+        self.target_ra: float | None = None
+        self.target_dec: float | None = None
+        #: Rotator Sync offset and Reverse (in memory, Position only).
+        self.rotator_offset = 0.0
+        self.rotator_reverse = False
+        self.rotator_target: float | None = None
+        self.focus_target: float | None = None
+        self.watch_stops = 0
+        self.pulse_until = 0.0
+        self._watch_latched = False
+        self._park_task: asyncio.Task | None = None
+
+    # -- reads ----------------------------------------------------------------------
+
+    async def status(self, max_age: float | None = None) -> PWIStatus:
+        max_age = self.config.status_max_age if max_age is None else max_age
+        async with self._lock:
+            now = time.monotonic()
+            if self._st is None or now - self._st_at > max_age:
+                st = await self.pwi.status()
+                self._take(st, time.monotonic())
+            assert self._st is not None
+            return self._st
+
+    def _take(self, st: PWIStatus, t: float) -> None:
+        if self._prev is not None and t - self._prev[0] > 0.05:
+            dt = t - self._prev[0]
+            self.speed = _sep_deg(st.alt_deg, st.az_deg, self._prev[1], self._prev[2]) / dt
+            self._prev = (t, st.alt_deg, st.az_deg)
+        elif self._prev is None:
+            self._prev = (t, st.alt_deg, st.az_deg)
+        self._st, self._st_at = st, t
+
+    def _invalidate(self) -> None:
+        self._st_at = -1e9
+
+    async def _send(self, fn: Callable[[], Awaitable[PWIStatus]], what: str) -> PWIStatus:
+        log.info("PWI %s", what)
+        try:
+            st = await fn()
+        finally:
+            self._invalidate()
+        return st
+
+    async def slewing(self) -> bool:
+        if time.monotonic() - self._moving_since < self.config.slew_report_min:
+            return True
+        st = await self.status()
+        if await self.homing(st):
+            return True
+        if st.slewing:
+            return True
+        if self.park_state == "parking":
+            return True
+        if self.speed > self.config.moving_speed and not st.tracking:
+            return True
+        raw = st.raw
+        for axis in ("0", "1"):
+            v = raw.get(f"mount.axis{axis}.setpoint_velocity_degs_per_sec")
+            with contextlib.suppress(ValueError, TypeError):
+                if v is not None and abs(float(v)) > 1e-4 and not st.tracking:
+                    return True
+        return False
+
+    async def homing(self, st: PWIStatus | None = None) -> bool:
+        if self._homing_since is None:
+            return False
+        st = st or await self.status()
+        if st.finding_home:
+            return True
+        if time.monotonic() - self._homing_since < 2.0:
+            return True
+        if st.backend == "pwi4" and st.slewing:
+            return True
+        self._homing_since = None
+        self._home_at = (st.alt_deg, st.az_deg)
+        return False
+
+    async def at_home(self) -> bool:
+        """True after a completed FindHome until the mount moves away."""
+        st = await self.status()
+        if await self.homing(st) or self._home_at is None:
+            return False
+        if _sep_deg(st.alt_deg, st.az_deg, *self._home_at) > 0.1 or st.tracking:
+            self._home_at = None
+            return False
+        return True
+
+    async def at_park(self) -> bool:
+        if self.park_state != "parked":
+            return False
+        st = await self.status()
+        cfg = self.config
+        if st.tracking or _sep_deg(st.alt_deg, st.az_deg, cfg.park_alt, cfg.park_az) > (
+            cfg.park_tolerance
+        ):
+            self.park_state = "unknown"
+            return False
+        return True
+
+    # -- checks -------------------------------------------------------------------------
+
+    async def _ready(self, what: str) -> PWIStatus:
+        st = await self.status(0)
+        if not st.connected:
+            raise AlpacaException(
+                INVALID_OPERATION,
+                f"{what}: PWI is not connected to the mount (Action MountConnect)",
+            )
+        if not st.motors_enabled:
+            raise AlpacaException(
+                INVALID_OPERATION, f"{what}: mount motors are disabled (Action MotorsEnable)"
+            )
+        for axis, err in (("alt", st.alt_motor_error), ("az", st.az_motor_error)):
+            if err is not None and err[0] != 0:
+                raise AlpacaException(INVALID_OPERATION, f"{what}: {axis} drive error {err}")
+        return st
+
+    def _check_alt(self, alt: float, what: str) -> None:
+        cfg = self.config
+        if not cfg.min_alt <= alt <= cfg.max_alt:
+            raise AlpacaException(
+                INVALID_OPERATION,
+                f"{what}: target altitude {alt:.2f} deg outside [{cfg.min_alt}, {cfg.max_alt}]",
+            )
+
+    async def _not_parked(self, what: str) -> None:
+        if await self.at_park():
+            raise AlpacaException(PARKED, f"{what}: the telescope is parked")
+
+    # -- telescope ------------------------------------------------------------------------
+
+    async def slew_radec(self, ra: float, dec: float) -> None:
+        if not (0.0 <= ra < 24.0) or not (-90.0 <= dec <= 90.0):
+            raise AlpacaException(INVALID_VALUE, f"RA {ra} h / Dec {dec} deg out of range")
+        await self._not_parked("slew")
+        st = await self._ready("slew")
+        if not st.tracking:
+            raise AlpacaException(INVALID_OPERATION, "slew: tracking is off")
+        if st.lst_hours is None:
+            raise AlpacaException(DRIVER_ERROR, "slew: PWI reports no sidereal time")
+        alt, _ = target_altaz(ra, dec, st.lst_hours, self.config.latitude)
+        self._check_alt(alt, "slew")
+        self.target_ra, self.target_dec = ra, dec
+        self.park_state = "unparked"
+        self._watch_latched = False
+        self._moving_since = time.monotonic()
+        await self._send(
+            lambda: self.pwi.goto_radec_j2000(ra, dec), f"goto J2000 {ra:.5f} h {dec:.4f}"
+        )
+
+    async def slew_altaz(self, alt: float, az: float, *, what: str = "SlewToAltAz") -> None:
+        if not -90.0 <= alt <= 90.0 or not 0.0 <= az < 360.0:
+            raise AlpacaException(INVALID_VALUE, f"alt {alt} / az {az} out of range")
+        await self._not_parked(what)
+        st = await self._ready(what)
+        if st.tracking:
+            raise AlpacaException(INVALID_OPERATION, f"{what}: tracking is on")
+        self._check_alt(alt, what)
+        self._watch_latched = False
+        self._moving_since = time.monotonic()
+        await self._send(lambda: self.pwi.goto_altaz(alt, az), f"goto alt {alt:.4f} az {az:.4f}")
+
+    async def abort(self) -> None:
+        self._moving_since = -1e9
+        if self.park_state == "parking":
+            self.park_state = "unknown"
+        if self._park_task is not None:
+            self._park_task.cancel()
+        self._homing_since = None
+        await self._send(self.pwi.stop, "stop")
+
+    async def tracking(self) -> bool:
+        return (await self.status()).tracking
+
+    async def set_tracking(self, on: bool) -> None:
+        if on:
+            await self._not_parked("Tracking")
+            st = await self._ready("Tracking")
+            if st.tracking:
+                return
+            self.park_state = "unparked"
+            self._watch_latched = False
+        elif not (await self.status(0)).tracking:
+            return
+        await self._send(lambda: self.pwi.tracking(on), f"tracking {'on' if on else 'off'}")
+
+    async def park(self) -> None:
+        if self.park_state == "parked" and await self.at_park():
+            return
+        st = await self._ready("Park")
+        cfg = self.config
+        if st.tracking:
+            await self._send(lambda: self.pwi.tracking(False), "tracking off (park)")
+        self.park_state = "parking"
+        self._watch_latched = False
+        self._moving_since = time.monotonic()
+        await self._send(lambda: self.pwi.goto_altaz(cfg.park_alt, cfg.park_az), "goto park")
+        self._park_task = asyncio.get_running_loop().create_task(self._finish_park())
+
+    async def _finish_park(self) -> None:
+        cfg = self.config
+        deadline = time.monotonic() + 600.0
+        while self.park_state == "parking" and time.monotonic() < deadline:
+            await asyncio.sleep(0.25)
+            try:
+                st = await self.status(0)
+            except PWIError:
+                continue
+            near = _sep_deg(st.alt_deg, st.az_deg, cfg.park_alt, cfg.park_az) <= cfg.park_tolerance
+            if near and not st.slewing and self.speed < cfg.moving_speed:
+                if st.tracking:
+                    await self._send(lambda: self.pwi.tracking(False), "tracking off (parked)")
+                self.park_state = "parked"
+                log.info("parked")
+                return
+        if self.park_state == "parking":
+            log.error("park did not complete")
+            self.park_state = "unknown"
+
+    async def unpark(self) -> None:
+        if self.park_state == "parking":
+            raise AlpacaException(INVALID_OPERATION, "Unpark: still parking")
+        self.park_state = "unparked"
+
+    async def find_home(self) -> None:
+        await self._not_parked("FindHome")
+        await self._ready("FindHome")
+        self._homing_since = time.monotonic()
+        self._home_at = None
+        self._moving_since = time.monotonic()
+        self._watch_latched = True  # homing may cross the limits
+        await self._send(self.pwi.find_home, "find home")
+
+    async def mount_connect(self) -> None:
+        await self._send(self.pwi.mount_connect, "mount connect")
+
+    async def motors(self, on: bool) -> None:
+        if on:
+            st = await self.status(0)
+            if not st.connected:
+                raise AlpacaException(INVALID_OPERATION, "MotorsEnable: PWI is not connected")
+            await self._send(self.pwi.enable_motors, "motors enable")
+        else:
+            await self._send(self.pwi.disable_motors, "motors disable")
+
+    def _port(self, parameters: str) -> int:
+        p = (parameters or "").strip()
+        if p in self.config.ports:
+            return self.config.ports[p]
+        if p in ("1", "2"):
+            return int(p)
+        names = ", ".join(["1", "2", *self.config.ports])
+        raise AlpacaException(INVALID_VALUE, f"{PORT_ACTION}: no port {p!r} (one of {names})")
+
+    async def select_port(self, parameters: str) -> str:
+        port = self._port(parameters)
+        st = await self.status(0)
+        if st.m3_port == port:
+            return json.dumps({"port": port, "moved": False})
+        await self._send(lambda: self.pwi.m3_select(port), f"m3 port {port}")
+        deadline = time.monotonic() + self.config.m3_timeout
+        while time.monotonic() < deadline:
+            await asyncio.sleep(0.25)
+            st = await self.status(0)
+            if st.m3_port == port and not st.m3_moving:
+                return json.dumps({"port": port, "moved": True})
+        with contextlib.suppress(PWIError):
+            await self._send(self.pwi.m3_stop, "m3 stop (timeout)")
+        raise AlpacaException(
+            DRIVER_ERROR, f"{PORT_ACTION}: M3 not at port {port} after {self.config.m3_timeout} s"
+        )
+
+    async def offset(self, parameters: str) -> str:
+        try:
+            p = json.loads(parameters or "{}")
+            east, north = float(p.get("east", 0.0)), float(p.get("north", 0.0))
+        except (ValueError, TypeError, AttributeError):
+            raise AlpacaException(
+                INVALID_VALUE, 'Offset parameters: JSON {"east": arcsec, "north": arcsec}'
+            ) from None
+        cfg = self.config
+        if not (math.isfinite(east) and math.isfinite(north)):
+            raise AlpacaException(INVALID_VALUE, "Offset: not finite")
+        if abs(east) > cfg.max_offset or abs(north) > cfg.max_offset:
+            raise AlpacaException(INVALID_VALUE, f'Offset exceeds max_offset {cfg.max_offset}"')
+        await self._not_parked("Offset")
+        st = await self._ready("Offset")
+        if not st.tracking:
+            raise AlpacaException(INVALID_OPERATION, "Offset: tracking is off")
+        cosd = math.cos(math.radians(st.dec_deg))
+        if cosd < 0.01:
+            raise AlpacaException(INVALID_OPERATION, "Offset: too close to the pole")
+        ra_arcsec = east / cosd
+        self._moving_since = time.monotonic()
+        await self._send(
+            lambda: self.pwi.offset_radec(ra_arcsec, north), f'offset E {east}" N {north}"'
+        )
+        return json.dumps({"east": east, "north": north, "ra_arcsec": ra_arcsec})
+
+    async def pulse_guide(self, direction: int, ms: int) -> None:
+        """A guide pulse as a PWI offset: ``guide_rate`` arcsec/s for ``ms``."""
+        cfg = self.config
+        if direction not in (0, 1, 2, 3):
+            raise AlpacaException(INVALID_VALUE, f"PulseGuide direction {direction}")
+        if not 0 <= ms <= cfg.max_pulse_ms:
+            raise AlpacaException(INVALID_VALUE, f"PulseGuide duration {ms} ms")
+        arcsec = cfg.guide_rate * ms / 1000.0
+        # ASCOM guideNorth 0, South 1, East 2, West 3; east = +RA. The RA
+        # guide rate moves the RA axis (coordinate arcsec), as ConformU expects.
+        ra = {2: arcsec, 3: -arcsec}.get(direction, 0.0)
+        north = {0: arcsec, 1: -arcsec}.get(direction, 0.0)
+        await self._not_parked("PulseGuide")
+        st = await self._ready("PulseGuide")
+        if not st.tracking:
+            raise AlpacaException(INVALID_OPERATION, "PulseGuide: tracking is off")
+        await self._send(lambda: self.pwi.offset_radec(ra, north), f'pulse RA {ra}" Dec {north}"')
+        self.pulse_until = max(self.pulse_until, time.monotonic() + ms / 1000.0)
+
+    async def report(self) -> dict[str, Any]:
+        st = await self.status(0)
+        return {
+            "pwi": st.as_dict(),
+            "park_state": self.park_state,
+            "speed_deg_s": self.speed,
+            "limits": [self.config.min_alt, self.config.max_alt],
+            "watch_stops": self.watch_stops,
+        }
+
+    # -- the limit watch -----------------------------------------------------------------
+
+    async def watch(self) -> None:
+        cfg = self.config
+        last_alt: float | None = None
+        while True:
+            await asyncio.sleep(cfg.watch_interval)
+            try:
+                st = await self.status(cfg.watch_interval / 2)
+            except PWIError:
+                last_alt = None
+                continue
+            alt = st.alt_deg
+            low = alt < cfg.min_alt - cfg.limit_margin
+            high = alt > cfg.max_alt + cfg.limit_margin
+            if not (low or high):
+                self._watch_latched = False
+            elif not self._watch_latched and last_alt is not None:
+                worse = (low and alt < last_alt - 1e-4) or (high and alt > last_alt + 1e-4)
+                if worse:
+                    self._watch_latched = True
+                    self.watch_stops += 1
+                    log.error(
+                        "LIMIT: altitude %.2f deg outside [%s, %s] and moving away: stop",
+                        alt,
+                        cfg.min_alt,
+                        cfg.max_alt,
+                    )
+                    with contextlib.suppress(PWIError):
+                        await self._send(self.pwi.stop, "stop (limit watch)")
+            last_alt = alt
+
+    # -- focuser ----------------------------------------------------------------------
+
+    async def _port_now(self, what: str) -> int:
+        st = await self.status()
+        if st.m3_port not in (1, 2):
+            raise AlpacaException(INVALID_OPERATION, f"{what}: the M3 is between ports")
+        return st.m3_port
+
+    async def focus_position(self) -> int:
+        st = await self.status()
+        if st.focuser_position is None:
+            raise AlpacaException(DRIVER_ERROR, "focuser position not reported")
+        return max(0, round(st.focuser_position))
+
+    async def focus_moving(self) -> bool:
+        return bool((await self.status()).focuser_moving)
+
+    async def focus_move(self, position: int) -> None:
+        cfg = self.config
+        if not cfg.focus_min <= position <= cfg.focus_max:
+            raise AlpacaException(
+                INVALID_VALUE, f"Move: {position} outside [{cfg.focus_min}, {cfg.focus_max}]"
+            )
+        port = await self._port_now("Move")
+        self.focus_target = position
+        await self._send(lambda: self.pwi.focuser_goto(port, position), f"focuser{port} {position}")
+
+    async def focus_halt(self) -> None:
+        port = await self._port_now("Halt")
+        await self._send(lambda: self.pwi.focuser_stop(port), f"focuser{port} stop")
+
+    # -- rotator ------------------------------------------------------------------------
+
+    async def rotator_mech(self) -> float:
+        st = await self.status()
+        port = st.m3_port
+        if port not in (1, 2):
+            raise AlpacaException(DRIVER_ERROR, "rotator: the M3 is between ports")
+        if st.backend == "pwi4" and port != self.config.rotator_status_port:
+            raise AlpacaException(
+                DRIVER_ERROR,
+                f"rotator: PWI4 reports only port {self.config.rotator_status_port}'s rotator",
+            )
+        if st.rotator_mech_deg is None:
+            raise AlpacaException(DRIVER_ERROR, "rotator position not reported")
+        return st.rotator_mech_deg % 360.0
+
+    async def rotator_moving(self) -> bool:
+        st = await self.status()
+        return bool(st.rotator_moving)
+
+    async def rotator_goto(self, mech: float) -> None:
+        port = await self._port_now("rotator")
+        await self.rotator_mech()  # refuse what we cannot read back
+        await self._send(
+            lambda: self.pwi.rotator_goto_mech(port, mech), f"rotator{port} {mech:.3f}"
+        )
+
+    async def rotator_halt(self) -> None:
+        port = await self._port_now("Halt")
+        self.rotator_target = None
+        await self._send(lambda: self.pwi.rotator_stop(port), f"rotator{port} stop")
+
+
+# -- Alpaca over HTTP ------------------------------------------------------------------
+
+TELESCOPE_CAN = {
+    "canfindhome": True,
+    "canpark": True,
+    "canpulseguide": True,
+    "cansetdeclinationrate": False,
+    "cansetguiderates": False,
+    "cansetpark": False,
+    "cansetpierside": False,
+    "cansetrightascensionrate": False,
+    "cansettracking": True,
+    "canslew": False,
+    "canslewaltaz": False,
+    "canslewaltazasync": True,
+    "canslewasync": True,
+    "cansync": False,
+    "cansyncaltaz": False,
+    "canunpark": True,
+}
+TELESCOPE_NOT_IMPLEMENTED_PUT = frozenset(
+    {
+        "declinationrate",
+        "rightascensionrate",
+        "guideratedeclination",
+        "guideraterightascension",
+        "doesrefraction",
+        "sideofpier",
+        "siteelevation",
+        "sitelatitude",
+        "sitelongitude",
+        "utcdate",
+        "moveaxis",
+        "slewtocoordinates",
+        "slewtotarget",
+        "slewtoaltaz",
+        "synctocoordinates",
+        "synctotarget",
+        "synctoaltaz",
+        "setpark",
+        "commandblind",
+        "commandbool",
+        "commandstring",
+    }
+)
+INTERFACE = {"telescope": 4, "focuser": 4, "rotator": 4}
+
+
+class PWIServer(ThreadingHTTPServer):
+    """The Alpaca server. The PWI client and logic live on a private event
+    loop thread; HTTP requests (threads) submit to it."""
+
+    daemon_threads = True
+    allow_reuse_address = True
+
+    def __init__(self, config: PWIConfig, *, hardware: bool = False) -> None:
+        allow = hwgate.gate_open(config.allow_hardware, hardware, what="PWI hardware")
+        self.pwi_ip = hwgate.check_endpoint(
+            config.pwi.host, config.pwi_port, allow_hardware=allow, what=f"{config.backend} PWI"
+        )
+        if allow:
+            log.warning("HARDWARE MODE: %s at %s:%d", config.backend, self.pwi_ip, config.pwi_port)
+        host, _, port = config.listen.rpartition(":")
+        super().__init__((host, int(port)), _Handler)
+        self.config = config
+        self.devices: tuple[str, ...] = ("telescope",)
+        self.devices += ("focuser",) if config.focuser else ()
+        self.devices += ("rotator",) if config.rotator else ()
+        self._stid = 0
+        self._stid_lock = threading.Lock()
+        self._clients: set[tuple[str, int]] = set()
+        self._clients_lock = threading.Lock()
+        self._loop = asyncio.new_event_loop()
+        self._loop_thread = threading.Thread(
+            target=self._loop.run_forever, name="pwi-loop", daemon=True
+        )
+        self._http_thread: threading.Thread | None = None
+        self._discovery: _Discovery | None = None
+        self._watch: concurrent.futures.Future | None = None
+        self.mount: PWIMount = self._run_sync(self._build())
+
+    async def _build(self) -> PWIMount:
+        p = self.config.pwi
+        client = make_client(
+            self.config.backend,
+            self.pwi_ip,
+            self.config.pwi_port,
+            timeout=p.timeout,
+            connect_timeout=p.connect_timeout,
+        )
+        return PWIMount(client, self.config)
+
+    def _run_sync(self, coro: Awaitable[Any]) -> Any:
+        if not self._loop_thread.is_alive():
+            self._loop_thread.start()
+        return asyncio.run_coroutine_threadsafe(coro, self._loop).result(10)  # type: ignore[arg-type]
+
+    @property
+    def address(self) -> str:
+        host, port = self.server_address[:2]
+        return f"{host}:{port}"
+
+    def next_stid(self) -> int:
+        with self._stid_lock:
+            self._stid = self._stid % UINT32_MAX + 1
+            return self._stid
+
+    def handle_error(self, request: Any, client_address: Any) -> None:
+        if isinstance(sys.exc_info()[1], ConnectionError):
+            return
+        super().handle_error(request, client_address)
+
+    def _call(self, fn: Callable[[], Awaitable[Any]], what: str) -> Any:
+        fut = asyncio.run_coroutine_threadsafe(fn(), self._loop)  # type: ignore[arg-type]
+        try:
+            return fut.result(self.config.request_timeout)
+        except concurrent.futures.TimeoutError:
+            fut.cancel()
+            raise AlpacaException(
+                PWI_TIMEOUT, f"{what}: no answer within {self.config.request_timeout} s"
+            ) from None
+        except AlpacaException:
+            raise
+        except PWITimeout as exc:
+            log.error("%s: %s", what, exc)
+            raise AlpacaException(PWI_TIMEOUT, str(exc)) from None
+        except PWIError as exc:
+            log.error("%s: %s", what, exc)
+            raise AlpacaException(DRIVER_ERROR, str(exc)) from None
+        except concurrent.futures.CancelledError:
+            raise AlpacaException(DRIVER_ERROR, f"{what}: cancelled") from None
+
+    # -- management -----------------------------------------------------------------
+
+    def management(self, tail: list[str]) -> Any:
+        name = self.config.name
+        if tail == ["apiversions"]:
+            return [1]
+        if tail == ["v1", "description"]:
+            return {
+                "ServerName": f"robofast PWI ({name})",
+                "Manufacturer": "robofast",
+                "ManufacturerVersion": DRIVER_VERSION,
+                "Location": name,
+            }
+        if tail == ["v1", "configureddevices"]:
+            return [
+                {
+                    "DeviceName": f"{name} {d}",
+                    "DeviceType": d.capitalize(),
+                    "DeviceNumber": 0,
+                    "UniqueID": f"robofast-pwi-{name}-{d}-0",
+                }
+                for d in self.devices
+            ]
+        return None
+
+    def setup_page(self) -> str:
+        return (
+            "<!doctype html><html><head><meta charset='utf-8'><title>PWI</title></head>"
+            f"<body><h1>robofast PWI: {self.config.name}</h1>"
+            "<p>Configured from its JSON file; nothing to set here.</p></body></html>"
+        )
+
+    # -- members --------------------------------------------------------------------
+
+    def connected(self, device: str, client: int) -> bool:
+        with self._clients_lock:
+            return (device, client) in self._clients
+
+    def _set_connected(self, device: str, client: int, value: bool) -> None:
+        if value:
+            if not self.connected(device, client):
+                # Reading only: connecting never commands PWI.
+                self._call(lambda: self.mount.status(0), "Connect")
+                with self._clients_lock:
+                    self._clients.add((device, client))
+        else:
+            with self._clients_lock:
+                self._clients.discard((device, client))
+
+    def _common(self, device: str, member: str, client: int) -> Any:
+        cfg = self.config
+        return {
+            "connected": self.connected(device, client),
+            "connecting": False,
+            "description": f"{cfg.name} {device} via PlaneWave {cfg.backend.upper()}",
+            "driverinfo": f"robofast_core.devices.pwi_server: Alpaca {device} for PlaneWave PWI",
+            "driverversion": DRIVER_VERSION,
+            "interfaceversion": INTERFACE[device],
+            "name": f"robofast PWI {cfg.name} {device}",
+            "supportedactions": list(TELESCOPE_ACTIONS) if device == "telescope" else [],
+        }[member]
+
+    def member(self, device: str, verb: str, member: str, params: dict[str, str], client: int):
+        if verb == "PUT":
+            if member == "connected":
+                self._set_connected(device, client, _bool_param(params, "Connected"))
+                return None
+            if member in ("connect", "disconnect"):
+                self._set_connected(device, client, member == "connect")
+                return None
+        elif member in COMMON_NAMES and member not in ("connect", "disconnect"):
+            return self._common(device, member, client)
+        if member in COMMON_NAMES:
+            raise _BadRequest(f"{verb} {member} is not allowed")
+        if member in ("connect", "disconnect", "action") and verb == "GET":
+            raise _BadRequest(f"{member} is a PUT method")
+        if device == "telescope":
+            return self._telescope(verb, member, params, client)
+        if device == "focuser":
+            return self._focuser(verb, member, params, client)
+        return self._rotator(verb, member, params, client)
+
+    def _need(self, device: str, member: str, client: int) -> None:
+        if not self.connected(device, client):
+            raise AlpacaException(NOT_CONNECTED, f"{member}: not connected")
+
+    @staticmethod
+    def _unknown(verb: str, member: str) -> Any:
+        raise _BadRequest(f"{verb} {member}: no such member")
+
+    def _telescope(self, verb: str, member: str, params: dict[str, str], client: int) -> Any:
+        cfg = self.config
+        t = self.mount
+        if verb == "PUT" and member == "action" and params.get("Action", "").lower() == "stop":
+            # Stop works whether or not this client is connected.
+            self._call(t.abort, "Stop")
+            return ""
+        if verb == "GET":
+            if member in TELESCOPE_CAN:
+                return TELESCOPE_CAN[member]
+            if member in ("canmoveaxis", "axisrates"):
+                axis = _int_param(params, "axis")
+                if axis not in (0, 1, 2):
+                    raise AlpacaException(INVALID_VALUE, f"axis {axis}")
+                return False if member == "canmoveaxis" else []
+            static = {
+                "alignmentmode": 0,  # algAltAz
+                "equatorialsystem": 2,  # equJ2000
+                "declinationrate": 0.0,
+                "rightascensionrate": 0.0,
+                "sitelatitude": cfg.latitude,
+                "sitelongitude": cfg.longitude,
+                "siteelevation": cfg.elevation,
+                "slewsettletime": 0,
+                "trackingrate": 0,
+                "trackingrates": [0],
+                "guideratedeclination": cfg.guide_rate / 3600.0,
+                "guideraterightascension": cfg.guide_rate / 3600.0,
+                "utcdate": _now_stamp() + "Z",
+            }
+            if member in static:
+                return static[member]
+            if member in ("aperturediameter", "aperturearea", "focallength"):
+                d = cfg.aperture_diameter
+                v = {
+                    "aperturediameter": d,
+                    "aperturearea": None if d is None else math.pi * d * d / 4,
+                    "focallength": cfg.focal_length,
+                }[member]
+                if v is None:
+                    raise AlpacaException(NOT_IMPLEMENTED, f"{member} is not configured")
+                return v
+            if member in ("doesrefraction", "sideofpier", "destinationsideofpier"):
+                raise AlpacaException(NOT_IMPLEMENTED, f"{member} is not implemented")
+        self._need("telescope", member, client)
+        if verb == "GET":
+            if member in (
+                "rightascension",
+                "declination",
+                "altitude",
+                "azimuth",
+                "siderealtime",
+            ):
+                st = self._call(t.status, member)
+                if member == "siderealtime":
+                    if st.lst_hours is None:
+                        raise AlpacaException(DRIVER_ERROR, "PWI reports no sidereal time")
+                    return st.lst_hours
+                if member == "rightascension":
+                    return st.ra2000_hours if st.ra2000_hours is not None else st.ra_hours
+                if member == "declination":
+                    return st.dec2000_deg if st.dec2000_deg is not None else st.dec_deg
+                return st.alt_deg if member == "altitude" else st.az_deg
+            if member == "atpark":
+                return self._call(t.at_park, member)
+            if member == "athome":
+                return self._call(t.at_home, member)
+            if member == "slewing":
+                return self._call(t.slewing, member)
+            if member == "tracking":
+                return self._call(t.tracking, member)
+            if member == "ispulseguiding":
+                return time.monotonic() < t.pulse_until
+            if member in ("targetrightascension", "targetdeclination"):
+                v = t.target_ra if member == "targetrightascension" else t.target_dec
+                if v is None:
+                    raise AlpacaException(INVALID_OPERATION, f"{member} has not been set")
+                return v
+            if member == "devicestate":
+                return self._telescope_state()
+            return self._unknown(verb, member)
+        # PUT
+        if member == "slewtocoordinatesasync":
+            ra = _float_param(params, "RightAscension")
+            dec = _float_param(params, "Declination")
+            return self._call(lambda: t.slew_radec(ra, dec), "SlewToCoordinatesAsync")
+        if member == "slewtotargetasync":
+            if t.target_ra is None or t.target_dec is None:
+                raise AlpacaException(INVALID_OPERATION, "SlewToTargetAsync: no target set")
+            ra, dec = t.target_ra, t.target_dec
+            return self._call(lambda: t.slew_radec(ra, dec), "SlewToTargetAsync")
+        if member == "slewtoaltazasync":
+            alt = _float_param(params, "Altitude")
+            az = _float_param(params, "Azimuth")
+            return self._call(lambda: t.slew_altaz(alt, az), "SlewToAltAzAsync")
+        if member == "targetrightascension":
+            v = _float_param(params, "TargetRightAscension")
+            if not 0.0 <= v < 24.0:
+                raise AlpacaException(INVALID_VALUE, f"TargetRightAscension {v}")
+            t.target_ra = v
+            return None
+        if member == "targetdeclination":
+            v = _float_param(params, "TargetDeclination")
+            if not -90.0 <= v <= 90.0:
+                raise AlpacaException(INVALID_VALUE, f"TargetDeclination {v}")
+            t.target_dec = v
+            return None
+        if member == "abortslew":
+            if self._call(t.at_park, member):
+                raise AlpacaException(PARKED, "AbortSlew: the telescope is parked")
+            return self._call(t.abort, "AbortSlew")
+        if member == "park":
+            return self._call(t.park, "Park")
+        if member == "unpark":
+            return self._call(t.unpark, "Unpark")
+        if member == "findhome":
+            return self._call(t.find_home, "FindHome")
+        if member == "tracking":
+            on = _bool_param(params, "Tracking")
+            return self._call(lambda: t.set_tracking(on), "Tracking")
+        if member == "trackingrate":
+            rate = _int_param(params, "TrackingRate")
+            if rate != 0:
+                raise AlpacaException(INVALID_VALUE, f"TrackingRate {rate}: sidereal only")
+            return None
+        if member == "slewsettletime":
+            if _float_param(params, "SlewSettleTime") < 0:
+                raise AlpacaException(INVALID_VALUE, "SlewSettleTime must be >= 0")
+            return None
+        if member == "pulseguide":
+            direction = _int_param(params, "Direction")
+            ms = _int_param(params, "Duration")
+            return self._call(lambda: t.pulse_guide(direction, ms), "PulseGuide")
+        if member == "action":
+            return self._action(params.get("Action", ""), params.get("Parameters", ""))
+        if member in TELESCOPE_NOT_IMPLEMENTED_PUT:
+            raise AlpacaException(NOT_IMPLEMENTED, f"{member} is not implemented")
+        return self._unknown(verb, member)
+
+    def _action(self, name: str, parameters: str) -> str:
+        t = self.mount
+        key = name.lower()
+        if key == PORT_ACTION.lower():
+            timeout = self.config.m3_timeout + 5.0
+            fut = asyncio.run_coroutine_threadsafe(t.select_port(parameters), self._loop)
+            try:
+                return fut.result(timeout)
+            except concurrent.futures.TimeoutError:
+                fut.cancel()
+                raise AlpacaException(PWI_TIMEOUT, f"{PORT_ACTION}: timed out") from None
+            except PWIError as exc:
+                raise AlpacaException(DRIVER_ERROR, str(exc)) from None
+        if key == "offset":
+            return self._call(lambda: t.offset(parameters), "Offset")
+        if key == "mountconnect":
+            self._call(t.mount_connect, "MountConnect")
+            return ""
+        if key in ("motorsenable", "motorsdisable"):
+            on = key == "motorsenable"
+            self._call(lambda: t.motors(on), name)
+            return ""
+        if key == "status":
+            return json.dumps(self._call(t.report, "Status"))
+        raise AlpacaException(ACTION_NOT_IMPLEMENTED, f"action {name!r} is not supported")
+
+    def _telescope_state(self) -> list[dict[str, Any]]:
+        t = self.mount
+        state: list[dict[str, Any]] = []
+        for name, fn in (("AtPark", t.at_park), ("Slewing", t.slewing), ("Tracking", t.tracking)):
+            try:
+                state.append({"Name": name, "Value": self._call(fn, name)})
+            except AlpacaException as exc:
+                log.warning("DeviceState without %s: %s", name, exc)
+        try:
+            st = self._call(t.status, "DeviceState")
+            ra = st.ra2000_hours if st.ra2000_hours is not None else st.ra_hours
+            dec = st.dec2000_deg if st.dec2000_deg is not None else st.dec_deg
+            state += [
+                {"Name": "Altitude", "Value": st.alt_deg},
+                {"Name": "Azimuth", "Value": st.az_deg},
+                {"Name": "RightAscension", "Value": ra},
+                {"Name": "Declination", "Value": dec},
+                {"Name": "UTCDate", "Value": _now_stamp() + "Z"},
+            ]
+            if st.lst_hours is not None:
+                state.append({"Name": "SiderealTime", "Value": st.lst_hours})
+        except AlpacaException as exc:
+            log.warning("DeviceState without coordinates: %s", exc)
+        with contextlib.suppress(AlpacaException):
+            state.append({"Name": "AtHome", "Value": self._call(t.at_home, "AtHome")})
+        state.append({"Name": "IsPulseGuiding", "Value": time.monotonic() < t.pulse_until})
+        state.append({"Name": "TimeStamp", "Value": _now_stamp()})
+        return state
+
+    def _focuser(self, verb: str, member: str, params: dict[str, str], client: int) -> Any:
+        cfg = self.config
+        t = self.mount
+        if verb == "GET":
+            static = {
+                "absolute": True,
+                "maxincrement": round(cfg.focus_max),
+                "maxstep": round(cfg.focus_max),
+                "stepsize": 1.0,  # microns
+                "tempcomp": False,
+                "tempcompavailable": False,
+            }
+            if member in static:
+                return static[member]
+            if member == "temperature":
+                raise AlpacaException(NOT_IMPLEMENTED, "Temperature is not implemented")
+        self._need("focuser", member, client)
+        if verb == "GET":
+            if member == "position":
+                return self._call(t.focus_position, "Position")
+            if member == "ismoving":
+                return self._call(t.focus_moving, "IsMoving")
+            if member == "devicestate":
+                state: list[dict[str, Any]] = []
+                for name, fn in (("IsMoving", t.focus_moving), ("Position", t.focus_position)):
+                    with contextlib.suppress(AlpacaException):
+                        state.append({"Name": name, "Value": self._call(fn, name)})
+                state.append({"Name": "TimeStamp", "Value": _now_stamp()})
+                return state
+            return self._unknown(verb, member)
+        if member == "move":
+            pos = _int_param(params, "Position")
+            return self._call(lambda: t.focus_move(pos), "Move")
+        if member == "halt":
+            return self._call(t.focus_halt, "Halt")
+        if member == "tempcomp":
+            if _bool_param(params, "TempComp"):
+                raise AlpacaException(NOT_IMPLEMENTED, "no temperature compensation")
+            return None
+        if member == "action":
+            raise AlpacaException(ACTION_NOT_IMPLEMENTED, "no focuser actions")
+        if member in ("commandblind", "commandbool", "commandstring"):
+            raise AlpacaException(NOT_IMPLEMENTED, f"{member} is not implemented")
+        return self._unknown(verb, member)
+
+    def _rotator(self, verb: str, member: str, params: dict[str, str], client: int) -> Any:
+        t = self.mount
+        if verb == "GET" and member == "canreverse":
+            return True
+        self._need("rotator", member, client)
+
+        def sky(x: float) -> float:
+            return ((-x if t.rotator_reverse else x) + t.rotator_offset) % 360.0
+
+        def to_mech(p: float) -> float:
+            x = (p - t.rotator_offset) % 360.0
+            return (-x if t.rotator_reverse else x) % 360.0
+
+        if verb == "GET":
+            if member == "ismoving":
+                return self._call(t.rotator_moving, "IsMoving")
+            if member == "mechanicalposition":
+                return round(self._call(t.rotator_mech, member), 4)
+            if member == "position":
+                return round(sky(self._call(t.rotator_mech, member)), 4)
+            if member == "targetposition":
+                if t.rotator_target is not None:
+                    return round(t.rotator_target, 4)
+                return round(sky(self._call(t.rotator_mech, member)), 4)
+            if member == "reverse":
+                return t.rotator_reverse
+            if member == "stepsize":
+                raise AlpacaException(NOT_IMPLEMENTED, "StepSize is not known")
+            if member == "devicestate":
+                state: list[dict[str, Any]] = []
+                with contextlib.suppress(AlpacaException):
+                    state.append(
+                        {"Name": "IsMoving", "Value": self._call(t.rotator_moving, "IsMoving")}
+                    )
+                with contextlib.suppress(AlpacaException):
+                    x = self._call(t.rotator_mech, "DeviceState")
+                    state += [
+                        {"Name": "MechanicalPosition", "Value": round(x, 4)},
+                        {"Name": "Position", "Value": round(sky(x), 4)},
+                    ]
+                state.append({"Name": "TimeStamp", "Value": _now_stamp()})
+                return state
+            return self._unknown(verb, member)
+
+        def angle(name: str) -> float:
+            v = _float_param(params, name)
+            if not 0.0 <= v < 360.0:
+                raise AlpacaException(INVALID_VALUE, f"{name} {v} not in [0, 360)")
+            return v
+
+        if member == "reverse":
+            t.rotator_reverse = _bool_param(params, "Reverse")
+            return None
+        if member == "movemechanical":
+            x = angle("Position")
+            t.rotator_target = sky(x)
+            return self._call(lambda: t.rotator_goto(x), "MoveMechanical")
+        if member == "moveabsolute":
+            p = angle("Position")
+            t.rotator_target = p
+            return self._call(lambda: t.rotator_goto(to_mech(p)), member)
+        if member == "move":
+            d = _float_param(params, "Position")
+            if not -360.0 < d < 360.0:
+                raise AlpacaException(INVALID_VALUE, f"Position {d} not in (-360, 360)")
+            x = self._call(t.rotator_mech, member)
+            p = (sky(x) + d) % 360.0
+            t.rotator_target = p
+            return self._call(lambda: t.rotator_goto(to_mech(p)), "Move")
+        if member == "sync":
+            p = angle("Position")
+            x = self._call(t.rotator_mech, member)
+            t.rotator_offset = (p - (-x if t.rotator_reverse else x)) % 360.0
+            t.rotator_target = None
+            return None
+        if member == "halt":
+            return self._call(t.rotator_halt, "Halt")
+        if member == "action":
+            raise AlpacaException(ACTION_NOT_IMPLEMENTED, "no rotator actions")
+        if member in ("commandblind", "commandbool", "commandstring"):
+            raise AlpacaException(NOT_IMPLEMENTED, f"{member} is not implemented")
+        return self._unknown(verb, member)
+
+    # -- lifecycle --------------------------------------------------------------------
+
+    def start(self) -> PWIServer:
+        self._http_thread = threading.Thread(
+            target=self.serve_forever, name="pwi-http", daemon=True
+        )
+        self._http_thread.start()
+        if self.config.watch_interval > 0:
+            self._watch = asyncio.run_coroutine_threadsafe(self.mount.watch(), self._loop)
+        if self.config.discovery_port is not None:
+            host = self.server_address[0]
+            self._discovery = _Discovery(host, self.config.discovery_port, self.server_address[1])
+            self._discovery.start()
+        return self
+
+    def stop(self) -> None:
+        if self._discovery is not None:
+            self._discovery.stop()
+        if self._watch is not None:
+            self._watch.cancel()
+        if self._http_thread is not None:
+            self.shutdown()
+        self.server_close()
+        if self._http_thread is not None:
+            self._http_thread.join(timeout=5)
+        with contextlib.suppress(Exception):
+            asyncio.run_coroutine_threadsafe(self.mount.pwi.aclose(), self._loop).result(5)
+        self._loop.call_soon_threadsafe(self._loop.stop)
+        self._loop_thread.join(timeout=5)
+
+
+def main(argv: list[str] | None = None) -> None:
+    ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    ap.add_argument("--config", required=True, help="JSON config file (see module doc)")
+    ap.add_argument(
+        "--hardware",
+        action="store_true",
+        help="allow a real PWI (the config must also say allow_hardware)",
+    )
+    ap.add_argument("--listen", help="host:port, overriding the config")
+    ap.add_argument("--log-level", default="INFO")
+    args = ap.parse_args(argv)
+    logging.basicConfig(
+        level=args.log_level, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
+    )
+    config = load_device_config(args.config, PWIConfig.from_dict)
+    if args.listen:
+        config.listen = args.listen
+    try:
+        server = PWIServer(config, hardware=args.hardware)
+    except hwgate.HardwareNotAllowed as exc:
+        log.error("%s", exc)
+        sys.exit(2)
+    server.start()
+    print(
+        json.dumps(
+            {"url": f"http://{server.address}", "pwi": f"{server.pwi_ip}:{config.pwi_port}"}
+        ),
+        flush=True,
+    )
+    stop = threading.Event()
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        signal.signal(sig, lambda *_: stop.set())
+    stop.wait()
+    server.stop()
+
+
+if __name__ == "__main__":
+    main()

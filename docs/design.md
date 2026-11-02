@@ -112,6 +112,13 @@ their good ideas instead (section 9).
   tip/tilt (Starlight Xpress AO, PI E-518) or mount offsets, with
   offloading to the mount and fiber acquisition. Every real backend is
   behind the same `allow_hardware` + `--hardware` gate.
+- **PlaneWave CDK700s under PWI** (MINERVA) have robofast's own Alpaca
+  Telescope + Focuser + Rotator server (`robofast_core/devices/pwi_*`,
+  `docs/pwi.md`) over PWI's HTTP API, PWI4 or the legacy PWI2, with
+  simulators of both and ConformU in CI: altitude limits and a limit watch
+  enforced in the server, motors enabled and homing only on explicit
+  command, the M3 port as the `SelectPort` Action, and `robofast-pwi-jog`
+  for bounded moves in a first hardware session. Behind the hardware gate.
 - Vendor extras that Alpaca lacks (PWI4 M3 port selection, fans, pointing
   models) use Alpaca `Action()` or a typed side channel per device client.
 - **robofast ships its own small asyncio Alpaca client.** alpyca serializes
@@ -1046,7 +1053,10 @@ Each step is a CI-tested deliverable.
    listed in `aqawan_pac`'s and `aqawan_sim`'s module docs; the confirmed
    ones and the fault policy are in `docs/aqawan.md`.
 6. Windows bridge on one control PC: ASCOM Remote for the camera and PWI4;
-   measure command latency and full-frame download time.
+   measure command latency and full-frame download time. The mount: the PWI
+   server (built, simulators only; `docs/pwi.md`), PWI2 now and PWI4 after
+   its cutover; next, a first attended small-move session on T1 through a
+   tunnel (`docs/pwi.md`, "First hardware session").
 7. Shadow mode: robofast's supervisor runs read-only alongside the legacy
    system and logs what it *would* have done, for comparison.
 8. One telescope, attended nights, then robotic; then the rest of MINERVA.

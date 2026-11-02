@@ -127,11 +127,12 @@ jobs:
   # (scripts/conformu_tres_frontend.py), the 60-inch's calibration-lamp
   # Switch server on its Pulizzi simulator (scripts/conformu_pulizzi.py), and
   # the 60-inch's ADC Rotator/Switch server on its prism-motor simulator
-  # (scripts/conformu_adc.py).
+  # (scripts/conformu_adc.py), and the PlaneWave PWI Telescope/Focuser/
+  # Rotator server on its PWI4 and PWI2 simulators (scripts/conformu_pwi.py).
   conformu:
     name: conformu
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -171,6 +172,9 @@ jobs:
       - name: ConformU against the ADC Rotator and Switch server
         if: ${{ !cancelled() }}
         run: python scripts/conformu_adc.py --conformu "$CONFORMU_BIN" --out "${{ runner.temp }}/conformu-adc"
+      - name: ConformU against the PWI Telescope, Focuser and Rotator server
+        if: ${{ !cancelled() }}
+        run: python scripts/conformu_pwi.py --conformu "$CONFORMU_BIN" --out "${{ runner.temp }}/conformu-pwi"
       - name: Upload ConformU logs
         if: always()
         continue-on-error: true
@@ -185,6 +189,7 @@ jobs:
             ${{ runner.temp }}/conformu-tres-frontend
             ${{ runner.temp }}/conformu-pulizzi
             ${{ runner.temp }}/conformu-adc
+            ${{ runner.temp }}/conformu-pwi
           if-no-files-found: warn
 
   # End to end: a whole simulated MINERVA RV night (docs/demo.md) on

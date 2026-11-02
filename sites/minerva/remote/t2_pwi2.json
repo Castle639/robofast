@@ -1,0 +1,41 @@
+{
+  "_note": [
+    "robofast PWI server (Alpaca Telescope + Focuser + Rotator) for MINERVA T2, through an SSH tunnel: docs/pwi.md, docs/remote.md.",
+    "PWI2 (legacy): stop the legacy control code (mainNew) before using this, so robofast is PWI2's only client.",
+    "PWI is reached on 127.0.0.1:7102 (PWI2); the tunnel's far end is the telescope's control PC, set up by the operator, not here.",
+    "allow_hardware is true, but nothing talks to the real PWI without --hardware on the command line as well (robofast_core/hwgate.py).",
+    "Limits (deg): min_alt = legacy telescope_N.ini HORIZON (21), max_alt = legacy scheduler.ini MAXALT (83); park = legacy control.telescope_park defaults (alt 25, az 0).",
+    "focus_min/focus_max (microns) = legacy telescope_N.ini MINFOCUS/MAXFOCUS (100/33000); ports = sites/minerva/instruments.json.",
+    "max_jog_deg: robofast-pwi-jog's largest relative move per axis (first hardware session: keep it small).",
+    "Only one of the PWI2 and PWI4 configs of a telescope runs at a time (same listen port); only one of PWI2 and PWI4 may own the mount."
+  ],
+  "name": "t2",
+  "backend": "pwi2",
+  "latitude": 31.680407,
+  "longitude": -110.878977,
+  "elevation": 2316.0,
+  "min_alt": 21.0,
+  "max_alt": 83.0,
+  "park_alt": 25.0,
+  "park_az": 0.0,
+  "pwi": {
+    "host": "127.0.0.1",
+    "port": 7102,
+    "timeout": 10.0,
+    "connect_timeout": 5.0
+  },
+  "allow_hardware": true,
+  "listen": "127.0.0.1:11122",
+  "focus_min": 100,
+  "focus_max": 33000,
+  "rotator_status_port": 1,
+  "ports": {
+    "imager": 2,
+    "fau": 1
+  },
+  "aperture_diameter": 0.7,
+  "focal_length": 4.56,
+  "max_jog_deg": 1.0,
+  "jog_timeout": 60.0,
+  "request_timeout": 20.0
+}
