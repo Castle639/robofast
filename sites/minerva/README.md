@@ -214,9 +214,11 @@ Its limits and their sources are commented in the file itself
 16. **Filter names** are legacy names (`gp`, `rp`, ...). The Alpaca filter
     wheel's `Names` must use the same names. T1 has R and no B. T2-T4 have B
     and no R, in a different order.
-17. **M3 port selection**: the port numbers are known, but no telescope has
-    a `port_action` (the PWI4 Alpaca Action name is not established), so
-    `dispatch.example.json` lists no `ports`.
+17. **M3 port selection**: robofast's PWI server (docs/pwi.md) selects a
+    port with the Action `SelectPort` (`"1"`, `"2"`, or `"imager"`/`"fau"`
+    from `remote/t1_pwi2.json` etc.). The enclosure configs here still point
+    at ASCOM Remote and name no `port_action`, so `dispatch.example.json`
+    lists no `ports`.
 18. **Guide parameters** with no legacy source keep the robofast defaults:
     `fiber_radius` 3 px, `capture_radius` 8 px, `roi_size`, exposure times.
 
