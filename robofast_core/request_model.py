@@ -38,7 +38,8 @@ Requests and groups report the OCS ``state`` (:func:`ocs_state`):
 A request with ``extra_params.cadence`` is *standing*: after each completed
 visit its configurations go back to ``PENDING``, and the scheduler enforces
 ``min_interval`` between visits and ``max_per_night`` (per request, or
-shared by the requests of a ``pool``). Without one it is a one-shot
+shared by the requests of a ``pool``; a ``"soft"`` limit only demotes the
+request below all others once reached). Without one it is a one-shot
 request. (The OCS's own ``cadence`` -- start, end, period, jitter --
 is a recipe for many one-shot requests, expanded by the request API's
 ``/api/requestgroups/cadence/``, not part of a stored request.)
@@ -697,15 +698,25 @@ class Cadence:
     ``pool`` (a name) shares the nightly count: ``max_per_night`` then
     counts tonight's visits of *every* request in the same pool, so "one B
     star a night, whichever" is ``{"max_per_night": 1, "pool": "bstars"}``
-    on each B star. ``min_interval`` stays per request."""
+    on each B star. ``min_interval`` stays per request.
+
+    ``limit`` says what reaching ``max_per_night`` does: ``"hard"`` (the
+    default) excludes the request for the rest of the night; ``"soft"``
+    keeps it observable but ranks it below every request that is not over
+    its own soft limit, so it is taken only when nothing else can be (a
+    second B star rather than an idle telescope). ``min_interval`` is
+    always hard."""
 
     min_interval: float = 0.0
     max_per_night: int | None = None
     pool: str | None = None
+    limit: str = "hard"
+
+    LIMITS: ClassVar[tuple[str, ...]] = ("hard", "soft")
 
     @classmethod
     def from_dict(cls, d: Any, what: str) -> Cadence:
-        _check_keys(d, {"min_interval", "max_per_night", "pool"}, set(), what)
+        _check_keys(d, {"min_interval", "max_per_night", "pool", "limit"}, set(), what)
         n = d.get("max_per_night")
         if n is not None:
             _count(n, f"{what}.max_per_night")
@@ -715,7 +726,12 @@ class Cadence:
                 raise ValueError(f"{what}.pool: expected a non-empty name, got {pool!r}")
             if n is None:
                 raise ValueError(f"{what}.pool: a pool shares max_per_night; set it too")
-        return cls(_number(d.get("min_interval", 0.0), f"{what}.min_interval", 0.0), n, pool)
+        limit = d.get("limit", "hard")
+        if limit not in cls.LIMITS:
+            raise ValueError(f"{what}.limit: {limit!r}; expected one of {list(cls.LIMITS)}")
+        if limit != "hard" and n is None:
+            raise ValueError(f"{what}.limit: a limit applies to max_per_night; set it too")
+        return cls(_number(d.get("min_interval", 0.0), f"{what}.min_interval", 0.0), n, pool, limit)
 
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {"min_interval": self.min_interval}
@@ -723,6 +739,8 @@ class Cadence:
             d["max_per_night"] = self.max_per_night
         if self.pool is not None:
             d["pool"] = self.pool
+        if self.limit != "hard":
+            d["limit"] = self.limit
         return d
 
 
