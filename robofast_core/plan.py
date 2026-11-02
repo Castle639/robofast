@@ -159,6 +159,11 @@ class Observation:
     #: calibration stage, lamps, waits, frames, ...). Its ``light`` is the
     #: definition's (set by the sequencer when it receives the observation).
     sequence: str | None = None
+    #: For ``kind="sequence"``: values for the parameters of the template the
+    #: sequence is made from (docs/sequences.md, "Templates"), e.g. an ARC
+    #: request's ``{"exptime": 30, "count": 3}``; the sequencer makes the
+    #: sequence again with them, checked as at load, before anything moves.
+    sequence_params: dict[str, Any] | None = None
 
     def __post_init__(self) -> None:
         kind = OBSERVATION_KINDS.get(self.kind)
@@ -195,7 +200,16 @@ class Observation:
 #: Observation fields that belong to one kind or a few (each kind's
 #: :attr:`~robofast_core.kinds.ObservationKind.fields`); another kind
 #: refuses them. ``autofocus`` is advisory and accepted on any kind.
-_KIND_FIELDS = ("pointing", "flats", "rotator", "spectrum", "lamp", "calibration", "sequence")
+_KIND_FIELDS = (
+    "pointing",
+    "flats",
+    "rotator",
+    "spectrum",
+    "lamp",
+    "calibration",
+    "sequence",
+    "sequence_params",
+)
 
 
 @dataclass

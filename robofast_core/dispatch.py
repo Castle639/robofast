@@ -267,6 +267,11 @@ class TelescopeLimits:
     #: ARC or LAMP_FLAT naming another is not for this telescope. Empty (the
     #: default, and MINERVA): no lamp calibrations at all.
     lamps: list[str] = field(default_factory=list)
+    #: The enclosure config's sequences an ARC or LAMP_FLAT request may name
+    #: here (``extra_params.sequence``; docs/sequences.md, "Requests");
+    #: checked against that config when the sequencer and the request API
+    #: start. Empty (the default): none.
+    sequences: list[str] = field(default_factory=list)
 
     @classmethod
     def from_dict(cls, d: dict[str, Any], what: str) -> TelescopeLimits:
@@ -409,6 +414,10 @@ class DispatchScheduler:
                 except ValueError as exc:
                     raise ValueError(f"dispatch plan: instruments.{name}.guiding: {exc}") from None
         self.config = config or DispatchConfig()
+        #: The enclosure config's sequences the telescopes' ``sequences``
+        #: name (robofast_core.sequences.check_request_sequences sets it):
+        #: a request naming one is checked against its frame type.
+        self.sequences: dict[str, Any] = {}
         self.clock = clock or (lambda: datetime.now(UTC))
         self.state_path = Path(state) if state is not None else None
         self.dropbox = Path(too_dropbox) if too_dropbox is not None else None
@@ -1149,6 +1158,15 @@ class DispatchScheduler:
                     reasons.append(f"{telescope} has no calstage position {ic.calstage!r}")
                 if ic.lamp is not None and ic.lamp not in limits.lamps:
                     reasons.append(f"{telescope} has no lamp {ic.lamp!r}")
+                if ic.sequence is not None:
+                    if ic.sequence not in limits.sequences:
+                        reasons.append(f"{telescope} has no sequence {ic.sequence!r}")
+                    elif ic.sequence in self.sequences:
+                        from robofast_core.sequences import requestable
+
+                        why = requestable(self.sequences[ic.sequence], c.type)
+                        if why is not None:
+                            reasons.append(why)
         if any(c.kind.spectrograph for c in configs):
             if self.spectrograph_down is not None:
                 reasons.append(f"spectrograph down ({self.spectrograph_down})")
