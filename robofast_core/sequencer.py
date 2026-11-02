@@ -278,6 +278,7 @@ from robofast_core.imaging import FrameWriteFailed, Imaging, PendingFrame
 from robofast_core.instruments import SpectrographBusy, SpectrographError, SpectrographFault
 from robofast_core.kinds import OBSERVATION_KINDS, KindRun
 from robofast_core.lamps import LampSetup, lamps_off, switch_status
+from robofast_core.modes import ModeGate
 from robofast_core.owner import DeviceError, DeviceOwner, Grant, GrantRevoked
 from robofast_core.plan import Idle, Observation, PlanProvider, as_plan
 from robofast_core.pointmodel import PointingCorrector
@@ -621,6 +622,10 @@ class SequencerConfig:
     spectrograph_recovery_interval: float = 300.0
     spectrograph_auto_recover: bool = True
     spectrograph_queue_wait: float = 600.0
+    #: Operating modes (docs/modes.md): while the enclosure's mode does not
+    #: let the plan run (``manual``, ``shadow``), how long a telescope waits
+    #: (Idle) before it asks again.
+    mode_idle: float = 10.0
 
 
 @dataclass
@@ -856,6 +861,11 @@ class Sequencer:
         #: Spectra finished tonight, by id (a late member does not start one again).
         self._spectra_done: dict[str, str] = {}
         self._report_files = _accepts_files(self.plan.report)
+        #: The enclosure's operating mode, as the plan is asked
+        #: (robofast_core.modes.ModeGate; docs/modes.md).
+        self.modes = ModeGate(
+            self.plan, lambda: self.supervisor, self._event, idle=self.config.mode_idle
+        )
         if self.config.abort_policy not in ("abort", "stop"):
             raise ValueError(f"abort_policy {self.config.abort_policy!r}")
         self.generation = 0
@@ -1087,6 +1097,7 @@ class Sequencer:
             await stop_task(task, self.config.cancel_ack_timeout)
 
     async def _run(self) -> None:
+        await self._shadow_start()
         await self._recover()
         while await self._wait_for_a_telescope():
             if not await self._closed_phase():
@@ -1111,6 +1122,19 @@ class Sequencer:
             for name in gen.backing_off:
                 unit = self.units[name]
                 unit.retry_at = max(unit.retry_at, time.monotonic() + self.config.error_backoff)
+
+    async def _shadow_start(self) -> None:
+        """While the mode commands nothing (``shadow``) or is not known yet,
+        do not start: the startup cleanup would park the telescopes. Log what
+        the plan would do meanwhile (docs/modes.md)."""
+        told = False
+        while (observe := await self.modes.update(force=True)) in ("shadow", "unknown"):
+            if not told:
+                self._event("startup_held", mode=self.modes.mode, observe=observe)
+                told = True
+            for u in self.units.values():
+                await self.modes.shadow(u.name)
+            await asyncio.sleep(self.config.mode_idle)
 
     async def _wait_for_a_telescope(self) -> bool:
         """Wait until some telescope may observe; False when none ever will."""
@@ -1180,10 +1204,9 @@ class Sequencer:
         """``plan.peek``, or, for a plan without it, ``next_observation``.
         Also returns whether the answer was taken from the plan (then an
         observation must be observed or given back)."""
-        peek = getattr(self.plan, "peek", None)
-        if peek is not None:
-            return await peek(unit.name), False
-        return await self.plan.next_observation(unit.name), True
+        if getattr(self.plan, "peek", None) is not None:
+            return await self.modes.peek(unit.name), False
+        return await self.modes.next_observation(unit.name), True
 
     def _give_back(self, unit: TelescopeUnit, obs: Observation) -> None:
         """Return an observation taken but not started (reported
@@ -1390,7 +1413,7 @@ class Sequencer:
                             obs = nxt
                     if obs is None:
                         obs = await asyncio.wait_for(
-                            self.plan.next_observation(unit.name), self.config.plan_timeout
+                            self.modes.next_observation(unit.name), self.config.plan_timeout
                         )
                 except Exception as exc:
                     await self._telescope_failed(state, unit, tel, cam, f"planning: {exc!r}")

@@ -146,6 +146,10 @@ class Fakes:
                 return httpx.Response(200, json={"reply": "cleared"})
             if path == "/duty":
                 return httpx.Response(200, json={"on_duty": body["operator"], "op": body["op"]})
+            if path == "/mode":
+                if body["mode"] == "nope":
+                    return httpx.Response(400, json={"error": "unknown mode 'nope'"})
+                return httpx.Response(200, json={"mode": body["mode"], "changed": True})
             if path.startswith("/leases/") and path.endswith("/clear"):
                 lease = doc["lease"]
                 return httpx.Response(200, json={**lease, "released_now": True})
@@ -1083,3 +1087,39 @@ def test_the_spectrograph_panel_is_described_by_its_instrument_type(tmp_path):
     assert fields is not None and ("iodine stage", "stage", None, "") in fields
     assert _spectrograph_fields({"spectrograph": {"type": "camera_spectrograph"}}, tmp_path) is None
     assert _spectrograph_fields({}, tmp_path) is None
+
+
+async def test_switching_the_operating_mode(make_console):
+    """docs/modes.md: the console's mode action asks the supervisor (which
+    checks and logs it), needs a confirmation and a reason, and is audited;
+    the mode and a switch's notice show on the enclosure panel."""
+    fakes = Fakes()
+    fakes.supervisor["mode"] = {
+        "mode": "shadow",
+        "policy": {"observe": "shadow", "open": False},
+        "modes": {"robotic": "", "shadow": ""},
+        "notice": "mode robotic -> shadow by bob: legacy tonight",
+    }
+    rig = await make_console(fakes=fakes)
+    await rig.login("alice")
+    assert (await rig.act("mode", mode="robotic", reason="go")).status_code == 400  # no confirm
+    r = await rig.act("mode", mode="robotic", reason="unattended tonight", confirm=True)
+    assert r.status_code == 200 and r.json()["result"]["mode"] == "robotic"
+    r = await rig.act("mode", mode="nope", reason="x", confirm=True)
+    assert r.status_code == 409 and "unknown mode" in r.json()["error"]
+    assert next(b for p, b in fakes.posts() if p == "sup.test/mode") == {
+        "operator": "alice",
+        "mode": "robotic",
+        "reason": "unattended tonight",
+    }
+    assert [a.get("mode") for a in rig.audit() if a.get("action") == "mode"] == [
+        "robotic",
+        "robotic",
+        "nope",
+    ]
+    status = await rig.status()
+    assert status["enclosure"]["mode"]["mode"] == "shadow"
+    assert any("legacy tonight" in a["text"] for a in status["alarms"])
+    # Shadow commands nothing: no manual control.
+    r = await rig.act("manual", telescope="t1", op="take", reason="look", confirm=True)
+    assert r.status_code == 409 and "commands nothing" in r.json()["error"]

@@ -1117,3 +1117,28 @@ async def test_validate_vets_targets_against_the_catalog(api):
     enc._view = None
     out = (await api.post("tom", "/requestgroups/validate", g)).json()
     assert out["valid"] and any("not_brightest" in w for w in out["warnings"])
+
+
+async def test_a_mode_without_requests_refuses_submissions(make_api):
+    """Operating modes (docs/modes.md): while the enclosure's mode takes no
+    requests (engineering), a submission or ToO is refused with 503; the
+    mode shows in the status; validation still answers."""
+    status = json.loads(json.dumps(SUPERVISOR))
+    status["mode"] = {
+        "mode": "engineering",
+        "since": "2026-11-02T01:00:00+00:00",
+        "policy": {"requests": False, "open": True, "observe": "manual"},
+    }
+    api = await make_api(http=supervisor_stub(status))
+    r = await api.post("tom", "/requestgroups", imaging())
+    assert r.status_code == 503 and "mode 'engineering'" in r.json()["error"]
+    assert r.headers["Retry-After"] == "600" and not list(api.box.glob("*.json"))
+    assert (await api.post("tom", "/requestgroups/validate", imaging())).status_code == 200
+    sup = (await api.get("reader", "/status")).json()["enclosures"]["aqawan1"]["supervisor"]
+    assert sup["mode"]["mode"] == "engineering" and sup["mode"]["requests"] is False
+    status["mode"]["policy"]["requests"] = True
+    assert (await api.post("tom", "/requestgroups", imaging())).status_code == 202
+
+
+async def test_a_supervisor_that_does_not_answer_refuses_nothing(api):
+    assert (await api.post("tom", "/requestgroups", imaging())).status_code == 202

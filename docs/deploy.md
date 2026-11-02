@@ -32,7 +32,7 @@ token in one service then reaches only what that user can write.
 
 | User | Runs | Writes |
 |---|---|---|
-| `robofast-supervisor` | `robofast-supervisor@<enclosure>` | nothing on disk (its state is in memory; logs to the journal) |
+| `robofast-supervisor` | `robofast-supervisor@<enclosure>` | only the enclosure's operating mode (`mode_file`, docs/modes.md); its other state is in memory; logs to the journal |
 | `robofast-sequencer` | `robofast-sequencer@<enclosure>` (and its timer), `robofast-calibrations@<enclosure>` | frames under `data_root`, the status snapshot, the dispatch state, the plan records, the focus store, `operator_control/holds.json`; consumes the drop box and the console's commands |
 | `robofast-api` | `robofast-request-api` | the drop box (`too_dropbox`), its audit log, the tokens file (`tokens add`) |
 | `robofast-console` | `robofast-console` | `operator_control/inbox/`, the drop box (requests through the request API's code), its acknowledgements, its audit log |
@@ -86,6 +86,7 @@ sees half a file.
     plans/                    plan records          robofast-sequencer:robofast 2750
     focus/focus_t1.json, ...  focus stores          robofast-sequencer 0750 dir
     console/acks.json         console acks          robofast-console:robofast 2750 dir
+    modes/aqawan1.json        operating mode        robofast-supervisor:robofast 2750 dir (docs/modes.md)
 /var/lib/robofast-notifier/   notifier state (systemd StateDirectory=, 0700)
 /var/log/robofast/            root:robofast 0750: the audit logs, one file per service
 <data_root>/                  frames and sidecars (docs/data.md), robofast-sequencer, on its own filesystem
@@ -93,7 +94,10 @@ sees half a file.
 
 Point the configs at these paths (`status_file`, `operator_control`,
 `state`, `too_dropbox`, `record`, the focus `store`, `acks`, `audit_log`,
-`data_root`). Each process writes its files atomically, through a temporary
+`data_root`, `mode_file`). A new enclosure starts in its config's `mode`
+(the shipped sites: `attended`) until an operator switches it
+(`python -m robofast_core.modes ... set`, or the console); the switch is
+kept in `mode_file` across restarts and upgrades. Each process writes its files atomically, through a temporary
 file next to the target, so it needs write access to the *directory*: that
 is why each writer has its own directory rather than files in
 `/var/lib/robofast` itself. A `systemd-tmpfiles` snippet keeps the tree right across
@@ -109,6 +113,7 @@ d /var/lib/robofast/control         0750 root               robofast-control -
 d /var/lib/robofast/control/aqawan1 2770 root               robofast-control -
 d /var/lib/robofast/plans           2750 robofast-sequencer robofast         -
 d /var/lib/robofast/console         2750 robofast-console   robofast         -
+d /var/lib/robofast/modes           2750 robofast-supervisor robofast        -
 d /var/log/robofast                 0750 root               robofast         -
 f /var/log/robofast/request-api-audit.jsonl 0640 robofast-api     robofast -
 f /var/log/robofast/console-audit.jsonl     0640 robofast-console robofast -

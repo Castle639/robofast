@@ -794,16 +794,29 @@ The rules:
   explicit allowlist, each entry tagged with the step below that removes it;
   the test fails when an entry goes stale, so the list only shrinks.
 
-**(b) Modes: one operating mode per enclosure (planned, step 3).** An
-enclosure's `mode` is one of `robotic`, `attended`, `shadow` or
-`engineering`, each a named policy bundle defined in the site config (may
-it open without an operator on duty, may the scheduler run, may a request
-be accepted, may the console move hardware by hand, is the weather verdict
-enforced or only reported). The supervisor, the sequencer, the observer
-console and the request API all read the same mode and honor it; every
-switch is an audited, logged event with who and why. Today's pieces become
-modes rather than flags: `safety.attended_only` (section 3.3) is
-`attended`, the weather bridge's `--shadow` is `shadow`.
+**(b) Modes: one operating mode per enclosure (step 3, done;
+docs/modes.md).** An enclosure's `mode` is a named policy bundle defined in
+the site config: the built-in `robotic`, `attended`, `engineering` and
+`shadow`, which a site may change, remove or add to (`modes`). A mode says
+whether the supervisor may open at all, what the sequencer does (run the
+plan; manual control only; log what it would do), whether the enclosure is
+commanded or only watched, whether the request API takes requests, and the
+operator-duty checks (needed or not, whether an expired duty closes or only
+alarms, its ttl and grace) and automatic fault clearing; the weather,
+fault, shutter, lease, park and heartbeat checks are enforced in every mode
+that may open. The supervisor holds the mode (saved across restarts; a
+missing or unreadable file means the config's default, which the shipped
+sites make `attended`, the safe one) and the sequencer, the observer console
+and the request API read it from its status; every switch (console or
+`python -m robofast_core.modes`) is logged with who, when and why and
+raised as a notice, never opens by itself (a less safe mode takes effect
+through the normal lease path), and closes at once when the live lease may
+not go on under the new mode. The active mode is in the FITS headers
+(`OBSMODE`) and the plan record. `safety.attended_only` (section 3.3) is
+now the enclosure's floor (no mode lowers it: the built-in `robotic` is not
+offered without a heartbeat); the enclosure's `shadow` mode is the
+documented way to shadow a legacy system with all of robofast (the weather
+bridge's `--shadow` stays the bridge's own flag).
 
 **(c) Sequences and plug-ins: site code without forking core (planned,
 steps 2 and 4).** Two mechanisms, for two kinds of difference:
@@ -860,7 +873,7 @@ The plan, approved by JDE 2026-11-01:
    frame's port from its file name is the throughput config's
    `file_ports`. The guard now also refuses a module named after a site
    outside `sites/` and `devices/`, and its allowlist is empty.
-3. Enclosure operating modes, (b) above.
+3. **Done:** enclosure operating modes, (b) above (docs/modes.md).
 4. Config-defined sequences, (c) above.
 
 A new site is a new config directory, plus any device servers it needs,
@@ -959,7 +972,8 @@ support is often worse. So:
 | `clear_faults_action`, `heartbeat_action` | `ClearFaults`, `Heartbeat` | the dome's clear-faults action (privileged: the supervisor's alone) and the heartbeat device's ping; the defaults are robofast's own servers' names |
 | `fault_auto_clear` | off (MINERVA: on) | clear a fault automatically, only with the enclosure closed, never an E-stop; a recurrence stops it until an operator clears (`docs/aqawan.md`) |
 | `fault_auto_clear_interval`, `fault_auto_clear_settle` | 1 h, 15 s | at most one automatic clear per interval; a fault still there `settle` after one counts as a recurrence |
-| `attended_only` | true without a heartbeat device | no lease unless an operator is on duty (section 3.3); FLWO 60-inch and MEarth South: on; MINERVA: off |
+| `attended_only` | true without a heartbeat device | the enclosure's floor: no mode opens without an operator on duty (section 3.3, docs/modes.md); FLWO 60-inch and MEarth South: on; MINERVA: off |
+| `mode` | none: `robotic` (`attended` without a heartbeat) | the operating mode started in when its mode file is missing or unreadable; the shipped sites: `attended` (docs/modes.md) |
 | `duty_ttl`, `duty_grace` | 300 s, 300 s | an operator's duty not renewed this long raises a critical alarm; after the grace, the supervisor closes |
 | `shutter_unreadable_grace` | 15 s | while open is wanted, a shutter unreadable this long revokes the lease and closes (shutterError does so at once) |
 | `shutter_error_backoff` | 30 min | no reopen after a shutter error, so a broken shutter is not cycled |
@@ -1116,8 +1130,8 @@ Each step is a CI-tested deliverable.
     loader; plan, observation-kind, instrument, weather-source, guider
     hardware and request-importer registries; KiwiSpec out of the
     sequencer; Action names in config; the legacy importers under
-    `robofast_core/sites/`) done; operating modes and config-defined
-    sequences next.
+    `robofast_core/sites/`) done; step 3 (operating modes, docs/modes.md)
+    done; config-defined sequences next.
 
 ## 9. Borrowed ideas
 

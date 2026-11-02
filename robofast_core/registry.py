@@ -20,7 +20,8 @@ Publishers:
   state at each exposure end -- read through the generation's own grants;
 * :class:`Telemetry` (a background task): the weather bridge's
   ObservingConditions (read-only), the enclosure and the weather verdict from
-  the safety supervisor's status, the Sun and Moon (astropy); and the
+  the safety supervisor's status (with the enclosure's operating mode,
+  ``OBSMODE``), the Sun and Moon (astropy); and the
   static values (site, software version).
 """
 
@@ -344,6 +345,15 @@ class Telemetry:
             keyword="WXSAFE",
             comment="Safety supervisor: weather safe",
         )
+        mode = status.get("mode")
+        if isinstance(mode, dict) and mode.get("mode"):
+            self.registry.publish(
+                "enclosure.mode",
+                str(mode["mode"]),
+                max_age=age,
+                keyword="OBSMODE",
+                comment="Enclosure operating mode (docs/modes.md)",
+            )
 
     async def poll_sky(self) -> None:
         assert self.site is not None

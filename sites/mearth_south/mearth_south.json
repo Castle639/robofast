@@ -14,7 +14,8 @@
     "fault_action Faults: a roof that timed out, never left its limit, shows both limits or neither, alarms and blocks opening (docs/mearth_roof.md). No automatic clearing (legacy never cleared its STUCK flag by itself).",
     "reopen_hold 1200 s: legacy latched each weather alert for 20 minutes (alert_timeout).",
     "No telescope lists 'limits' (manual-slew altitude limits) yet: the legacy values are unconfirmed, so the observer console refuses manual slews until they are added.",
-    "site: legacy MEarth::Config for CTIO (-30 10 20.9, -70 48 00.5, 2124 m)."
+    "site: legacy MEarth::Config for CTIO (-30 10 20.9, -70 48 00.5, 2124 m).",
+    "mode: attended (no watchdog: attended_only, so robotic is not offered; docs/modes.md)."
   ],
   "name": "mearth_south",
   "listen": "127.0.0.1:8150",
@@ -62,6 +63,7 @@
       "camera": "127.0.0.1:11158/0"
     }
   },
+  "mode": "attended",
   "safety": {
     "park_before_close": true,
     "park_wait": 120,

@@ -105,7 +105,8 @@ previous shape (``errors`` a list).
 * ``POST /toos`` (``too``) -- submit a target of opportunity (the same as
   ``POST /requestgroups``, but refuses a NORMAL group).
 * ``GET /status`` (``read``) -- each enclosure: weather verdict and reason,
-  shutter, lease, faults (from the supervisor), and each telescope's state
+  shutter, lease, faults and operating mode (from the supervisor), and each
+  telescope's state
   and current observation (from the sequencer's status snapshot).
 * ``GET /requestgroups/{id}/data`` (``read``) -- data pointers: each
   completed observation of each configuration (telescope, time, frames) and
@@ -132,6 +133,13 @@ queued group takes its file back out of the drop box; canceling an accepted
 one asks the scheduler, which cancels every
 configuration not yet finished: an observation in progress finishes, then
 its visit ends.
+
+**Operating modes** (docs/modes.md): while an enclosure's mode takes no
+requests (its ``requests`` is false: the built-in ``engineering``), a
+submission or ToO for it is refused with 503 and a ``Retry-After``; the
+mode is read from the supervisor's status, and a supervisor that does not
+answer refuses nothing (intake only queues). Validation, reads and
+cancellations are not affected.
 """
 
 from __future__ import annotations
@@ -614,10 +622,10 @@ class RequestApi:
             )
         if route == "submit":
             self._need(client, "submit", "too")
-            return self._submit(client, body, query, too=None, audit=audit)
+            return await self._submit(client, body, query, too=None, audit=audit)
         if route == "too":
             self._need(client, "too")
-            return self._submit(client, body, query, too=True, audit=audit)
+            return await self._submit(client, body, query, too=True, audit=audit)
         if route == "validate":
             self._need(client, "submit", "too")
             return await self._validate(client, body, query, legacy=legacy)
@@ -855,7 +863,7 @@ class RequestApi:
             out.append(f"extra_params.too.deadline: {group.too.deadline.isoformat()} has passed")
         return out
 
-    def _submit(
+    async def _submit(
         self,
         client: TokenRecord,
         body: bytes,
@@ -871,6 +879,7 @@ class RequestApi:
         self._need(client, "too" if group.too is not None else "submit")
         if problems:
             raise ApiError(400, "request group not accepted", problems)
+        await self._intake_open(enc)
         group.submitted = self.clock()
         d = group.to_dict()
         enc.drop("submit", group.id, d)
@@ -1259,6 +1268,21 @@ class RequestApi:
             },
         }
 
+    async def _intake_open(self, enc: Enclosure) -> None:
+        """Refuse a submission (503) while the enclosure's operating mode
+        takes no requests (``requests`` false: e.g. engineering;
+        docs/modes.md). A supervisor that does not answer refuses nothing:
+        intake only queues, it moves nothing."""
+        sup = await self._supervisor(enc)
+        mode = sup.get("mode") if sup.get("reachable") else None
+        if isinstance(mode, dict) and mode.get("requests") is False:
+            raise ApiError(
+                503,
+                f"enclosure {enc.name} is in mode {mode.get('mode')!r}, which takes no new"
+                " requests now; try again later",
+                headers={"Retry-After": "600"},
+            )
+
     async def _supervisor(self, enc: Enclosure) -> dict[str, Any]:
         if self._http is None:
             self._http = httpx.AsyncClient(timeout=self.config.status_timeout)
@@ -1272,8 +1296,18 @@ class RequestApi:
             log.warning("%s: supervisor status: %r", enc.name, exc)
             return {"reachable": False}
         lease = s.get("lease") if isinstance(s.get("lease"), dict) else None
+        mode = s.get("mode") if isinstance(s.get("mode"), dict) else None
         return {
             "reachable": True,
+            # The operating mode (docs/modes.md): its name and what it allows.
+            "mode": None
+            if mode is None
+            else {
+                "mode": mode.get("mode"),
+                "since": mode.get("since"),
+                "requests": (mode.get("policy") or {}).get("requests"),
+                "open": (mode.get("policy") or {}).get("open"),
+            },
             # The weather verdict (the supervisor's, from the safety monitor).
             "safe": s.get("safe"),
             "reason": s.get("reason"),

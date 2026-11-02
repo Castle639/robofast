@@ -27,6 +27,7 @@ from robofast_core import (
     Timeline,
 )
 from robofast_core.lease_client import RemoteSupervisor
+from robofast_core.modes import modes_from_config
 from robofast_core.safety import ENCLOSURE_MEMBERS
 from robofast_core.sequencer import TelescopeUnit
 from robofast_core.supervisor_service import SupervisorServer
@@ -63,6 +64,7 @@ FAST_SEQ = dict(
     error_backoff=0.5,
     max_consecutive_errors=2,
     recover_poll=0.1,
+    mode_idle=0.1,
 )
 #: RemoteSupervisor timings for the "remote" lease path.
 FAST_REMOTE = dict(timeout=0.5, poll=0.3, retry=0.1)
@@ -169,6 +171,8 @@ async def make_rig(lease_path):
         calstages: bool = False,
         port_action: str | None = None,
         imaging=None,
+        modes: dict | None = None,
+        mode_store=None,
     ) -> Rig:
         tl = Timeline()
         weather = FakeWeather(safe=weather_safe)
@@ -219,6 +223,15 @@ async def make_rig(lease_path):
             heartbeat=owners["dome"] if scfg.heartbeat_interval is not None else None,
             timeline=tl,
             config=scfg,
+            # The enclosure config's "mode" and "modes" (docs/modes.md).
+            modes=None
+            if modes is None
+            else modes_from_config(
+                modes,
+                attended_floor=bool(scfg.attended_only),
+                fault_action=bool(scfg.fault_action),
+            ),
+            mode_store=mode_store,
         )
         k = iter(range(10**6))
         seqr = Sequencer(
