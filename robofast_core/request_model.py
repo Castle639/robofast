@@ -72,6 +72,9 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any, ClassVar
 
+from robofast_core.instruments import instrument_params
+from robofast_core.kinds import ObservationKind, kind_for_request, request_types
+
 log = logging.getLogger(__name__)
 
 __all__ = [
@@ -191,13 +194,13 @@ def _check_keys(d: Any, allowed: set[str], required: set[str], what: str) -> dic
     return d
 
 
-#: OCS configuration types for spectrograph lamp calibrations. They run
-#: only where a telescope has lamps (its dispatch limits list them in
-#: ``lamps``; docs/pulizzi.md); the request API refuses them, with
-#: :data:`NO_LAMPS` and the enclosure config's ``help.no_lamps`` (the site's
-#: advice: what to do instead), for an enclosure without. ``extra_params``
-#: keys that would ask for a lamp are refused everywhere (:data:`LAMPS_HOW`).
-LAMP_TYPES = ("ARC", "LAMP_FLAT")
+#: :data:`robofast_core.kinds.LAMP_TYPES`: OCS configuration types for
+#: spectrograph lamp calibrations. They run only where a telescope
+#: has lamps (its dispatch limits list them in ``lamps``; docs/pulizzi.md);
+#: the request API refuses them, with :data:`NO_LAMPS` and the enclosure
+#: config's ``help.no_lamps`` (the site's advice: what to do instead), for
+#: an enclosure without. ``extra_params`` keys that would ask for a lamp are
+#: refused everywhere (:data:`LAMPS_HOW`).
 LAMP_KEYS = ("lamp", "lamps", "thar", "arc", "calibration_lamp")
 NO_LAMPS = (
     "spectrograph lamp calibrations (arcs, lamp flats) are not available here:"
@@ -409,8 +412,9 @@ class InstrumentConfig:
     (``count``), ``optical_elements.filter`` (``filter``) and
     ``optical_elements.calstage`` (``calstage``), ``optical_elements.lamp``
     (``lamp``: ARC and LAMP_FLAT only), and readout ``mode``;
-    robofast's ``extra_params``: ``port``, ``iodine``, ``target_counts``
-    and ``light``."""
+    robofast's ``extra_params``: ``port`` and ``light``, and the
+    instrument's own (``params``: those an instrument type declares,
+    :mod:`robofast_core.instruments`, e.g. KiwiSpec's)."""
 
     exptime: float
     count: int = 1
@@ -425,11 +429,10 @@ class InstrumentConfig:
     #: M3 port, selected by the sequencer through the telescope's port
     #: action; only telescopes whose limits list it in ``ports`` are eligible.
     port: str | None = None
-    #: SPECTRUM only: the iodine cell in the beam (None: the spectrograph
-    #: service's default), and the exposure-meter counts that end the
-    #: exposure (``exptime`` is then the maximum; None: timed).
-    iodine: bool | None = None
-    target_counts: float | None = None
+    #: The instrument's own ``extra_params`` (:class:`~robofast_core.instruments.Param`),
+    #: parsed; only an instrument whose type declares them takes the
+    #: configuration (the dispatch scheduler and the request API check).
+    params: dict[str, Any] = field(default_factory=dict)
     #: The OCS readout mode (kept, not acted on).
     mode: str = ""
     #: Calibration-stage position (the TRES front end: ``out``, ``sky``,
@@ -441,7 +444,8 @@ class InstrumentConfig:
     #: ``lamps`` are eligible.
     lamp: str | None = None
 
-    EXTRA: ClassVar[set[str]] = {"port", "iodine", "target_counts", "light"}
+    #: robofast's own ``extra_params`` (the instruments' are added).
+    EXTRA: ClassVar[set[str]] = {"port", "light"}
 
     @classmethod
     def from_dict(cls, d: Any, what: str) -> InstrumentConfig:
@@ -450,17 +454,19 @@ class InstrumentConfig:
         _check_keys(d, keys, {"exposure_time"}, what)
         _unsupported(d, {"rotator_mode": (None, ""), "rois": (None, [])}, what)
         _no_lamps(d, what)
-        extra = _extra(d, cls.EXTRA, what)
+        declared = instrument_params()
+        extra = _extra(d, cls.EXTRA | set(declared), what)
         oe = _check_keys(
             d.get("optical_elements") or {},
             {"filter", "calstage", "lamp"},
             set(),
             f"{what}.optical_elements",
         )
-        iodine = extra.get("iodine")
-        if iodine is not None:
-            _flag(iodine, f"{what}.extra_params.iodine")
-        counts = extra.get("target_counts")
+        params = {
+            k: declared[k].parse(v, f"{what}.extra_params.{k}")
+            for k, v in extra.items()
+            if k in declared and v is not None
+        }
         mode = d.get("mode")
         return cls(
             _number(d["exposure_time"], f"{what}.exposure_time", 0.0, 86400.0),
@@ -468,10 +474,7 @@ class InstrumentConfig:
             _text(oe.get("filter")),
             _flag(extra.get("light", True), f"{what}.extra_params.light"),
             _text(extra.get("port")),
-            iodine,
-            None
-            if counts is None
-            else _number(counts, f"{what}.extra_params.target_counts", 1.0, 1e15),
+            params,
             "" if mode is None else str(mode),
             _text(oe.get("calstage")),
             _text(oe.get("lamp")),
@@ -493,10 +496,7 @@ class InstrumentConfig:
             extra["light"] = self.light
         if self.port is not None:
             extra["port"] = self.port
-        if self.iodine is not None:
-            extra["iodine"] = self.iodine
-        if self.target_counts is not None:
-            extra["target_counts"] = self.target_counts
+        extra.update(self.params)
         if extra:
             d["extra_params"] = extra
         return d
@@ -507,8 +507,9 @@ class Configuration:
     id: str
     target: Target
     #: OCS ``instrument_type``; the telescope must list it among its
-    #: instruments.
-    instrument: str
+    #: instruments, and its type take this configuration's type. None (not
+    #: given): whichever of the telescope's instruments takes it.
+    instrument: str | None
     instrument_configs: list[InstrumentConfig]
     constraints: Constraints = field(default_factory=Constraints)
     status: Status = Status.PENDING
@@ -529,10 +530,10 @@ class Configuration:
     #: (``exposure_count`` per instrument config) with the enclosure's
     #: spectrograph, fed by every telescope of the request that is free when
     #: it starts (docs/rv_night.md). A SPECTRUM is always guided, its
-    #: instrument_type is ``spectrograph`` and its instrument configs are
-    #: light, with optional ``iodine`` and ``target_counts``; ``filter`` and
-    #: ``port`` are not allowed (the fiber has its own port, selected by the
-    #: guider config). ``POINTING_MODEL`` (robofast's): a pointing run
+    #: instrument is a spectrograph that takes SPECTRUM (e.g. KiwiSpec, with
+    #: its own ``iodine`` and ``target_counts``) and its instrument configs
+    #: are light; ``filter`` and ``port`` are not allowed (the fiber has its
+    #: own port, selected by the guider config). ``POINTING_MODEL`` (robofast's): a pointing run
     #: (docs/pointing_model.md), ``exposure_count`` points over the sky of
     #: ``exposure_time`` each through the instrument config's port; the
     #: target only says when the run is schedulable (pick one near the
@@ -545,7 +546,9 @@ class Configuration:
     #: when it is schedulable. ``ARC`` and ``LAMP_FLAT``: spectrograph lamp
     #: frames, each instrument config naming its lamp
     #: (``optical_elements.lamp``); no sky light, never guided; only on a
-    #: telescope with that lamp (docs/pulizzi.md).
+    #: telescope with that lamp (docs/pulizzi.md). Each type is served by
+    #: one observation kind (:mod:`robofast_core.kinds`), which checks it;
+    #: a plug-in's kind adds its own types.
     type: str = "EXPOSE"
     #: ``acquisition_config`` (docs/acquisition.md): how the guider tells the
     #: target from its neighbours -- ``mode`` (AUTO, BRIGHTEST, GEOMETRY,
@@ -555,17 +558,6 @@ class Configuration:
     #: catalog) and ``tolerance`` (pixels). Empty: AUTO.
     acquisition: dict[str, Any] = field(default_factory=dict)
 
-    TYPES: ClassVar[tuple[str, ...]] = (
-        "EXPOSE",
-        "DARK",
-        "BIAS",
-        "AUTO_FOCUS",
-        "SPECTRUM",
-        "POINTING_MODEL",
-        "ROTATOR_CALIBRATION",
-        "SKY_FLAT",
-        *LAMP_TYPES,
-    )
     GUIDE_MODES: ClassVar[tuple[str, ...]] = ("", "ON", "OFF")
 
     @classmethod
@@ -601,60 +593,27 @@ class Configuration:
         except ValueError as exc:
             raise ValueError(f"{what}.status: {d.get('status')!r}") from exc
         ctype = d.get("type") or "EXPOSE"
-        if ctype not in cls.TYPES:
-            raise ValueError(f"{what}.type: {ctype!r}; expected one of {cls.TYPES}")
+        kind = kind_for_request(ctype)
+        if kind is None:
+            raise ValueError(f"{what}.type: {ctype!r}; expected one of {request_types()}")
         parsed = [
             InstrumentConfig.from_dict(ic, f"{what}.instrument_configs[{i}]")
             for i, ic in enumerate(ics)
         ]
         for i, ic in enumerate(parsed):
-            if ctype in LAMP_TYPES:
-                if ic.lamp is None:
-                    raise ValueError(
-                        f"{what}.type: {ctype!r} needs instrument_configs[{i}]"
-                        f".optical_elements.lamp: {LAMPS_HOW}"
-                    )
-                if ic.light and "light" in (ics[i].get("extra_params") or {}):
-                    raise ValueError(
-                        f"{what}.instrument_configs[{i}]: an {ctype} takes no sky light"
-                    )
-                ic.light = False
-                continue
-            if ic.lamp is not None:
+            kind.check_instrument_config(ctype, i, ic, ics[i], what)
+        guide = kind.check_configuration(ctype, parsed, guide, gmode, what)
+        declared = instrument_params()
+        for i, ic in enumerate(parsed):
+            wrong = sorted(k for k in ic.params if ctype not in declared[k].types)
+            if wrong:
+                types = sorted({t for k in wrong for t in declared[k].types})
                 raise ValueError(
-                    f"{what}.instrument_configs[{i}].optical_elements.lamp: only for"
-                    f" {' and '.join(LAMP_TYPES)} configurations"
+                    f"{what}.instrument_configs[{i}]: {' and '.join(wrong)}"
+                    f" {'is' if len(wrong) == 1 else 'are'} for {' and '.join(types)}"
+                    " configurations"
                 )
-            if ctype in ("DARK", "BIAS"):
-                if ic.light and "light" in (ics[i].get("extra_params") or {}):
-                    raise ValueError(f"{what}.instrument_configs[{i}]: a {ctype} is not light")
-                ic.light = False
-            elif ctype != "EXPOSE" and not ic.light:
-                raise ValueError(f"{what}.instrument_configs[{i}]: a {ctype} frame is light")
-        if ctype in LAMP_TYPES and guide:
-            raise ValueError(f"{what}: an {ctype} is not guided")
-        if ctype in ("AUTO_FOCUS", "POINTING_MODEL", "ROTATOR_CALIBRATION") and len(parsed) != 1:
-            raise ValueError(f"{what}: an {ctype} needs exactly one light instrument config")
-        default = "spectrograph" if ctype == "SPECTRUM" else "imager"
-        instrument = str(d.get("instrument_type") or default)
-        if ctype == "SPECTRUM":
-            if instrument != "spectrograph":
-                raise ValueError(f"{what}: a SPECTRUM's instrument_type is 'spectrograph'")
-            if gmode == "OFF":
-                raise ValueError(f"{what}: a SPECTRUM is always guided")
-            guide = True
-            for i, ic in enumerate(parsed):
-                if ic.filter is not None or ic.port is not None:
-                    raise ValueError(
-                        f"{what}.instrument_configs[{i}]: a SPECTRUM frame has no filter or port"
-                    )
-        else:
-            for i, ic in enumerate(parsed):
-                if ic.iodine is not None or ic.target_counts is not None:
-                    raise ValueError(
-                        f"{what}.instrument_configs[{i}]: iodine and target_counts"
-                        " are for SPECTRUM configurations"
-                    )
+        instrument = _text(d.get("instrument_type"))
         return cls(
             str(d["id"]),
             Target.from_dict(d["target"], f"{what}.target"),
@@ -669,8 +628,17 @@ class Configuration:
             acquisition,
         )
 
+    @property
+    def kind(self) -> ObservationKind:
+        """The observation kind that serves this configuration's type."""
+        kind = kind_for_request(self.type)
+        if kind is None:
+            raise ValueError(f"configuration {self.id!r}: no observation kind serves {self.type!r}")
+        return kind
+
     def to_dict(self) -> dict[str, Any]:
-        light = self.type not in ("DARK", "BIAS", *LAMP_TYPES)
+        kind = self.kind
+        light = kind.frame_light(self.type) is not False
         d: dict[str, Any] = {
             "id": self.id,
             "type": self.type,
@@ -678,9 +646,11 @@ class Configuration:
             "target": self.target.to_dict(),
             "instrument_configs": [ic.to_dict(light=light) for ic in self.instrument_configs],
             "constraints": self.constraints.to_dict(),
-            "guiding_config": {"mode": "ON" if self.guide or self.type == "SPECTRUM" else "OFF"},
+            "guiding_config": {"mode": "ON" if self.guide or kind.always_guided else "OFF"},
             "status": str(self.status),
         }
+        if self.instrument is None:
+            del d["instrument_type"]
         if self.acquisition:
             a = dict(self.acquisition)
             ac: dict[str, Any] = {"mode": a.pop("mode", "AUTO")}
@@ -1075,7 +1045,9 @@ _LEGACY_GROUP = {"priority", "too", "submitted"}
 _LEGACY_REQUEST = {"telescopes", "max_attempts"}
 _LEGACY_CONFIG = {"instrument", "allow_partial", "guide"}
 _LEGACY_TARGET = {"ra_hours", "dec_deg", "pm_ra", "pm_dec", "rv"}
-_LEGACY_IC = {"exptime", "count", "filter", "port", "light", "iodine", "target_counts"}
+#: An instrument config's previous keys; the instruments' own parameters
+#: (:func:`~robofast_core.instruments.instrument_params`) were top-level too.
+_LEGACY_IC = {"exptime", "count", "filter", "port", "light"}
 _LEGACY_CONSTRAINTS = {"min_alt", "max_alt", "min_moon_sep", "max_sun_alt", "min_ha", "max_ha"}
 _warned = False
 
@@ -1166,7 +1138,7 @@ def _upgrade_configuration(c: dict[str, Any]) -> None:
         _move(ic, "count", "exposure_count")
         if "filter" in ic:
             _sub(ic, "optical_elements")["filter"] = ic.pop("filter")
-        for k in ("port", "light", "iodine", "target_counts"):
+        for k in ("port", "light", *instrument_params()):
             if k in ic:
                 _sub(ic, "extra_params")[k] = ic.pop(k)
     k = c.get("constraints")
@@ -1195,8 +1167,9 @@ def _is_legacy(d: dict[str, Any]) -> bool:
             k = c.get("constraints")
             if isinstance(k, dict) and _LEGACY_CONSTRAINTS & set(k):
                 return True
+            legacy_ic = _LEGACY_IC | set(instrument_params())
             for ic in c.get("instrument_configs") or []:
-                if isinstance(ic, dict) and _LEGACY_IC & set(ic):
+                if isinstance(ic, dict) and legacy_ic & set(ic):
                     return True
     return False
 

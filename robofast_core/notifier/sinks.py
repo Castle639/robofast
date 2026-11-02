@@ -31,6 +31,7 @@ import httpx
 
 from robofast_core.cancel import isolated
 from robofast_core.notifier.core import Notification
+from robofast_core.plugins import Registry
 
 
 def check_secret_file(path: str | Path) -> Path:
@@ -274,11 +275,12 @@ class CommandSink:
             raise RuntimeError(f"{self.argv[0]} exited {proc.returncode}: {tail}")
 
 
-SINK_TYPES: dict[str, type] = {
-    "email": EmailSink,
-    "webhook": WebhookSink,
-    "command": CommandSink,
-}
+#: Sink type name -> class ``(name, **options)``; a plug-in adds its own
+#: (docs/plugins.md).
+SINK_TYPES: Registry[type] = Registry("notifier sink type")
+SINK_TYPES.register("email", EmailSink)
+SINK_TYPES.register("webhook", WebhookSink)
+SINK_TYPES.register("command", CommandSink)
 
 __all__ = [
     "SINK_TYPES",

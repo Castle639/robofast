@@ -44,7 +44,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-import robofast_core.sites  # noqa: F401  (registers the site adapters)
+from robofast_core.plugins import load_config_plugins
 from robofast_core.sun import now_utc
 from robofast_core.weather_eval import (
     UNKNOWN,
@@ -84,6 +84,7 @@ _SOURCE_KEYS = {
     "dynamic_limits",
 }
 _TOP_KEYS = {
+    "plugins",
     "site",
     "listen",
     "poll_interval",
@@ -145,6 +146,7 @@ def parse_config(raw: dict[str, Any]) -> BridgeConfig:
     extra = set(raw) - _TOP_KEYS
     if extra:
         raise ValueError(f"unknown config keys: {sorted(extra)}")
+    load_config_plugins(raw)  # a site's source types (docs/plugins.md)
     site = dict(raw["site"])
     for key in ("latitude", "longitude"):
         if key not in site:

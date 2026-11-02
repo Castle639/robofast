@@ -56,6 +56,7 @@ def plan_entry(**kw) -> dict:
             "t1": {"instruments": ["imager"], "min_alt": 21.0, "max_alt": 83.0},
             "t2": {"instruments": ["imager", "spectrograph"], "min_alt": 21.0, "max_alt": 83.0},
         },
+        "instruments": {"spectrograph": {"type": "kiwispec"}},
         "too_poll": 0.02,
         **kw,
     }
@@ -452,10 +453,32 @@ async def test_a_too_needs_the_too_scope_wherever_it_is_submitted(api):
     assert (await api.post("alerts", "/requestgroups", imaging("n"))).status_code == 403
 
 
+async def test_the_instrument_type_decides_what_a_request_may_ask(api):
+    """The spectrograph is KiwiSpec (the plan's ``instruments``): it takes
+    SPECTRUM only, and an imager takes neither a SPECTRUM nor KiwiSpec's
+    iodine (before, any configuration type could name any instrument)."""
+    r = await api.post("tom", "/requestgroups/validate", imaging("v4", instrument="spectrograph"))
+    out = r.json()
+    assert not out["valid"], out
+    assert "'spectrograph' (kiwispec) takes ['SPECTRUM'], not EXPOSE" in str(out["errors"])
+    spec = imaging("v5", instrument="imager")
+    sc = spec["requests"][0]["configurations"][0]
+    sc["type"] = "SPECTRUM"
+    sc["instrument_configs"] = [{"exposure_time": 60.0, "extra_params": {"iodine": True}}]
+    out = (await api.post("tom", "/requestgroups/validate", spec)).json()
+    assert not out["valid"] and "'imager' (imager) takes" in str(out["errors"]), out
+    del sc["instrument_type"]
+    out = (await api.post("tom", "/requestgroups/validate", spec)).json()
+    assert out["valid"], out  # t2's spectrograph takes it
+
+
 async def test_validate_is_a_dry_run(api):
     good = imaging("v1", telescopes=["t1", "t2"])
     south = imaging("v2", dec=-80.0)
     spec = imaging("v3", instrument="spectrograph")
+    sc = spec["requests"][0]["configurations"][0]
+    sc["type"] = "SPECTRUM"
+    sc["instrument_configs"] = [{"exposure_time": 60.0, "extra_params": {"iodine": True}}]
     r = await api.post("tom", "/requestgroups/validate", good)
     assert r.status_code == 200, r.text
     out = r.json()

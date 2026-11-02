@@ -85,13 +85,18 @@ and optionally:
   gives the Sun and Moon and the night; ``devices.observingconditions``
   (the weather bridge, only read) the weather keywords; the supervisor's
   status the shutter. Without ``images`` no frame is saved.
-* ``spectrograph`` -- the enclosure's fiber-fed spectrograph
+* ``plugins`` -- plug-in modules to load first (docs/plugins.md): plan
+  types, observation kinds, instrument types a site adds.
+* ``spectrograph`` -- the enclosure's fiber-fed spectrograph:
+  ``{"type": ..., "telescopes": {"t1": "T1", ...}, "data_root": ...,
+  "instrument": ..., ...}``. ``type`` (required) is its instrument type
+  (:mod:`robofast_core.instruments`), which builds its client from the
+  rest of the entry: ``"kiwispec"``
   (:class:`~robofast_core.devices.kiwispec_service.KiwiSpecRemote`;
-  ``docs/kiwispec.md``, ``docs/rv_night.md``): ``{"url": ...,
-  "telescopes": {"t1": "T1", ...}, "timeout": s, "abort_timeout": s,
-  "queue_wait": s, "data_root": ..., "instrument": ...}`` (``instrument``,
-  the sidecars' instrument name, is required with a data root).
-  ``queue_wait`` (default ``sequencer.spectrograph_queue_wait``) is how
+  ``docs/kiwispec.md``, ``docs/rv_night.md``) takes ``"url"``,
+  ``"timeout"``, ``"abort_timeout"`` and ``"queue_wait"`` (s).
+  ``instrument``, the sidecars' instrument name, is required with a data
+  root. ``queue_wait`` (default ``sequencer.spectrograph_queue_wait``) is how
   long a request waits in the service's queue while another enclosure
   holds the shared spectrograph (docs/kiwispec.md). ``telescopes`` maps the
   enclosure's telescope names to the spectrograph service's (default: the
@@ -169,9 +174,11 @@ from robofast_core.config import (
     telescopes,
 )
 from robofast_core.imaging import imaging_from_config
+from robofast_core.instruments import INSTRUMENT_TYPES
 from robofast_core.lease_client import RemoteSupervisor
 from robofast_core.owner import DeviceOwner
 from robofast_core.plan import PlanProvider, StaticPlan, plan_from_config
+from robofast_core.plugins import load_config_plugins
 from robofast_core.sequencer import Sequencer, SequencerConfig, TelescopeUnit
 from robofast_core.spectra import SpectrumRecorder
 from robofast_core.timeline import Timeline
@@ -365,6 +372,7 @@ def build(
     (and, with an ``images`` entry, its frame pipeline: ``seq.imaging``).
     ``clock`` (else the config's ``clock``, else a given plan's, else the
     host's) is the one clock of :mod:`robofast_core.clock`."""
+    load_config_plugins(config)
     if clock is None and config.get("clock") is not None:
         clock = clock_from_config(config["clock"], base)
     command_timeout = float(config.get("command_timeout", 5.0))
@@ -451,15 +459,9 @@ def build(
     return seq, remote
 
 
-SPECTROGRAPH_KEYS = {
-    "url",
-    "telescopes",
-    "timeout",
-    "abort_timeout",
-    "queue_wait",
-    "data_root",
-    "instrument",
-}
+#: A ``spectrograph`` entry's keys for any type (its type's client takes
+#: the rest: :attr:`~robofast_core.instruments.InstrumentType.client_keys`).
+SPECTROGRAPH_KEYS = {"type", "telescopes", "data_root", "instrument"}
 
 
 def spectrograph_from_config(
@@ -470,23 +472,20 @@ def spectrograph_from_config(
     entry = config.get("spectrograph")
     if entry is None:
         return None, {}, None
-    if isinstance(entry, str):
-        entry = {"url": entry}
+    if not isinstance(entry, dict):
+        raise ValueError("spectrograph: expected {'type': ..., ...} (module doc)")
     entry = {k: v for k, v in entry.items() if not k.startswith("_")}
-    unknown = set(entry) - SPECTROGRAPH_KEYS
+    require_keys(entry, ("type",), "spectrograph (its instrument type)")
+    itype = INSTRUMENT_TYPES.lookup(entry["type"], "spectrograph.type")
+    unknown = set(entry) - SPECTROGRAPH_KEYS - itype.client_keys
     if unknown:
         raise ValueError(f"spectrograph: unknown keys {sorted(unknown)}")
-    if "url" not in entry:
-        raise ValueError("spectrograph: 'url' is required")
-    from robofast_core.devices.kiwispec_service import KiwiSpecRemote
     from robofast_core.sky import Site  # imports astropy
 
-    remote = KiwiSpecRemote(
-        str(entry["url"]),
-        timeout=float(entry.get("timeout", 10.0)),
-        abort_timeout=float(entry.get("abort_timeout", 45.0)),
-        client=str(config.get("sequencer_name") or config.get("name") or ""),
-        queue_wait=float(entry.get("queue_wait", queue_wait)),
+    remote = itype.client(
+        {k: v for k, v in entry.items() if k in itype.client_keys},
+        name=str(config.get("sequencer_name") or config.get("name") or ""),
+        queue_wait=queue_wait,
     )
     names = {str(k): str(v) for k, v in (entry.get("telescopes") or {}).items()}
     unknown_tels = set(names) - set(telescopes(config))
@@ -661,6 +660,7 @@ def main(argv: list[str] | None = None) -> None:
     )
     try:
         config = load_config(args.config)
+        load_config_plugins(config)  # before --plan, whose types may be a plug-in's
         tl = Timeline(maxlen=config.get("timeline_size", 10000))
         plan = None
         if args.plan:

@@ -171,6 +171,8 @@ from robofast_core.api_auth import (
 from robofast_core.cancel import isolated
 from robofast_core.config import load_config, telescopes
 from robofast_core.dispatch import DispatchScheduler, dispatch_from_config
+from robofast_core.instruments import INSTRUMENT_TYPES, InstrumentType
+from robofast_core.plugins import load_config_plugins
 from robofast_core.request_model import NO_LAMPS, RequestGroup, upgrade_legacy
 
 log = logging.getLogger(__name__)
@@ -319,6 +321,7 @@ class Enclosure:
         clock: Callable[[], datetime] | None = None,
     ) -> None:
         self.name = name
+        load_config_plugins(config, f"enclosure {name}: plugins")
         self.telescopes = list(telescopes(config))
         #: The site's advice added to refusals (``help`` in the enclosure
         #: config): ``no_lamps``, what to do instead of a lamp calibration.
@@ -810,12 +813,34 @@ class RequestApi:
                             f"{what}.configurations[{j}]: no lamp {lamp!r} on {tels}"
                             f" (they have {sorted(have_lamps)})"
                         )
-                if not any(c.instrument in enc.planner.limits[t].instruments for t in tels):
-                    have = sorted({x for t in tels for x in enc.planner.limits[t].instruments})
-                    out.append(
-                        f"{what}.configurations[{j}].instrument: no {c.instrument!r} on "
-                        f"{tels} (they have {have})"
-                    )
+                planner = enc.planner
+                if not any(planner.instrument_for(planner.limits[t], c) for t in tels):
+                    have = sorted({x for t in tels for x in planner.limits[t].instruments})
+                    if c.instrument is None:
+                        out.append(
+                            f"{what}.configurations[{j}].instrument: no instrument on {tels}"
+                            f" takes this {c.type} (they have {have})"
+                        )
+                    elif any(c.instrument in planner.limits[t].instruments for t in tels):
+                        itype = planner.instrument_types[c.instrument]
+                        params = sorted(
+                            {k for ic in c.instrument_configs for k in ic.params}
+                            - set(itype.params)
+                        )
+                        out.append(
+                            f"{what}.configurations[{j}].instrument: {c.instrument!r}"
+                            f" ({itype.name}) takes "
+                            + (
+                                f"no extra_params {params}"
+                                if c.type in itype.accepts
+                                else f"{list(itype.accepts)}, not {c.type}"
+                            )
+                        )
+                    else:
+                        out.append(
+                            f"{what}.configurations[{j}].instrument: no {c.instrument!r} on "
+                            f"{tels} (they have {have})"
+                        )
             if r.windows and all(w.end <= now for w in r.windows):
                 out.append(f"{what}.windows: every window has already ended")
             tclass = r.location.get("telescope_class")
@@ -1019,15 +1044,23 @@ class RequestApi:
         return out
 
     def _instruments(self) -> dict[str, Any]:
-        """``/instruments``: the OCS description of every instrument type on
-        an enclosure's telescopes (as their dispatch limits list them)."""
+        """``/instruments``: the OCS description of every instrument on an
+        enclosure's telescopes (as their dispatch limits list them), each as
+        its type describes it (:mod:`robofast_core.instruments`): an imager
+        with its filters, a spectrograph with its configuration types (the
+        lamp calibrations where a telescope with it has lamps)."""
         found: dict[str, dict[str, Any]] = {}
+        types: dict[str, InstrumentType] = {}
         for enc in self.enclosures.values():
             for tel in enc.telescopes:
                 limits = enc.planner.limits[tel]
                 for inst in limits.instruments:
-                    entry = found.setdefault(inst, {"filters": [], "telescopes": [], "ports": []})
+                    types.setdefault(inst, enc.planner.instrument_types[inst])
+                    entry = found.setdefault(
+                        inst, {"filters": [], "telescopes": [], "ports": [], "lamps": False}
+                    )
                     entry["telescopes"].append(f"{enc.name}.{tel}")
+                    entry["lamps"] = entry["lamps"] or bool(limits.lamps)
                     for f in limits.filters or []:
                         if f not in entry["filters"]:
                             entry["filters"].append(f)
@@ -1036,15 +1069,16 @@ class RequestApi:
                             entry["ports"].append(port)
         out = {}
         for inst in sorted(set(found) | set(self.config.instruments)):
-            have = found.get(inst, {"filters": [], "telescopes": [], "ports": []})
-            spectro = inst == "spectrograph"
-            types = ["SPECTRUM"] if spectro else ["EXPOSE", "AUTO_FOCUS", "DARK", "BIAS"]
+            have = found.get(inst, {"filters": [], "telescopes": [], "ports": [], "lamps": False})
+            itype = types.get(inst) or INSTRUMENT_TYPES.get(inst) or INSTRUMENT_TYPES["imager"]
+            listed = itype.listed(have["lamps"])
+            guided = itype.guided
             d: dict[str, Any] = {
-                "type": "SPECTRA" if spectro else "IMAGE",
+                "type": itype.ocs_type,
                 "class": self.config.telescope_class,
                 "name": inst,
                 "optical_elements": {}
-                if spectro
+                if not itype.filters
                 else {
                     "filters": [
                         {"name": f, "code": f, "schedulable": True, "default": i == 0}
@@ -1061,9 +1095,9 @@ class RequestApi:
                         "type": "guiding",
                         "modes": [
                             {"name": "On", "code": "ON", "schedulable": True},
-                            {"name": "Off", "code": "OFF", "schedulable": not spectro},
+                            {"name": "Off", "code": "OFF", "schedulable": not guided},
                         ],
-                        "default": "ON" if spectro else "OFF",
+                        "default": "ON" if guided else "OFF",
                     },
                     "acquisition": {
                         "type": "acquisition",
@@ -1074,9 +1108,9 @@ class RequestApi:
                 "default_acceptability_threshold": 100,
                 "configuration_types": {
                     t: {"name": t.replace("_", " ").title(), "code": t, "schedulable": True}
-                    for t in types
+                    for t in listed
                 },
-                "default_configuration_type": types[0],
+                "default_configuration_type": listed[0] if listed else None,
                 # robofast's: where it is, and the M3 ports (extra_params.port).
                 "telescopes": have["telescopes"],
                 "ports": have["ports"],
@@ -1775,6 +1809,8 @@ def load_api_config(path: str | Path) -> tuple[ApiConfig, dict[str, Any], Path]:
     enclosures = raw.pop("enclosures", None)
     if not isinstance(enclosures, dict) or not enclosures:
         raise ValueError(f"{path}: 'enclosures' must name at least one enclosure")
+    load_config_plugins(raw, f"{path}: plugins")
+    raw.pop("plugins", None)
     known = {f.name for f in fields(ApiConfig)}
     bad = set(raw) - known
     if bad:

@@ -24,7 +24,7 @@ site pages --HTTP--> (fetch,     (staleness,    (weather_server.py)
 |---|---|
 | `robofast_core/weather_sources.py` | `WeatherSource`, `Reading` (values + the data's own time, per field where the data has it), HTTP fetch with basic auth from a credentials file, the Redis source, the Sun as a source, units |
 | `robofast_core/resp.py` | a minimal read-only Redis client (SELECT/MGET only) |
-| `robofast_core/sites/minerva.py` | MINERVA adapter: the ridge station page, the cloud-sensor page, the (disabled) MEarth page |
+| `robofast_core/sites/minerva.py` | MINERVA adapter: the ridge station page, the cloud-sensor page, the (disabled) MEarth page; a plug-in (docs/plugins.md), loaded because `sites/minerva/weather.yaml` lists it in `plugins` |
 | `robofast_core/weather_eval.py` | limits (static and dynamic), hysteresis, per-source and per-field staleness, rain (enforced or shadow), required/advisory combiner |
 | `robofast_core/sun.py` | the Sun's altitude, from astropy (offline-safe) |
 | `robofast_core/weather_bridge.py` | config, poll/evaluate/publish loop, command line (shadow mode) |

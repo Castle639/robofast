@@ -644,3 +644,24 @@ def test_lamp_setup_validation():
         LampSetup.from_dict({"switch": "h:1/0", "lamps": {"a": {"warmup": -1}}})
     with pytest.raises(ValueError, match="unknown keys"):
         LampSetup.from_dict({"switch": "h:1/0", "lamps": {"a": {"max_on": 5}}})
+
+
+async def test_instruments_lists_a_camera_spectrograph_with_its_lamp_types(make_api):  # noqa: F811
+    """FLWO's ``tres`` (a camera_spectrograph, its dispatch config says) is
+    advertised as a spectrograph, with ARC and LAMP_FLAT where its telescope
+    has lamps (before, every instrument not named "spectrograph" was
+    advertised as an imager and the lamp types never were)."""
+    from robofast_core.instruments import INSTRUMENT_TYPES
+
+    api = await make_api()
+    planner = api.app.enclosures["aqawan1"].planner
+    planner.limits["t2"].instruments.append("tres")
+    planner.instrument_types["tres"] = INSTRUMENT_TYPES["camera_spectrograph"]
+    tres = (await api.get("tom", "/instruments/")).json()["tres"]
+    assert tres["type"] == "SPECTRA" and tres["optical_elements"] == {}
+    assert list(tres["configuration_types"]) == ["EXPOSE", "DARK", "BIAS"]
+    planner.limits["t2"].lamps = ["ThAr1"]
+    tres = (await api.get("tom", "/instruments/")).json()["tres"]
+    assert list(tres["configuration_types"]) == ["EXPOSE", "DARK", "BIAS", "ARC", "LAMP_FLAT"]
+    r = await api.post("tom", "/requestgroups/", arc_group("arc9", instrument="tres"))
+    assert r.status_code == 202, r.text

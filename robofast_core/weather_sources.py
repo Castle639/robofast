@@ -26,6 +26,7 @@ import httpx
 
 from robofast_core import resp
 from robofast_core.cancel import isolated
+from robofast_core.plugins import Registry
 from robofast_core.sun import standard_atmosphere, sun_altitude
 
 
@@ -448,15 +449,19 @@ class RedisSource(WeatherSource):
         )
 
 
-#: Source type name -> factory(config, site) -> WeatherSource. Site adapters
-#: register theirs (see :mod:`robofast_core.sites`).
+#: Source type name -> factory(config, site, **kw) -> WeatherSource. A site
+#: adapter registers its own from a plug-in (docs/plugins.md; MINERVA's:
+#: :mod:`robofast_core.sites.minerva`, listed in its weather config's
+#: ``plugins``).
 SourceFactory = Callable[..., WeatherSource]
-SOURCE_TYPES: dict[str, SourceFactory] = {
-    "sun": lambda cfg, site, **kw: SunSource(
+SOURCE_TYPES: Registry[SourceFactory] = Registry("weather source type")
+SOURCE_TYPES.register(
+    "sun",
+    lambda cfg, site, **kw: SunSource(
         cfg,
         latitude=site["latitude"],
         longitude=site["longitude"],
         elevation=float(site["elevation"]),
     ),
-    "redis": lambda cfg, site, **kw: RedisSource(cfg),
-}
+)
+SOURCE_TYPES.register("redis", lambda cfg, site, **kw: RedisSource(cfg))

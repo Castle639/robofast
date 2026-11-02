@@ -13,7 +13,9 @@ MinervaCollaboration/minerva-control (``getWeatherRidge``, ``getWeather``,
 * the cloud page's local timestamps (MST, UTC-7, no DST in Arizona) are
   converted with a configured offset.
 
-Source types registered here (see :data:`robofast_core.weather_sources.SOURCE_TYPES`):
+A plug-in (docs/plugins.md): :func:`register` adds these source types to
+:data:`robofast_core.weather_sources.SOURCE_TYPES`; MINERVA's weather config
+lists it (``plugins: ["robofast_core.sites.minerva"]``):
 
 ``minerva.ridge``
     ``linmax.sao.arizona.edu/weather/weather.cur_cond``: a first line
@@ -227,6 +229,6 @@ class MearthSource(HttpSource):
 
 
 def register() -> None:
-    SOURCE_TYPES["minerva.ridge"] = lambda cfg, site, **kw: RidgeSource(cfg, **kw)
-    SOURCE_TYPES["minerva.sky_temps"] = lambda cfg, site, **kw: SkyTempsSource(cfg, **kw)
-    SOURCE_TYPES["minerva.mearth"] = lambda cfg, site, **kw: MearthSource(cfg, **kw)
+    SOURCE_TYPES.register("minerva.ridge", lambda cfg, site, **kw: RidgeSource(cfg, **kw))
+    SOURCE_TYPES.register("minerva.sky_temps", lambda cfg, site, **kw: SkyTempsSource(cfg, **kw))
+    SOURCE_TYPES.register("minerva.mearth", lambda cfg, site, **kw: MearthSource(cfg, **kw))

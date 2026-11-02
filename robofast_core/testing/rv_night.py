@@ -583,6 +583,7 @@ class SimulatedNight:
         }
         cfg["images"].update(data_root=str(self.out / "data"), queue_size=4, imagebytes=False)
         cfg["spectrograph"] = {
+            "type": "kiwispec",
             "url": self.kiwispec_url,
             "telescopes": {"t1": "T1", "t2": "T2"},
             "instrument": "kiwispec",

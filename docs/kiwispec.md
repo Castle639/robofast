@@ -378,6 +378,16 @@ nightly biases and darks take about 65 minutes with the 22 s readout
 
 ## 5. Spectra in the sequencer
 
+KiwiSpec is an instrument type, `kiwispec`
+(`robofast_core/devices/kiwispec_instrument.py`, registered by the devices
+package's built-in plug-in; docs/plugins.md): it takes `SPECTRUM` requests
+with its own `extra_params` `iodine` and `target_counts`, its calibration
+frames are the service's, and an enclosure config's
+`"spectrograph": {"type": "kiwispec", "url": ...}` builds the sequencer's
+`KiwiSpecRemote`. The sequencer itself knows only the neutral
+`SpectrographHook` and its errors (`KiwiSpecBusy` is a
+`SpectrographBusy`, every other `KiwiSpecError` a `SpectrographError`).
+
 Done: `docs/rv_night.md`. In short, a `SPECTRUM` request is fed by every
 free telescope it allows. Each one acquires the target, locates the fiber
 with the backlight (`POST /backlight` through its guider) and guides. The

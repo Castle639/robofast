@@ -276,7 +276,8 @@ def test_sidecars_are_never_overwritten(tmp_path):
 
 
 async def test_two_telescopes_feed_one_spectrum(make_rig, tmp_path):
-    plan = StaticPlan([spectrum_target(iodine=False, target_counts=5e5)], ["t1", "t2"])
+    params = {"iodine": "out", "target_counts": 5e5}
+    plan = StaticPlan([spectrum_target(params=params)], ["t1", "t2"])
     rig = rv_rig(make_rig, tmp_path, plan)
     await run_to_end(rig)
     [frame] = rig.spec.science()
@@ -457,13 +458,18 @@ def _limits():
     return {"t1": tlimits(instruments=both), "t2": tlimits(instruments=both)}
 
 
+#: MINERVA's: its spectrograph is KiwiSpec.
+KIWISPEC = {"spectrograph": {"type": "kiwispec"}}
+
+
 def test_spectrum_configurations_validate_and_round_trip():
     from robofast_core.request_model import RequestGroup
 
     g = RequestGroup.from_dict(_rv_group("rv", iodine=True, target_counts=2e6))
     c = g.requests[0].configurations[0]
-    assert (c.type, c.instrument, c.guide) == ("SPECTRUM", "spectrograph", True)
-    assert c.instrument_configs[0].iodine is True and c.target.parallax == 273.8
+    # No instrument_type: whichever of a telescope's instruments takes a SPECTRUM.
+    assert (c.type, c.instrument, c.guide) == ("SPECTRUM", None, True)
+    assert c.instrument_configs[0].params["iodine"] is True and c.target.parallax == 273.8
     assert RequestGroup.from_dict(g.to_dict()).to_dict() == g.to_dict()
     bad = _rv_group("x", filter="V")
     with pytest.raises(ValueError, match="no filter or port"):
@@ -486,17 +492,23 @@ async def test_dispatch_reserves_the_feed_and_only_the_leader_counts(tmp_path):
     clock = Clock()
     rec = PlanRecord(tmp_path, longitude=MTHOPKINS.longitude)
     # An idle member is woken (preempt "next": nothing is interrupted).
-    d0 = make([_rv_group("rv")], limits=_limits())
+    d0 = make([_rv_group("rv")], limits=_limits(), instruments=KIWISPEC)
     woken = []
     d0.set_preempt_callback(lambda t, p, r: woken.append((t, p)) or True)
     d0._idle.add("t2")
     await d0.next_observation("t1")
     assert woken == [("t2", "next")]
 
-    d = make([_rv_group("rv", iodine=False)], clock=clock, limits=_limits(), record=rec)
+    d = make(
+        [_rv_group("rv", iodine=False)],
+        clock=clock,
+        limits=_limits(),
+        instruments=KIWISPEC,
+        record=rec,
+    )
     lead = await d.next_observation("t1")
     assert lead.kind == "spectrum" and lead.spectrum["feed"] == ["t1", "t2"]
-    assert lead.spectrum["leader"] == "t1" and lead.spectrum["iodine"] is False
+    assert lead.spectrum["leader"] == "t1" and lead.spectrum["params"] == {"iodine": "out"}
     assert lead.spectrum["target"]["pm_dec"] == 855.3
     member = await d.next_observation("t2")
     assert member.spectrum["id"] == lead.spectrum["id"] and member.spectrum["leader"] == "t1"
@@ -522,6 +534,7 @@ async def test_dispatch_one_spectrum_at_a_time_and_busy_telescopes_are_not_fed()
     d = make(
         [_rv_group("rv1", priority=3.0), _rv_group("rv2", priority=2.0), _img_group()],
         limits=_limits(),
+        instruments=KIWISPEC,
     )
     img = await d.next_observation("t2")  # t2 busy imaging (only t2 may)
     assert img.kind == "expose"

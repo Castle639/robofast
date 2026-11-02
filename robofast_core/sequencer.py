@@ -139,7 +139,8 @@ telescope gives up for the night (an alarm); the others observe on. See
 
 Spectra (fiber-fed, several telescopes)
 ---------------------------------------
-With a ``spectrograph`` (the enclosure's spectrograph service,
+With a ``spectrograph`` (the enclosure's spectrograph service, a
+:class:`SpectrographHook` built by its instrument type: e.g.
 :class:`~robofast_core.devices.kiwispec_service.KiwiSpecRemote`), an
 observation of ``kind="spectrum"`` is one or more spectra of its target,
 fed by the telescopes of ``obs.spectrum["feed"]`` (docs/rv_night.md). Each
@@ -152,8 +153,9 @@ first to start it) opens a session; the others (members) join it once they
 are guiding. The leader waits until every expected member is guiding -- or
 ``spectrum_ready_timeout``, then starts with those that are (a member that
 is late does not join a spectrum already exposing) -- and asks the
-spectrograph for each frame (``POST /expose``: the telescopes feeding it,
-``iodine``, ``target_counts`` for exposure-meter termination with
+spectrograph for each frame (``expose``: the telescopes feeding it, and
+the instrument's own parameters, ``obs.spectrum["params"]`` -- KiwiSpec's
+``iodine``, and ``target_counts`` for exposure-meter termination with
 ``exptime`` the maximum). Never without guiding: a spectrum starts only
 with at least one telescope guiding on the fiber.
 
@@ -270,10 +272,11 @@ from robofast_core.autofocus import (
 )
 from robofast_core.cancel import stop_task
 from robofast_core.clock import Clock, real_clock
-from robofast_core.devices.kiwispec_client import KiwiSpecBusy, KiwiSpecError
 from robofast_core.imagebytes import ImageArray, fits_order
 from robofast_core.imaging import FrameWriteFailed, Imaging, PendingFrame
-from robofast_core.lamps import LAMP_KINDS, LampSetup, lamps_off, switch_status
+from robofast_core.instruments import SpectrographBusy, SpectrographError, SpectrographFault
+from robofast_core.kinds import OBSERVATION_KINDS, KindRun
+from robofast_core.lamps import LampSetup, lamps_off, switch_status
 from robofast_core.owner import DeviceError, DeviceOwner, Grant, GrantRevoked
 from robofast_core.plan import Idle, Observation, PlanProvider, as_plan
 from robofast_core.pointmodel import PointingCorrector
@@ -362,24 +365,6 @@ class ManualRefused(Exception):
     """A manual command that cannot be carried out now (said to the operator)."""
 
 
-class SpectrographError(Exception):
-    """The spectrograph could not take a spectrum (module doc, "Spectrograph
-    health"): never the telescope's error."""
-
-
-class SpectrographBusy(SpectrographError):
-    """The spectrograph is busy with another job (this sequencer's, or
-    another enclosure's after the service's bounded queue wait): the
-    observation is reported ``interrupted`` and re-queued; nothing is
-    wrong with the telescope or the spectrograph."""
-
-
-class SpectrographFault(SpectrographError):
-    """The spectrograph service refused or failed a job, did not finish it
-    in time, or did not answer: counted towards marking the spectrograph
-    down, not towards the telescope's give-up."""
-
-
 class SpectrumFailed(Exception):
     """A spectrum could not be taken: no telescope of its feed was guiding
     when it was due to start, or every one dropped out during it."""
@@ -428,8 +413,14 @@ class GuiderHook(Protocol):
 
 
 class SpectrographHook(Protocol):
-    """The enclosure's spectrograph service
-    (:class:`~robofast_core.devices.kiwispec_service.KiwiSpecRemote`)."""
+    """The enclosure's spectrograph service: a client built by its
+    instrument type (:mod:`robofast_core.instruments`; KiwiSpec's is
+    :class:`~robofast_core.devices.kiwispec_service.KiwiSpecRemote`). Its
+    methods raise :class:`SpectrographBusy` when another job holds the
+    spectrograph and any other :class:`SpectrographError` when it fails (or
+    subclasses of them: :mod:`robofast_core.instruments`). It may have
+    ``record_keys``: keys of a frame's result copied to the top of each
+    spectrum's sidecar record."""
 
     async def expose(self, **frame: Any) -> dict[str, Any]:
         """Start one frame; returns the job (``id``, ``state``)."""
@@ -1842,11 +1833,13 @@ class Sequencer:
         self._event("target_start", gen=gen, telescope=unit.name, target=obs.name)
         if obs.light and state.lease is None:
             raise RuntimeError(f"{obs.name}: light frames in a closed generation")
-        if obs.kind == "manual":
-            await self._manual(state, unit, tel, cam, obs, taken)
+        handler = OBSERVATION_KINDS[obs.kind]
+        run = KindRun(self, state, unit, tel, cam, obs, taken)
+        if handler.stage == "before_setup":
+            await handler.run(run)
             return
         if (
-            obs.kind in ("spectrum", "spectrograph_calibration")
+            handler.spectrograph
             and self.spectrograph_down is not None
             and not (obs.spectrum and obs.spectrum.get("leader") not in (None, unit.name))
         ):
@@ -1867,11 +1860,8 @@ class Sequencer:
             assert state.lease is not None
             await tel.set("Tracking", True)
             await state.lease.wait_open()
-            if obs.kind == "pointing_model":
-                await self._pointing_run(state, unit, tel, cam, obs, taken)
-                return
-            if obs.kind == "sky_flat":
-                await self._sky_flats(state, unit, tel, cam, obs, taken)
+            if handler.stage == "before_slew":
+                await handler.run(run)
                 return
             ra, dec = obs.ra_hours, obs.dec_deg
             if ra is None or dec is None:
@@ -1905,7 +1895,7 @@ class Sequencer:
                 # Stopped in _observe_preemptible's finally and in cleanup.
                 if unit.guider is None:
                     raise Unsupported(f"{unit.name} has no guider ({obs.name} asks to guide)")
-                if obs.kind == "spectrum":
+                if handler.fiber:
                     await self._locate_fiber(state, unit)
                 acq = (obs.spectrum or {}).get("acquisition") or {}
                 extra: dict[str, Any] = {}
@@ -1938,23 +1928,8 @@ class Sequencer:
                         }
                     ),
                 )
-        if obs.kind == "autofocus":
-            await self._autofocus(state, unit, tel, cam, obs, taken)
-            return
-        if obs.kind == "rotator_calibration":
-            assert ra is not None and dec is not None
-            await self._rotator_calibration(state, unit, tel, cam, obs, taken, ra, dec)
-            return
-        if obs.kind == "spectrum":
-            await self._spectrum(state, unit, tel, cam, obs, taken)
-            return
-        if obs.kind == "spectrograph_calibration":
-            await self._spectrograph_calibration(state, unit, obs, taken)
-            return
-        if obs.kind in LAMP_KINDS:
-            await self._lamp_frames(state, unit, tel, cam, obs, taken)
-            return
-        await self._expose_frames(state, unit, tel, cam, obs, taken)
+            run.ra, run.dec = ra, dec
+        await handler.run(run)
 
     async def _expose_frames(
         self,
@@ -1973,7 +1948,7 @@ class Sequencer:
         gen = state.gen
         imaging = self.imaging
         # A lamp frame takes no sky light but opens the shutter on the lamp.
-        shutter = obs.light or obs.kind in LAMP_KINDS
+        shutter = obs.light or OBSERVATION_KINDS[obs.kind].shutter
         for i in range(obs.count):
             if imaging is not None:
                 imaging.check(unit.name)  # a lost frame stops the telescope first
@@ -3285,10 +3260,8 @@ class Sequencer:
             "object": _spec_object(obs.object or obs.name),
             "telescopes": [self._spec_name(t) for t in feeding],
         }
-        if spec.get("target_counts") is not None:
-            frame["target_counts"] = spec["target_counts"]
-        if spec.get("iodine") is not None:
-            frame["iodine"] = "in" if spec["iodine"] else "out"
+        # The instrument's own parameters, as it takes them (kinds.Spectrum).
+        frame.update(spec.get("params") or {})
         asked = self.clock()
         night = self._night_name(asked)
         if night is not None:
@@ -3301,9 +3274,9 @@ class Sequencer:
         try:
             try:
                 job = await state.spectrograph.expose(**frame)
-            except KiwiSpecBusy as exc:
+            except SpectrographBusy as exc:
                 raise SpectrographBusy(str(exc)) from exc
-            except KiwiSpecError as exc:
+            except SpectrographError as exc:
                 raise SpectrographFault(f"expose: {exc}") from exc
             job_id = int(job["id"])
             self._spec_job, self._spec_job_owner = job_id, unit.name
@@ -3374,7 +3347,7 @@ class Sequencer:
         while True:
             try:
                 view = await self.spectrograph.job(job_id, wait=cfg.spectrum_poll)
-            except KiwiSpecError as exc:
+            except SpectrographError as exc:
                 if time.monotonic() - t0 <= bound:
                     log.warning("%s: spectrograph job %d: %s", self.name, job_id, exc)
                     await asyncio.sleep(cfg.poll_interval)
@@ -3466,7 +3439,7 @@ class Sequencer:
             "flux_midpoint_s": result.get("flux_midpoint_s"),
             "flux_midpoint_utc": result.get("flux_midpoint_utc"),
             "flux_midpoint_jd": result.get("flux_midpoint_jd"),
-            "iodine": result.get("iodine"),
+            **self._record_extra(result),
             "target": spec.get("target")
             or {"name": obs.object or obs.name, "ra_hours": obs.ra_hours, "dec_deg": obs.dec_deg},
             "spectrograph": result,
@@ -3482,6 +3455,11 @@ class Sequencer:
             }
             record["barycentric"] = self.spectra.correct(record)
         return record
+
+    def _record_extra(self, result: dict[str, Any]) -> dict[str, Any]:
+        """The spectrograph's ``record_keys`` of a frame's result (SpectrographHook)."""
+        keys = getattr(self.spectrograph, "record_keys", ())
+        return {k: result.get(k) for k in keys}
 
     def _write_spectrum(self, record: dict[str, Any]) -> str | None:
         self.spectrum_records.append(record)
@@ -3523,9 +3501,9 @@ class Sequencer:
         try:
             try:
                 job = await state.spectrograph.calibrate(frames, night=night)
-            except KiwiSpecBusy as exc:
+            except SpectrographBusy as exc:
                 raise SpectrographBusy(str(exc)) from exc
-            except KiwiSpecError as exc:
+            except SpectrographError as exc:
                 raise SpectrographFault(f"calibrate: {exc}") from exc
             job_id = int(job["id"])
             self._spec_job, self._spec_job_owner = job_id, unit.name
@@ -3554,7 +3532,7 @@ class Sequencer:
                 "exptime": result.get("exptime"),
                 "start_utc": result.get("start_utc"),
                 "night": night,
-                "iodine": result.get("iodine"),
+                **self._record_extra(result),
                 "spectrograph": result,
                 "warnings": list(result.get("warnings") or []),
             }

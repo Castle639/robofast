@@ -170,6 +170,7 @@ def _plan(tmp_path, reject=()):
         "too_dropbox": str(tmp_path / "drop"),
         "record": str(tmp_path / "record"),
         "telescopes": {"t1": {"instruments": ["spectrograph"], "min_alt": 21, "max_alt": 83}},
+        "instruments": {"spectrograph": {"type": "kiwispec"}},
         "vetting": _vetting_cfg(reject),
     }
 
