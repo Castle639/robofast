@@ -126,8 +126,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
-from robofast_core.config import load_device_config, require_keys
 from robofast_core.cancel import stop_task
+from robofast_core.config import load_device_config, require_keys
 from robofast_core.devices.aqawan_pac import (
     SHUTTER_STATES,
     HardwareNotAllowed,

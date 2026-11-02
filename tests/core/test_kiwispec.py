@@ -766,8 +766,10 @@ def test_unknown_config_keys_are_rejected():
         KiwiSpecConfig.from_dict(
             {"spectrograph": {"host": "127.0.0.1"}, "camera": {"host": "127.0.0.1"}, "x": 1}
         )
-    with pytest.raises(ValueError, match="missing required key.s. telescopes"):
-        KiwiSpecConfig.from_dict({"spectrograph": {"host": "127.0.0.1"}, "camera": {"host": "127.0.0.1"}})
+    with pytest.raises(ValueError, match=r"missing required key\(s\) telescopes"):
+        KiwiSpecConfig.from_dict(
+            {"spectrograph": {"host": "127.0.0.1"}, "camera": {"host": "127.0.0.1"}}
+        )
 
 
 def test_example_config_loads_and_is_loopback():

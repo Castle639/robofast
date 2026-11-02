@@ -305,7 +305,7 @@ def test_hardware_needs_the_config_and_the_flag():
 def test_config_validation():
     with pytest.raises(ValueError, match="unknown config keys"):
         TRESFrontEndConfig.from_dict({"bogus": 1})
-    with pytest.raises(ValueError, match="missing required key.s. positions"):
+    with pytest.raises(ValueError, match=r"missing required key\(s\) positions"):
         TRESFrontEndConfig.from_dict({"name": "t"})
     with pytest.raises(ValueError, match="closer than"):
         TRESFrontEndConfig.from_dict({"name": "t", "positions": {"a": 1.0, "b": 1.01}})

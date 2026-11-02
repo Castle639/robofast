@@ -49,6 +49,7 @@ def tlimits(**kw):
 
     return TelescopeLimits(**{"instruments": ["imager"], "min_alt": 21.0, "max_alt": 83.0, **kw})
 
+
 SITE = ROOT / "sites" / "flwo60"
 LAMPS = [
     {"outlet": 2, "name": "ThAr1", "lamp": True, "max_on": 600},
@@ -425,7 +426,7 @@ def test_lamp_requests_parse_and_round_trip():
 @pytest.mark.parametrize(
     ("change", "error"),
     [
-        ({"lamp": None}, r"needs instrument_configs\[0\].optical_elements.lamp.*iodine only"),
+        ({"lamp": None}, r"needs instrument_configs\[0\].optical_elements.lamp.*lists that lamp"),
         ({"ctype": "EXPOSE"}, "only for ARC and LAMP_FLAT"),
     ],
 )
@@ -447,7 +448,7 @@ def test_a_guided_or_light_lamp_frame_is_refused():
 
 def test_lamps_in_extra_params_are_still_refused_with_the_reason():
     g = group("x", ics=[{"exposure_time": 1.0, "extra_params": {"thar": True}}])
-    with pytest.raises(ValueError, match=r"optical_elements\.lamp.*iodine only"):
+    with pytest.raises(ValueError, match=r"optical_elements\.lamp.*lists that lamp"):
         RequestGroup.from_dict(g)
 
 

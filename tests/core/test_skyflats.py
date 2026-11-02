@@ -12,10 +12,9 @@ import numpy as np
 import pytest
 
 from robofast_core.photometry import PortPhotometry, SkyConditions
-
-from robofast_core.testing import TEST_OPTICS
 from robofast_core.plan import Observation, StaticPlan
 from robofast_core.skyflats import FlatConfig, flat_spot, take_flats, twilight_rate
+from robofast_core.testing import TEST_OPTICS
 from robofast_core.testing.skysim import SkyCamera, SkyScene
 from robofast_core.testing.starfield import Detector
 
@@ -31,7 +30,9 @@ class Twilight:
         cam = SkyCamera((64, 64), 1.0, detector=Detector(shape=(64, 64), gain=1.5, bias=1000))
         from robofast_core.catalog import Stars
 
-        self.sky = SkyScene(Stars.empty(), cam, PortPhotometry(**TEST_OPTICS, zero_point=24.0, gain=1.5), seed=2)
+        self.sky = SkyScene(
+            Stars.empty(), cam, PortPhotometry(**TEST_OPTICS, zero_point=24.0, gain=1.5), seed=2
+        )
         self.alt0, self.rate, self.overhead, self.t = alt0, rate, overhead, 0.0
         self.log: list[tuple[str, float, float]] = []
 

@@ -618,7 +618,7 @@ def test_config_validation():
     ):
         with pytest.raises(ValueError, match=match):
             ADCConfig.from_dict({**ADC_SITE, **bad})
-    with pytest.raises(ValueError, match="missing required key.s. latitude, instruments"):
+    with pytest.raises(ValueError, match=r"missing required key\(s\) latitude, instruments"):
         ADCConfig.from_dict({"name": "t", "instrument": "tres"})
 
 

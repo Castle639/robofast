@@ -97,8 +97,8 @@ from dataclasses import dataclass, field
 from http.server import ThreadingHTTPServer
 from typing import Any
 
-from robofast_core.config import load_device_config, require_keys
 from robofast_core.cancel import stop_task
+from robofast_core.config import load_device_config, require_keys
 from robofast_core.devices.aqawan_server import (
     ACTION_NOT_IMPLEMENTED,
     CAN,

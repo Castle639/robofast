@@ -506,7 +506,9 @@ def test_server_refuses_a_non_loopback_pac(tmp_path):
     # The CLI exits non-zero before listening.
     path = tmp_path / "aqawan.json"
     path.write_text(
-        json.dumps({"name": "a", "open_order": [2, 1], "pac": {"host": NOT_LOOPBACK, "port": 22004}})
+        json.dumps(
+            {"name": "a", "open_order": [2, 1], "pac": {"host": NOT_LOOPBACK, "port": 22004}}
+        )
     )
     proc = subprocess.run(
         [sys.executable, "-m", "robofast_core.devices.aqawan_server", "--config", str(path)],
@@ -520,7 +522,7 @@ def test_server_refuses_a_non_loopback_pac(tmp_path):
     with pytest.raises(ValueError, match="unknown config keys"):
         AqawanConfig.from_dict({"allow_hardwar": True})
     # Site values have no defaults (docs/design.md 3.10).
-    with pytest.raises(ValueError, match="missing required key.s. open_order"):
+    with pytest.raises(ValueError, match=r"missing required key\(s\) open_order"):
         AqawanConfig.from_dict({"name": "aqawan1"})
 
 

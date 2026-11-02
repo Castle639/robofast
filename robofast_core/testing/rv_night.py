@@ -585,6 +585,7 @@ class SimulatedNight:
         cfg["spectrograph"] = {
             "url": self.kiwispec_url,
             "telescopes": {"t1": "T1", "t2": "T2"},
+            "instrument": "kiwispec",
             "timeout": 5.0,
             "abort_timeout": 8.0,
         }

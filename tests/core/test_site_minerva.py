@@ -121,7 +121,7 @@ async def test_plans_load(tmp_path):
     lamp = json.loads((SITE / "requests.example.json").read_text())["groups"][0]
     lamp = {**lamp, "id": "ARC1"}
     lamp["requests"][0]["configurations"][0]["type"] = "ARC"
-    with pytest.raises(ValueError, match="iodine only"):
+    with pytest.raises(ValueError, match=r"optical_elements\.lamp"):
         await plan.submit(lamp)
     plan = load_plan(SITE / "calibration.example.json", ["t1", "t2"])
     first = await plan.peek("t1")

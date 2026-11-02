@@ -312,7 +312,8 @@ def _scene(catalog, thr: float):
     from robofast_core.testing.skysim import SkyCamera, SkyScene
     from robofast_core.testing.starfield import Detector
 
-    phot = PortPhotometry(**TEST_OPTICS, band="V", efficiency={"mirrors": 0.73, "qe": 0.8, "dust": thr},
+    phot = PortPhotometry(**TEST_OPTICS, band="V",
+                          efficiency={"mirrors": 0.73, "qe": 0.8, "dust": thr},
                           gain=1.3, read_noise=6.0, extinction=0.15)  # fmt: skip
     det = Detector(shape=(1024, 1024), gain=1.3, read_noise=6.0, bias=500.0)
     cam = SkyCamera((1024, 1024), 0.61, detector=det)

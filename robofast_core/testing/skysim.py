@@ -45,8 +45,8 @@ import numpy as np
 
 from robofast_core.catalog import Catalog, CatalogUnavailable, Stars, _tan, _untan, decimal_year
 from robofast_core.photometry import PortPhotometry, SkyConditions, sky_brightness
-from robofast_core.testing import TEST_OPTICS
 from robofast_core.pointing import PointingModel, altaz_to_hadec, hadec_to_altaz
+from robofast_core.testing import TEST_OPTICS
 from robofast_core.testing.focus_sim import FocusScene
 from robofast_core.testing.starfield import Detector, Frame, SimOptics, Star, render
 

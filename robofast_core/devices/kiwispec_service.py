@@ -106,9 +106,9 @@ from http import HTTPStatus
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
-from robofast_core.config import load_device_config, require_keys
 from robofast_core.cancel import isolated, stop_task
 from robofast_core.clock import clock_from_config
+from robofast_core.config import load_device_config, require_keys
 from robofast_core.devices.kiwispec_client import (
     CAMERA_PORT,
     SPEC_PORT,

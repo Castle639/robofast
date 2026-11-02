@@ -80,8 +80,8 @@ from dataclasses import dataclass, field
 from http.server import ThreadingHTTPServer
 from typing import Any
 
-from robofast_core.config import load_device_config, require_keys
 from robofast_core.cancel import stop_task
+from robofast_core.config import load_device_config, require_keys
 from robofast_core.devices.aqawan_server import (
     ACTION_NOT_IMPLEMENTED,
     DRIVER_ERROR,
@@ -114,7 +114,6 @@ TIMEOUT = 0x502
 ACTIONS = ("Status", "Reference")
 SIM_KEYS = frozenset({"position", "referenced", "servo", "velocity", "travel"})
 INTERFACE = {"filterwheel": 3, "focuser": 4}
-
 
 
 # -- configuration ----------------------------------------------------------------

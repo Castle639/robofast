@@ -95,8 +95,8 @@ from dataclasses import dataclass, field
 from http.server import ThreadingHTTPServer
 from typing import Any, Protocol
 
-from robofast_core.config import load_device_config, require_keys
 from robofast_core.cancel import stop_task
+from robofast_core.config import load_device_config, require_keys
 from robofast_core.devices import adc_math
 from robofast_core.devices.adc_mdrive import (
     STEPS_PER_TURN,

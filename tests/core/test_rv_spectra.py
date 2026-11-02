@@ -23,6 +23,7 @@ def tlimits(**kw):
 
     return TelescopeLimits(**{"instruments": ["imager"], "min_alt": 21.0, "max_alt": 83.0, **kw})
 
+
 MTHOPKINS = Site(31.680407, -110.878977, 2316.0)
 TARGET = {"name": "HD 10700", "ra_hours": 1.7345, "dec_deg": -15.9375, "pm_ra": -1729.7}
 
@@ -452,8 +453,6 @@ def _rv_group(gid, ha=-1.0, *, priority=2.0, telescopes=("t1", "t2"), filter=Non
 
 
 def _limits():
-    from robofast_core.dispatch import TelescopeLimits
-
     both = ["imager", "spectrograph"]
     return {"t1": tlimits(instruments=both), "t2": tlimits(instruments=both)}
 

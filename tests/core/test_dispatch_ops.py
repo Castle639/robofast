@@ -11,8 +11,6 @@ from tests.core.test_dispatch import Clock, group, make
 
 def tlimits(**kw):
     """TelescopeLimits with the test suite's generic values (no defaults in core)."""
-    from robofast_core.dispatch import TelescopeLimits
-
     return TelescopeLimits(**{"instruments": ["imager"], "min_alt": 21.0, "max_alt": 83.0, **kw})
 
 

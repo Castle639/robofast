@@ -86,7 +86,9 @@ def _enclosure(tmp_path, **tel):
 
     site = {"latitude": 31.68, "longitude": -110.88, "elevation": 2316.0}
     t1 = {"telescope": "x:1", "camera": "x:1", **tel}
-    (tmp_path / "e.json").write_text(json.dumps({"name": "e", "site": site, "telescopes": {"t1": t1}}))
+    (tmp_path / "e.json").write_text(
+        json.dumps({"name": "e", "site": site, "telescopes": {"t1": t1}})
+    )
     return ConsoleEnclosure.from_spec("e", "e.json", tmp_path)
 
 
@@ -110,7 +112,7 @@ def test_manual_slew_limits_come_from_the_telescope_config(tmp_path):
     doc = sky_for(enc, {}, {})
     assert (doc["telescopes"]["t1"]["min_alt"], doc["telescopes"]["t1"]["max_alt"]) == (30, 80)
     assert _slew(enc, 50.0)["alt"] == pytest.approx(50.0, abs=0.5)
-    with pytest.raises(ApiError, match="outside 30.0-80.0"):
+    with pytest.raises(ApiError, match=r"outside 30\.0-80\.0"):
         _slew(enc, 25.0)
 
 

@@ -401,10 +401,10 @@ def test_server_refuses_a_non_loopback_tcs(tmp_path):
     with pytest.raises(ValueError, match="park_command"):
         TCSGOConfig.from_dict({"name": "t", **SIM_SERVER_SITE, "park_command": "stow"})
     # Site values have no defaults (docs/design.md 3.10).
-    with pytest.raises(ValueError, match="missing required key.s. name, latitude, longitude"):
+    with pytest.raises(ValueError, match=r"missing required key\(s\) name, latitude, longitude"):
         TCSGOConfig.from_dict({})
     site = {k: v for k, v in SIM_SERVER_SITE.items() if k != "focus_max"}
-    with pytest.raises(ValueError, match="focuser: true.: missing required key.s. focus_max"):
+    with pytest.raises(ValueError, match=r"focuser: true.: missing required key\(s\) focus_max"):
         TCSGOConfig.from_dict({"name": "t", **site})
     assert not TCSGOConfig.from_dict({"name": "t", **site, "focuser": False}).focuser
 

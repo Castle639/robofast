@@ -26,7 +26,9 @@ WHEN = datetime(2026, 7, 1, 6, 0, tzinfo=UTC)
 FIBER = (948.0, 626.0)
 SCALE = 0.265
 #: The FAU behind a 2 % beamsplitter (its zero point ~4.25 mag above the imager's).
-FAU_PHOT = PortPhotometry(**TEST_OPTICS, zero_point=20.0, gain=1.5, read_noise=4.0, saturation=65535)
+FAU_PHOT = PortPhotometry(
+    **TEST_OPTICS, zero_point=20.0, gain=1.5, read_noise=4.0, saturation=65535
+)
 
 
 def fau(catalog, pa=30.0, flip=False):

@@ -23,9 +23,8 @@ from robofast_core.request_model import RequestGroup, Status, load_request_group
 
 def tlimits(**kw):
     """TelescopeLimits with the test suite's generic values (no defaults in core)."""
-    from robofast_core.dispatch import TelescopeLimits
-
     return TelescopeLimits(**{"instruments": ["imager"], "min_alt": 21.0, "max_alt": 83.0, **kw})
+
 
 SITES = Path(__file__).resolve().parents[2] / "sites"
 MINERVA = sky.Site(31.680407, -110.878977, 2316.0)
@@ -696,9 +695,14 @@ def test_config_errors(tmp_path):
         plan_from_config(
             {**cfg, "telescopes": {"t1": cfg["telescopes"]["t1"]}}, ["t1", "t2"], base=tmp_path
         )
-    with pytest.raises(ValueError, match="telescopes.t1: missing required key.s. min_alt, max_alt"):
+    with pytest.raises(
+        ValueError, match=r"telescopes\.t1: missing required key\(s\) min_alt, max_alt"
+    ):
         dispatch_from_config(
-            {"site": {"latitude": 0, "longitude": 0}, "telescopes": {"t1": {"instruments": []}}},
+            {
+                "site": {"latitude": 0, "longitude": 0},
+                "telescopes": {"t1": {"instruments": []}},
+            },
             ["t1"],
         )
     with pytest.raises(ValueError, match="empty altitude"):

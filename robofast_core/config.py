@@ -46,9 +46,7 @@ import json
 import sys
 from collections.abc import Callable, Iterable
 from pathlib import Path
-from typing import Any, TypeVar
-
-T = TypeVar("T")
+from typing import Any
 
 
 def load_config(path: str | Path) -> dict[str, Any]:
@@ -85,7 +83,9 @@ def telescopes(config: dict[str, Any]) -> dict[str, dict[str, str]]:
     return entries
 
 
-def altitude_limits(name: str, entry: dict[str, Any], where: str = "") -> tuple[float, float] | None:
+def altitude_limits(
+    name: str, entry: dict[str, Any], where: str = ""
+) -> tuple[float, float] | None:
     """A telescope entry's ``limits`` ``{"min_alt": deg, "max_alt": deg}``
     as ``(min_alt, max_alt)``; None when the entry has none. ``where`` (the
     config file) goes into the error messages."""
@@ -114,7 +114,7 @@ def require_keys(d: dict[str, Any], keys: Iterable[str], what: str = "") -> None
         raise ValueError(f"{where}missing required key(s) {', '.join(missing)}")
 
 
-def load_device_config(path: str | Path, from_dict: Callable[[dict[str, Any]], T]) -> T:
+def load_device_config[T](path: str | Path, from_dict: Callable[[dict[str, Any]], T]) -> T:
     """A device server's config file through its ``from_dict``; any error
     (a missing required key, a bad value) exits with status 2, naming the
     file."""
