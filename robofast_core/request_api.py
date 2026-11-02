@@ -182,6 +182,7 @@ from robofast_core.dispatch import DispatchScheduler, dispatch_from_config
 from robofast_core.instruments import INSTRUMENT_TYPES, InstrumentType
 from robofast_core.plugins import load_config_plugins
 from robofast_core.request_model import NO_LAMPS, RequestGroup, upgrade_legacy
+from robofast_core.sequences import check_request_sequences, requestable, sequences_from_config
 
 log = logging.getLogger(__name__)
 
@@ -361,11 +362,44 @@ class Enclosure:
         self.planner = dispatch_from_config(
             empty, self.telescopes, base=plan_base, clock=self.clock
         )
+        #: The site sequences ARC and LAMP_FLAT requests may name (the
+        #: telescopes' ``sequences``; docs/sequences.md, "Requests").
+        self.sequences = check_request_sequences(
+            self.planner.limits,
+            sequences_from_config(config, where=f"enclosure {name}"),
+            where=f"enclosure {name}: dispatch plan",
+        )
+        self.planner.sequences = self.sequences
         self.state_error: str | None = None
         self._view: DispatchScheduler | None = None
         self._stamp: tuple[Any, ...] | None = None
         self._last_ns = 0
         self.view()  # a broken request file is a startup error
+
+    def sequence_problems(self, ic: Any, ctype: str, tels: list[str], what: str) -> list[str]:
+        """Why an instrument config naming a site sequence cannot run on
+        ``tels`` (docs/sequences.md, "Requests"): no telescope lists it, it
+        takes other frames, or the request's exposure time and count break
+        its checks (a lamp's ``max_on``, ...)."""
+        at = f"{what}.extra_params.sequence"
+        on = [t for t in tels if ic.sequence in self.planner.limits[t].sequences]
+        if not on:
+            have = sorted({s for t in tels for s in self.planner.limits[t].sequences})
+            if not have and not any(self.planner.limits[t].lamps for t in tels):
+                advice = f"; {self.help['no_lamps']}" if "no_lamps" in self.help else ""
+                return [
+                    f"{what.rsplit('.instrument_configs', 1)[0]}.type: {ctype!r}: {NO_LAMPS}{advice}"
+                ]
+            return [f"{at}: no sequence {ic.sequence!r} on {tels} (they have {have or 'none'})"]
+        seq = self.sequences[ic.sequence]
+        why = requestable(seq, ctype)
+        if why is not None:
+            return [f"{at}: {why}"]
+        try:
+            seq.rebuild({"exptime": ic.exptime, "count": ic.count})
+        except ValueError as exc:
+            return [f"{at}: with exposure_time {ic.exptime:g} and exposure_count {ic.count}: {exc}"]
+        return []
 
     @staticmethod
     def _resolve(p: str, base: Path) -> Path:
@@ -823,6 +857,11 @@ class RequestApi:
                             f"{what}.configurations[{j}]: no lamp {lamp!r} on {tels}"
                             f" (they have {sorted(have_lamps)})"
                         )
+                for k, ic in enumerate(c.instrument_configs):
+                    if ic.sequence is not None:
+                        out += enc.sequence_problems(
+                            ic, c.type, tels, f"{what}.configurations[{j}].instrument_configs[{k}]"
+                        )
                 planner = enc.planner
                 if not any(planner.instrument_for(planner.limits[t], c) for t in tels):
                     have = sorted({x for t in tels for x in planner.limits[t].instruments})
@@ -1071,7 +1110,7 @@ class RequestApi:
                         inst, {"filters": [], "telescopes": [], "ports": [], "lamps": False}
                     )
                     entry["telescopes"].append(f"{enc.name}.{tel}")
-                    entry["lamps"] = entry["lamps"] or bool(limits.lamps)
+                    entry["lamps"] = entry["lamps"] or bool(limits.lamps or limits.sequences)
                     for f in limits.filters or []:
                         if f not in entry["filters"]:
                             entry["filters"].append(f)
