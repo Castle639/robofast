@@ -13,7 +13,6 @@ import pytest
 from robofast_core.request_model import (
     RequestGroup,
     Status,
-    from_legacy_csv,
     load_request_groups,
     ocs_state,
     upgrade_legacy,
@@ -329,31 +328,6 @@ def test_example_files_load():
         data = json.loads((SITES / "minerva" / name).read_text())
         for g in data.get("groups", [data]):
             assert upgrade_legacy(g) is g, name
-
-
-def test_legacy_csv(tmp_path):
-    # The columns minerva-control's targetlist.mkdict reads (units in
-    # parentheses are stripped, as the legacy reader did).
-    path = tmp_path / "targets.csv"
-    path.write_text(
-        "name,ra (hours),dec (deg),exptime (s),priority,seplimit,maxobs,active,vmag\n"
-        "HD 1,1.5,20,300,5,7200,3,1,6.1\n"
-        "HD 2,2.5,30,600,2,,,1,7.0\n"
-        "HD 3,3.5,40,600,9,,,0,5.0\n"
-    )
-    groups = from_legacy_csv(path)
-    assert [g.name for g in groups] == ["HD 1", "HD 2"]  # HD 3 is inactive
-    r1, r2 = groups[0].requests[0], groups[1].requests[0]
-    assert r1.cadence.min_interval == 7200 and r1.cadence.max_per_night == 3
-    assert r2.cadence.min_interval == 3 * 3600 and r2.cadence.max_per_night == 2  # legacy defaults
-    c = r1.configurations[0]
-    assert (c.target.ra_hours, c.target.dec_deg, c.instrument) == (1.5, 20.0, "spectrograph")
-    assert c.type == "SPECTRUM" and c.target.ra == 22.5
-    assert groups[0].priority == 5
-    assert groups[0].to_dict()["requests"][0]["extra_params"]["cadence"]["max_per_night"] == 3
-    path.write_text("name,ra,dec,exptime,priority,active\nHD 1,1.5,95,300,5,1\n")
-    with pytest.raises(ValueError, match=r"targets.csv:2: .*target.dec"):
-        from_legacy_csv(path)
 
 
 # -- KiwiSpec is iodine only (JDE 2026-10-31) ---------------------------------------

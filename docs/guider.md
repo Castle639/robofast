@@ -176,7 +176,8 @@ The matrix replaces MINERVA's `ARCSEC_PER_STEP` and `ROTOFFSET`
 (`config/ao_*.ini`) and tres-guider's `STEPS_PER_PIXEL_TIP/TILT`, `THETA`
 and `FLIP`: scales, rotation, flip (`det M < 0`) and any non-orthogonality
 all come out of the fit, so no sign convention has to be guessed.
-`from_sx_legacy` and `from_tres_legacy` turn the old numbers into a matrix
+The sites' importers `robofast_core.sites.minerva.guider_calibration.from_sx_legacy`
+and `robofast_core.sites.flwo60.guider_calibration.from_tres_legacy` turn the old numbers into a matrix
 to compare with a measurement. With a plate scale and position angle
 (`sky_matrix`: arcsec east/north per pixel; PA of the detector's +y axis
 east of north; parity for a mirrored field) a calibration also maps to the

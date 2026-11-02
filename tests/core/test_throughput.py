@@ -436,4 +436,10 @@ def test_header_context_and_nights():
     r = tp.record_from_header({"TELESCOP": "t1", "DATE-OBS": "2026-04-23T05:00:00", "AIRMASS": 1.1},
                               {"zp": 22.0}, file="x.fits", longitude=-110.88)  # fmt: skip
     assert r["night"] == "n20260422"  # 22:36 local mean time on the 22nd
+    # A legacy frame's port from its file name, as the site config maps it.
+    h = {"TELESCOP": "T2", "NIGHT": "n20260422"}
+    fau = tp.record_from_header(h, {"zp": 1.0}, file="n20260422.T2.FAU.x.fits",
+                                file_ports={".fau.": "fau"})  # fmt: skip
+    assert fau["port"] == "fau"
+    assert tp.record_from_header(h, {"zp": 1.0}, file="n20260422.T2.FAU.x.fits")["port"] is None
     assert tp._night_str(date(2026, 1, 2)) == "n20260102"

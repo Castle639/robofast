@@ -9,8 +9,10 @@ It replaces the legacy scalars -- MINERVA's ``ARCSEC_PER_STEP`` and
 ``STEPS_PER_PIXEL_TIP/TILT``, ``THETA`` and ``FLIP`` -- with the general
 linear map: two scales, a rotation, a flip (``det M < 0``) and any
 non-orthogonality all come out of one fit, so no sign convention has to be
-guessed. :func:`from_sx_legacy` and :func:`from_tres_legacy` turn the old
-numbers into a matrix, as a starting point to compare with a measurement.
+guessed. The sites' importers turn the old numbers into a matrix, as a
+starting point to compare with a measurement:
+``robofast_core.sites.minerva.guider_calibration.from_sx_legacy`` and
+``robofast_core.sites.flwo60.guider_calibration.from_tres_legacy``.
 
 Measuring (:func:`measure`): with a star in the guide window, the device is
 moved to its centre and then by ``+/- step`` on each axis (and back), the
@@ -141,65 +143,6 @@ class Calibration:
         if m.shape != (2, 2) or not np.all(np.isfinite(m)) or abs(np.linalg.det(m)) < 1e-12:
             raise ValueError(f"calibration {cal.device}/{cal.port}: singular or bad matrix")
         return cal
-
-
-def from_sx_legacy(
-    arcsec_per_step: float,
-    rotoffset_deg: float,
-    plate_scale: float,
-    pa_deg: float = 0.0,
-    parity: int = 1,
-    *,
-    device: str = "sxao",
-    port: str = "",
-) -> Calibration:
-    """The legacy MINERVA AO model (``minerva_library/ao.py``: ``tip =
-    -(E cos r - N sin r)/aps``, ``tilt = (E sin r + N cos r)/aps``) as a
-    matrix. A seed only: the legacy unit was never commissioned and its
-    sign conventions were never verified."""
-    r = math.radians(rotoffset_deg)
-    steps_per_sky = np.array([[-math.cos(r), math.sin(r)], [math.sin(r), math.cos(r)]])
-    steps_per_sky /= arcsec_per_step
-    sky_per_step = np.linalg.inv(steps_per_sky)
-    pix_per_step = np.linalg.inv(sky_matrix(plate_scale, pa_deg, parity)) @ sky_per_step
-    return Calibration(
-        device,
-        port,
-        pix_per_step.tolist(),
-        units="steps",
-        plate_scale=plate_scale,
-        pa=pa_deg,
-        parity=parity,
-        notes="from legacy ARCSEC_PER_STEP/ROTOFFSET (unverified)",
-    )
-
-
-def from_tres_legacy(
-    steps_per_pixel_tip: float,
-    steps_per_pixel_tilt: float,
-    theta_deg: float,
-    flip: bool,
-    *,
-    device: str = "pi",
-    port: str = "",
-) -> Calibration:
-    """tres-guider's ``tiptilt.move_x_y`` model (``tip = s*spp_tip*(x cos t
-    - y sin t)``, ``tilt = spp_tilt*(x sin t + y cos t)``, ``s = -1`` if
-    FLIP) as a matrix."""
-    t = math.radians(theta_deg)
-    s = -1.0 if flip else 1.0
-    dev_per_pix = np.array(
-        [
-            [s * steps_per_pixel_tip * math.cos(t), -s * steps_per_pixel_tip * math.sin(t)],
-            [steps_per_pixel_tilt * math.sin(t), steps_per_pixel_tilt * math.cos(t)],
-        ]
-    )
-    return Calibration(
-        device,
-        port,
-        np.linalg.inv(dev_per_pix).tolist(),
-        notes="from tres-guider STEPS_PER_PIXEL/THETA/FLIP",
-    )
 
 
 def fit_matrix(

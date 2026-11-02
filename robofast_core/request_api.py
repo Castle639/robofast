@@ -349,7 +349,7 @@ class Enclosure:
         sf = config.get("status_file")
         self.status_file = None if sf is None else self._resolve(sf, config_base)
         #: For dry runs: the same limits and settings, no requests.
-        empty = {k: v for k, v in plan.items() if k not in ("requests", "legacy_csv")}
+        empty = {k: v for k, v in plan.items() if k not in ("requests", "imports", "legacy_csv")}
         self.planner = dispatch_from_config(
             empty, self.telescopes, base=plan_base, clock=self.clock
         )
@@ -375,9 +375,11 @@ class Enclosure:
     def view(self) -> DispatchScheduler:
         """The scheduler as of its state file (rebuilt when a file changes)."""
         files = [self.state_path]
-        for key in ("requests", "legacy_csv"):
-            if isinstance(self.plan.get(key), str):
-                files.append(self._resolve(self.plan[key], self.plan_base))
+        if isinstance(self.plan.get("requests"), str):
+            files.append(self._resolve(self.plan["requests"], self.plan_base))
+        for entry in self.plan.get("imports") or []:  # a plug-in importer's file
+            if isinstance(entry, dict) and isinstance(entry.get("path"), str):
+                files.append(self._resolve(entry["path"], self.plan_base))
         stamp = tuple(self._stamp_of(f) for f in files)
         if self._view is not None and stamp == self._stamp:
             return self._view

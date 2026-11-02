@@ -777,20 +777,23 @@ def test_config_errors(tmp_path):
         )
 
 
-def test_legacy_csv_in_the_plan_entry(tmp_path):
+def test_a_plug_ins_importer_in_the_plan_entry(tmp_path):
     (tmp_path / "targets.csv").write_text(
         "name,ra,dec,exptime,priority,active\nHD 1,1.5,20,300,5,1\n"
     )
-    d = dispatch_from_config(
-        {
-            "site": {"latitude": 31.68, "longitude": -110.88},
-            "legacy_csv": "targets.csv",
-            "telescopes": {"t1": {"instruments": ["imager"], "min_alt": 21, "max_alt": 83}},
-        },
-        ["t1"],
-        base=tmp_path,
-    )
+    entry = {
+        "site": {"latitude": 31.68, "longitude": -110.88},
+        "plugins": ["robofast_core.sites.minerva"],
+        "imports": [{"type": "minerva.legacy_csv", "path": "targets.csv"}],
+        "telescopes": {"t1": {"instruments": ["imager"], "min_alt": 21, "max_alt": 83}},
+    }
+    d = dispatch_from_config(entry, ["t1"], base=tmp_path)
     assert list(d.requests) == ["HD_1/r"]
+    with pytest.raises(ValueError, match="request importer 'nope' is not one of"):
+        dispatch_from_config({**entry, "imports": [{"type": "nope", "path": "x"}]}, ["t1"])
+    # The former key says where it went.
+    with pytest.raises(ValueError, match="'legacy_csv' is now an entry of 'imports'"):
+        dispatch_from_config({**entry, "legacy_csv": "targets.csv"}, ["t1"], base=tmp_path)
 
 
 def test_requests_inline():

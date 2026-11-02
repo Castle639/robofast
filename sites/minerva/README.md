@@ -107,7 +107,8 @@ The guider's calibration is a 2x2 matrix `M` with d(pixels) = M @
 d(device units) (`robofast_core/guider/calibration.py`). The legacy model
 (`minerva_library/ao.py`) is tip = -(E cos r - N sin r)/a and tilt = (E sin
 r + N cos r)/a, with a = ARCSEC_PER_STEP and r = ROTOFFSET.
-`calibration.from_sx_legacy(a, r, plate_scale)` converts it.
+`robofast_core.sites.minerva.guider_calibration.from_sx_legacy(a, r, plate_scale)`
+converts it.
 
 | Value | Here | Legacy source |
 |---|---|---|

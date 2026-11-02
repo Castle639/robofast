@@ -7,20 +7,25 @@ mention sites) and fails on a string literal or an identifier that names a
 site or a site-specific instrument, or on a site's coordinates or elevation
 as a number.
 
-Two kinds of module are exempt:
+Three directories are exempt:
 
-* ``robofast_core/sites/`` (site adapters: the place for site code) and
-  ``robofast_core/testing/`` (simulations and fixtures);
-* drivers for specific hardware: everything under ``robofast_core/devices/``
-  (the Aqawan PAC, the KiwiSpec PC, the TCSGalil, the TRES front end, ...),
-  and any other module whose file name names the hardware or format it
-  speaks (``catalogs/tres.py``). A driver may name its own hardware; the
-  core modules that use it (sequencer, plan, dispatch, request_*, console,
-  safety, imaging, photometry, vetting, sun, weather_*, ...) may not.
+* ``robofast_core/sites/`` (site code: adapters, legacy importers, each
+  site's plug-in) and ``robofast_core/testing/`` (simulations and fixtures);
+* ``robofast_core/devices/``: drivers for specific hardware (the Aqawan
+  PAC, the KiwiSpec PC, the TCSGalil, the TRES front end, ...). A driver
+  may name its own hardware; the core modules that use it (sequencer, plan,
+  dispatch, request_*, console, safety, imaging, photometry, vetting, sun,
+  weather_*, guider, ...) may not.
 
-:data:`ALLOWLIST` lists what core still names, each entry tagged with the
-plan step that removes it (docs/design.md 3.10). An entry that no longer
-matches anything fails the test too, so the list only shrinks.
+A module **named** after a site or a site-specific instrument belongs in
+one of the first and last of those: one anywhere else fails
+(:func:`test_no_site_named_module_in_core`), so an importer named for its
+site cannot sit in core again.
+
+:data:`ALLOWLIST` lists what core may still name, each entry tagged with
+the plan step that removes it (docs/design.md 3.10); after step 2 it is
+empty. An entry that no longer matches anything fails the test too, so the
+list only shrinks.
 """
 
 from __future__ import annotations
@@ -70,14 +75,10 @@ EXEMPT_DIRS = ("sites/", "testing/", "devices/")
 #: What core still names: (module, name) -> (count, why). Every entry is
 #: removed by a later step of the site-configuration plan (docs/design.md
 #: 3.10) and is tagged with it; delete the entry with the code it covers.
-ALLOWLIST: dict[tuple[str, str], tuple[int, str]] = {
-    # -- step 2b: the MINERVA legacy CSV importer moves under sites/minerva.
-    ("request_model.py", '"spectrograph"'): (2, "step 2b: from_legacy_csv's default instrument"),
-    # -- step 2b: legacy importers move under robofast_core/sites/<site>/.
-    ("catalogs/__init__.py", "tres"): (1, "step 2b: the TRES catalog format importer"),
-    ("catalogs/__main__.py", "tres"): (7, "step 2b: the TRES catalog format importer"),
-    ("guider/calibration.py", "tres"): (2, "step 2b: the tres-guider calibration importer"),
-}
+ALLOWLIST: dict[tuple[str, str], tuple[int, str]] = {}
+
+#: Where a module may be named after a site (relative to robofast_core/).
+SITE_NAMED_DIRS = ("sites/", "devices/")
 
 
 def _modules() -> list[Path]:
@@ -86,8 +87,6 @@ def _modules() -> list[Path]:
         rel = p.relative_to(CORE).as_posix()
         if rel.startswith(EXEMPT_DIRS):
             continue
-        if _NAME_RE.search(p.stem.lower()):
-            continue  # a driver named for the hardware or format it speaks
         out.append(p)
     return out
 
@@ -196,6 +195,23 @@ def test_core_names_no_site():
                 f"{found.get(key, 0)} remain: lower or delete it"
             )
     assert not errors, "\n".join(errors)
+
+
+def test_no_site_named_module_in_core():
+    """A module, or a package, named after a site lives in sites/ or devices/."""
+    named = []
+    for p in sorted(CORE.rglob("*.py")):
+        rel = p.relative_to(CORE)
+        if rel.as_posix().startswith(SITE_NAMED_DIRS):
+            continue
+        parts = [*rel.parts[:-1], p.stem]
+        if any(_NAME_RE.search(part.lower()) for part in parts):
+            named.append(f"robofast_core/{rel.as_posix()}")
+    assert not named, (
+        f"{named}: named after a site or a site's instrument; site code goes under "
+        "robofast_core/sites/<site>/ (a plug-in), a hardware driver under "
+        "robofast_core/devices/ (docs/design.md 3.10)"
+    )
 
 
 def test_the_scanner_sees_names_and_numbers_but_not_docstrings(tmp_path):

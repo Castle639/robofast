@@ -17,6 +17,7 @@ it names core's own.
 | `robofast_core.guider.hardware.CAMERAS`, `TIPTILTS`, `MOUNTS`, `BACKLIGHTS` | a guider config's `camera`, `tiptilt`, `mount`, `backlight` `kind` | cameras `sim`, `alpaca`, `zwo`, `framegrabber`; tip/tilts `sim`, `sxao`, `sxao-sim`, `pi`, `pi-sim`; mounts `sim`, `alpaca`; backlights `sim`, `kiwispec` (by `robofast_core.devices`) |
 | `robofast_core.notifier.sinks.SINK_TYPES` | a notifier sink's `type` | `email`, `webhook`, `command` |
 | `robofast_core.weather_sources.SOURCE_TYPES` | a weather source's `type` | `sun`, `redis`; MINERVA's `minerva.ridge`, `minerva.sky_temps`, `minerva.mearth` (a plug-in) |
+| `robofast_core.request_model.REQUEST_IMPORTERS` | a dispatch plan's `imports`: `[{"type", "path", ...options}]` | none; MINERVA's `minerva.legacy_csv` (a plug-in) |
 
 Every registry is a `robofast_core.plugins.Registry`: `register(name,
 entry)` adds an entry, and a name that is already taken is refused (the
@@ -108,6 +109,9 @@ The other registries work the same way:
   part's config less its `kind`, `ctx` a `BuildContext` (`allowed`: the
   hardware gate, which a real device's driver must honor; `clock`; `world`,
   the simulated sky) (`robofast_core/guider/hardware.py`).
+* **A request importer**: `REQUEST_IMPORTERS.register("mysite.list",
+  fn)` with `fn(path, **options) -> list[RequestGroup]`; a dispatch plan
+  then has `"imports": [{"type": "mysite.list", "path": "targets.txt"}]`.
 * **An observation kind**: subclass `robofast_core.kinds.ObservationKind`
   and register an instance under its `name`. The kind owns its validation
   (`validate`, `fields`), its request mapping (`request_types`,
@@ -118,6 +122,25 @@ The other registries work the same way:
 A plug-in that fails to import, or registers a name that is taken, stops
 the service at start-up with the reason: a config that names it cannot be
 served without it.
+
+## Site code shipped with robofast
+
+`robofast_core/sites/<site>/` holds each site's code: its plug-in (a
+`register()` in the package, listed in that site's configs) and its legacy
+importers with their own command lines:
+
+| Module | What |
+|---|---|
+| `robofast_core.sites.minerva` | the plug-in: weather pages (`minerva.*` sources), the legacy target CSV (`minerva.legacy_csv`) |
+| `robofast_core.sites.minerva.target_sheet` | the target lists from their Google Sheet (`python -m`; docs/minerva_sheet.md) |
+| `robofast_core.sites.minerva.focus_model` | the legacy `guessFocus` model as a `FocusModel` (docs/autofocus.md) |
+| `robofast_core.sites.minerva.guider_calibration` | the legacy SX AO calibration as a matrix (docs/guider.md) |
+| `robofast_core.sites.flwo60.catalogs` | the telshell catalogs, `.mct`/`.off`/`.sec` (`python -m`; docs/catalogs.md) |
+| `robofast_core.sites.flwo60.guider_calibration` | tres-guider's tip/tilt calibration as a matrix |
+
+Core never imports them; `tests/core/test_no_site_values.py` refuses a
+site's name, number or site-named module anywhere else in core but the
+hardware drivers (`robofast_core/devices/`).
 
 ## Not code: device action names
 

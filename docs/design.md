@@ -450,11 +450,12 @@ may be wrong about the 60-inch's focus.
   *standing*: it returns to PENDING after each visit, as MINERVA's RV
   targets do; a cadence `pool` shares `max_per_night` among requests (one
   B star a night, whichever). Requests load from JSON files, validated with errors that
-  name the entry; `from_legacy_csv` converts a legacy MINERVA target
-  spreadsheet export, `robofast_core.catalogs.minerva_sheet` reads
+  name the entry; a site plug-in's request importers convert legacy lists
+  (a dispatch plan's `imports`: MINERVA's target spreadsheet export is
+  `minerva.legacy_csv`), `robofast_core.sites.minerva.target_sheet` reads
   MINERVA's target and B-star lists from their Google Sheet (read only,
   with timestamped snapshots and a fallback to the newest;
-  `docs/minerva_sheet.md`), and `robofast_core.catalogs` the FLWO 60-inch's
+  `docs/minerva_sheet.md`), and `robofast_core.sites.flwo60.catalogs` the FLWO 60-inch's
   telshell catalogs (`.mct` target lists, `.off` offset patterns; `.sec`
   confidential lists described but never decrypted) into an intermediate
   form shaped like the proposed target model, request groups for the
@@ -817,11 +818,12 @@ The plan, approved by JDE 2026-11-01:
    another site's defaults in the device servers, dispatch, photometry,
    vetting, the guider's pulse guiding and the catalog CLI; neutral lamp
    messages with per-enclosure help; the guard test.
-2. Registries and `robofast.plugins` entry points (plan types, observation
-   kinds, instrument handlers, guider hardware, recovery rungs, weather
-   sources), KiwiSpec decoupled from the sequencer, Action names in config,
-   the legacy importers (MINERVA CSV, TRES catalogs, tres-guider
-   calibration) moved under `robofast_core/sites/<site>/`. **2a done**
+2. **Done:** registries and `robofast.plugins` entry points (plan types,
+   observation kinds, instrument handlers, guider hardware, weather
+   sources, request importers), KiwiSpec decoupled from the sequencer,
+   Action names in config, the legacy importers moved under
+   `robofast_core/sites/<site>/`. (The recovery ladder's rungs stay a
+   fixed list until a site needs another.) **2a**
    (docs/plugins.md): the plug-in loader (`robofast_core.plugins`: entry
    points and a config's `plugins`), plan types, observation kinds (one
    handler per kind: `robofast_core/kinds.py`), instrument types
@@ -831,12 +833,19 @@ The plan, approved by JDE 2026-11-01:
    (neutral `SpectrographBusy`/`SpectrographError`, `spectrograph.type`),
    weather sources (MINERVA's adapters loaded from its weather config) and
    notifier sinks.
-   2b: guider hardware registries (`robofast_core/guider/hardware.py`;
+   **2b**: guider hardware registries (`robofast_core/guider/hardware.py`;
    KiwiSpec's backlight registered by `robofast_core.devices`), ADC
    switches found by name (`robofast_core/adc.py`), Action names in config
    with robofast's servers' names as defaults, the console's spectrograph
-   panel described by the instrument type (`status_fields`) done; next,
-   the legacy importers.
+   panel described by the instrument type (`status_fields`); the legacy
+   importers as site code: `robofast_core/sites/minerva/` (the MINERVA
+   plug-in: weather pages, the legacy target CSV as request importer
+   `minerva.legacy_csv`; the target Sheet, the legacy focus model, the
+   legacy AO calibration) and `robofast_core/sites/flwo60/` (the telshell
+   catalogs and their command line, tres-guider's calibration); a legacy
+   frame's port from its file name is the throughput config's
+   `file_ports`. The guard now also refuses a module named after a site
+   outside `sites/` and `devices/`, and its allowlist is empty.
 3. Enclosure operating modes, (b) above.
 4. Config-defined sequences, (c) above.
 
@@ -1005,7 +1014,7 @@ Each step is a CI-tested deliverable.
    next a TOM Toolkit facility module (`docs/tom_facility.md`) and an
    alert-broker client; then MEarth (collision checker). MINERVA's
    target and B-star lists come from their Google Sheet as request groups
-   (built: `robofast_core/catalogs/minerva_sheet.py`,
+   (built: `robofast_core/sites/minerva/target_sheet.py`,
    `docs/minerva_sheet.md`; next, the service-account key on the control
    host and a timer running `export`).
 10. **Done:** several telescopes per enclosure (section 3.5) and the
@@ -1043,7 +1052,7 @@ Each step is a CI-tested deliverable.
     turning it on before light frames and its state in the headers (built:
     `robofast_core/devices/adc_*`, `docs/adc.md`, hardware locked until
     confirmed). The TRES catalogs import as request groups and export
-    back for telshell (built: `robofast_core/catalogs/`,
+    back for telshell (built: `robofast_core/sites/flwo60/catalogs/`,
     `docs/catalogs.md`; the target database waits for the live catalog
     directory). Next: answers to those questions, a TRES
     camera/spectrograph service, then a supervised test on the real TCS.
@@ -1088,11 +1097,12 @@ Each step is a CI-tested deliverable.
     measured on real frames, a pointing-model builder.
 
 18. Site configuration, modes and site code (section 3.10): step 1
-    (site values out of core, the guard test) and step 2a (the plug-in
-    loader; plan, observation-kind, instrument and weather-source
-    registries; KiwiSpec out of the sequencer) done; the rest of step 2
-    (guider hardware, Action names, legacy importers), operating modes and
-    config-defined sequences next.
+    (site values out of core, the guard test) and step 2 (the plug-in
+    loader; plan, observation-kind, instrument, weather-source, guider
+    hardware and request-importer registries; KiwiSpec out of the
+    sequencer; Action names in config; the legacy importers under
+    `robofast_core/sites/`) done; operating modes and config-defined
+    sequences next.
 
 ## 9. Borrowed ideas
 

@@ -20,9 +20,9 @@ from pathlib import Path
 
 import pytest
 
-from robofast_core.catalogs import minerva_sheet as ms
 from robofast_core.dispatch import DispatchScheduler, TelescopeLimits
 from robofast_core.request_model import load_request_groups
+from robofast_core.sites.minerva import target_sheet as ms
 
 DATA = Path(__file__).parent / "data" / "minerva_sheet"
 SITE = Path(__file__).resolve().parents[2] / "sites" / "minerva"

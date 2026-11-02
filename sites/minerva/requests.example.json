@@ -12,12 +12,13 @@
     "  true), for the instrumental profile. Legacy took one a night (scheduler.py, 'weight for 1 Bstar per",
     "  night', from its 'B stars' sheet, not in the public repository). The cadence is the knob: max_per_night",
     "  1 in pool 'bstars' here, one B star a night whichever it is; raise it for more; ipp_value sets how hard",
-    "  the scheduler tries. robofast_core.catalogs.minerva_sheet makes these from the real sheet.",
+    "  the scheduler tries. robofast_core.sites.minerva.target_sheet makes these from the real sheet.",
     "  TEMPLATE-*: an RV star with the iodine cell OUT (extra_params.iodine false), one-shot (no cadence):",
     "  it completes once taken. One per RV star; good seeing and low airmass matter most.",
     "Lamp calibrations (type ARC or LAMP_FLAT) are refused here: KiwiSpec has none (no telescope lists lamps).",
-    "Convert a real legacy targets.csv with robofast_core.request_model.from_legacy_csv, or name it",
-    "as 'legacy_csv' in the dispatch plan entry (sites/minerva/dispatch.example.json)."
+    "Convert a real legacy targets.csv with robofast_core.sites.minerva.legacy_csv.from_legacy_csv, or import it",
+    "in the dispatch plan entry: \"imports\": [{\"type\": \"minerva.legacy_csv\", \"path\": \"targets.csv\"}]",
+    "(with plugins [\"robofast_core.sites.minerva\"]; sites/minerva/dispatch.example.json)."
   ],
   "groups": [
     {

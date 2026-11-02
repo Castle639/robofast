@@ -45,7 +45,8 @@ degrees.)
   `parallax` (mas) and `extra_params.radial_velocity` (km/s) are optional.
   The scheduler ignores them; the barycentric correction uses the proper
   motion.
-* `from_legacy_csv` makes `SPECTRUM` configurations, and
+* `from_legacy_csv` (`robofast_core.sites.minerva.legacy_csv`; the
+  dispatch plan's `imports`, type `minerva.legacy_csv`) makes `SPECTRUM` configurations, and
   `sites/minerva/requests.example.json` uses them.
 
 ## 2. Dispatch: the leader and its feed

@@ -13,7 +13,7 @@
     "9600 baud, XMIN..YMAX +/-500 steps): rename it to 'tiptilt' (and add an 'offload') only during commissioning.",
     "_legacy_seed_calibrations (NOT loaded): the mount's matrix from the plate scale at PA 0, and the AO's from",
     "ao_t2.ini as the pre-2019 legacy code used it (PLATESCALE = 40 steps per arcsec, so 0.025 arcsec/step;",
-    "ROTOFFSET 45) via calibration.from_sx_legacy(0.025, 45, 0.265). Both are unverified starting points to",
+    "ROTOFFSET 45) via robofast_core.sites.minerva.guider_calibration.from_sx_legacy(0.025, 45, 0.265). Both are unverified starting points to",
     "compare with POST /calibrate; README.md lists the conflicting alternatives."
   ],
   "name": "t2-guider",

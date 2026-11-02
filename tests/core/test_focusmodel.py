@@ -9,7 +9,8 @@ import numpy as np
 import pytest
 
 from robofast_core.autofocus import FocusModel, FocusStore
-from robofast_core.focusmodel import fit, legacy_model, main
+from robofast_core.focusmodel import fit, main
+from robofast_core.sites.minerva.focus_model import legacy_model
 
 T2 = {"F0": 16500.0, "C0": -52.94, "T0": 8.95, "C1": 46.18, "dT0": 0.2237, "C2": 2220.265,
       "G0": 0.7824}  # fmt: skip

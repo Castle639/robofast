@@ -1,8 +1,8 @@
 {
   "_note": [
-    "MINERVA's target lists in their Google Sheet, read by robofast_core.catalogs.minerva_sheet (docs/minerva_sheet.md):",
-    "  python -m robofast_core.catalogs.minerva_sheet fetch --config target_sheet.json",
-    "  python -m robofast_core.catalogs.minerva_sheet export --config target_sheet.json -o minerva-requests.json",
+    "MINERVA's target lists in their Google Sheet, read by robofast_core.sites.minerva.target_sheet (docs/minerva_sheet.md):",
+    "  python -m robofast_core.sites.minerva.target_sheet fetch --config target_sheet.json",
+    "  python -m robofast_core.sites.minerva.target_sheet export --config target_sheet.json -o minerva-requests.json",
     "Copy this file to the control host and fill in the placeholders there; never commit the real values.",
     "key_file: MINERVA's Google service-account key (JSON), mode 600, outside any repository. $ROBOFAST_MINERVA_SHEETS_KEY overrides it.",
     "sheet: each list's spreadsheet key (the long id in the Sheet's URL; legacy minerva-control has it in",
