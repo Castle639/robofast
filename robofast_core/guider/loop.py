@@ -750,6 +750,15 @@ class Guider:
             out["residual_rms_arcsec"] = rms * ps
             if self.last is not None and math.isfinite(self.last.fwhm):
                 out["fwhm_arcsec"] = out["fwhm"] * ps
+            # The live seeing (docs/seeing.md): a whole star's FWHM; on the
+            # fiber (annulus) the width learned from a star clear of the
+            # hole, never the fit of the spill around it.
+            if getattr(self._centroider, "name", "") == "annulus":
+                px = getattr(self._centroider, "seeing", None)
+            else:
+                px = out["fwhm"]
+            if px is not None and math.isfinite(px) and px > 0:
+                out["seeing_arcsec"] = px * ps
         return out
 
     def _check_alarms(self) -> None:
@@ -843,6 +852,7 @@ VALUES: dict[str, tuple[str, str, str]] = {
     "guide_rms_arcsec": ("GUIDRMSA", "arcsec", "Guide residual rms (arcsec)"),
     "guide_flux": ("GUIDFLUX", "adu", "Guide star flux per frame (ADU)"),
     "guide_fwhm": ("GUIDFWHM", "pix", "Guide star FWHM (pixels)"),
+    "guide_seeing": ("GUIDSEE", "arcsec", "Seeing FWHM from the guide camera"),
     "guide_rate": ("GUIDRATE", "Hz", "Guide loop rate"),
     "guide_latency": ("GUIDLAT", "s", "Guide latency, exposure end to command (median)"),
     "guide_exptime": ("GUIDEXP", "s", "Guide exposure time"),
@@ -893,6 +903,7 @@ def publish_values(
             ("guide_rms_arcsec", "residual_rms_arcsec"),
             ("guide_flux", "flux"),
             ("guide_fwhm", "fwhm"),
+            ("guide_seeing", "seeing_arcsec"),
             ("guide_rate", "loop_rate"),
             ("guide_latency", "latency_median"),
         ):

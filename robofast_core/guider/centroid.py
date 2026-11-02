@@ -403,6 +403,15 @@ class AnnulusCentroider:
             self.learn(m)
         return m
 
+    @property
+    def seeing(self) -> float | None:
+        """The seeing FWHM (pixels) learned from a star clear of the hole
+        (None until then, and always None when ``fwhm`` is configured: a
+        fixed width is not a measurement). The guide loop reports it as
+        its live seeing (docs/seeing.md): the fitted width of a star half
+        in the hole is not one."""
+        return self._learned
+
     def learn(self, m: Measurement) -> None:
         """Learn the seeing FWHM from a star clear of the hole."""
         if not (m.valid and math.isfinite(m.fwhm) and m.fwhm > 0):

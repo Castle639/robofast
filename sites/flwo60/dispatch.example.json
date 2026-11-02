@@ -23,10 +23,12 @@
         "_note": [
           "When to offset guide (robofast_core/guider/recommend.py; docs/offset_guiding.md): guide 'auto'.",
           "1.5 m Tillinghast; TRES's 2.3 arcsec fiber in a reflective plate seen by the tres-guider Andor Zyla.",
-          "ASSUMED, to measure: plate_scale, throughput, read_noise, exposure, obscuration.",
+          "plate_scale 0.161 arcsec/px: tres-guider's config/zyla.ini (Andor Zyla 4.2P).",
+          "ASSUMED, to measure: fiber_diameter (2.3 arcsec, unconfirmed), throughput, read_noise, exposure, obscuration.",
+          "seeing: the fallback when the guiders have nothing recent (docs/seeing.md).",
           "Thresholds: max_error (arcsec rms), min_snr, prefer_annulus."
         ],
-        "aperture": 1.5, "obscuration": 0.1, "fiber_diameter": 2.3, "plate_scale": 0.12,
+        "aperture": 1.5, "obscuration": 0.1, "fiber_diameter": 2.3, "plate_scale": 0.161,
         "read_noise": 1.4, "throughput": 0.1, "exposure": 1.0,
         "sky": 21.0, "seeing": 1.5, "star_g": 11.0, "separation": 60.0,
         "max_error": 0.25, "min_snr": 5.0, "prefer_annulus": 1.5
