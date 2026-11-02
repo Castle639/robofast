@@ -25,6 +25,14 @@
 ``mode`` ``"open"`` measures and reports without moving anything (for
 commissioning and for checking a calibration); ``"closed"`` guides.
 
+**Offset guiding** (:meth:`Guider.set_offset`; docs/offset_guiding.md):
+the guider holds a guide star at the fiber plus the guide star's offset
+from the science target (:class:`~robofast_core.guider.offset.OffsetGuide`),
+so the target sits on the fiber; the setpoint is recomputed every
+``update`` seconds (proper motion, differential refraction, field
+rotation) without resetting the controller, and the centroider is a plain
+one (the guide star is clear of the fiber hole).
+
 Telemetry (:meth:`Guider.status`): the last frame, and over the last
 ``window`` frames the residual rms (pixels, and arcsec with a plate scale),
 loop rate, latency (median, 95th percentile, max), flux, FWHM, tip/tilt
@@ -221,6 +229,7 @@ class Guider:
         self._task: asyncio.Task | None = None
         self._stop = asyncio.Event()
         self._last_publish = -math.inf
+        self.offset: Any = None
         self._centroider = self._make_centroider()
         self._ref_flux: float | None = None
         self._roi: ROI | None = None
@@ -237,6 +246,13 @@ class Guider:
         #: Where the last acquisition frame put the target (None: unsolved).
         self.identified: tuple[float, float] | None = None
         self._why = ""
+        #: Offset guiding (:meth:`set_offset`): the setpoint model, the
+        #: fiber pixel it is measured from, clock time -> UTC, the last
+        #: solution and when the setpoint is next recomputed.
+        self.fiber: tuple[float, float] | None = None
+        self._utc_at: Callable[[float], datetime] | None = None
+        self.offset_info: dict[str, Any] | None = None
+        self._offset_due = math.inf
 
     # -- configuration --------------------------------------------------------------
 
@@ -251,8 +267,11 @@ class Guider:
 
     def _make_centroider(self) -> Any:
         c = self.config
-        fiber = None if c.target is None else (c.target[0], c.target[1], c.fiber_radius)
         spec = dict(c.centroider or {"kind": "com"})
+        if self.offset is not None:
+            # The guide star is clear of the fiber: no hole to model.
+            return WindowedCOM() if spec.get("kind") == "annulus" else make_centroider(spec)
+        fiber = None if c.target is None else (c.target[0], c.target[1], c.fiber_radius)
         if spec.get("kind") == "annulus":
             if fiber is None:
                 return WindowedCOM()
@@ -267,6 +286,60 @@ class Guider:
         self._centroider = self._make_centroider()
         if self._roi is not None and not self._roi.contains(x, y, margin=4):
             self._roi = ROI.centred(x, y, self.config.roi_size, self.camera.sensor)
+
+    # -- offset guiding ----------------------------------------------------------------
+
+    def set_offset(self, offset: Any, utc_at: Callable[[float], datetime]) -> dict[str, Any]:
+        """Guide on an offset star (module doc): ``offset`` an
+        :class:`~robofast_core.guider.offset.OffsetGuide`, ``utc_at`` maps
+        the guider's clock to UTC. The current target pixel is the fiber.
+        Returns the setpoint's solution."""
+        if self.running:
+            raise GuiderError("stop guiding before changing the guide star")
+        fiber = self.fiber if self.fiber is not None else self.config.target
+        if fiber is None:
+            raise GuiderError("no fiber pixel: configure it or locate the fiber")
+        self.fiber = (float(fiber[0]), float(fiber[1]))
+        self.offset = offset
+        self._utc_at = utc_at
+        self._offset_due = -math.inf
+        return self._update_offset(force=True)
+
+    def clear_offset(self) -> None:
+        """Back to guiding on the target itself, at the fiber."""
+        fiber, self.fiber = self.fiber, None
+        self.offset = self._utc_at = self.offset_info = None
+        self._offset_due = math.inf
+        if fiber is not None:
+            self.set_target(*fiber)
+
+    def _update_offset(self, force: bool = False) -> dict[str, Any]:
+        """Recompute the offset setpoint if due (keeps the controller)."""
+        now = self.clock.now()
+        if self.offset is None or (not force and now < self._offset_due):
+            return self.offset_info or {}
+        assert self.fiber is not None and self._utc_at is not None
+        sol = self.offset.solve(self._utc_at(now))
+        x = self.fiber[0] + sol["pixels"][0]
+        y = self.fiber[1] + sol["pixels"][1]
+        sol["setpoint"] = [round(x, 3), round(y, 3)]
+        prev = self.config.target
+        self.set_target(x, y)
+        self.offset_info = sol
+        self._offset_due = now + max(float(self.offset.update), 0.1)
+        if force or prev is None or math.hypot(x - prev[0], y - prev[1]) > 0.05:
+            log.info(
+                'guider %s: offset star at %+.1f" E %+.1f" N of the target -> setpoint'
+                " %.2f, %.2f (refraction %s arcsec, PA %.2f)",
+                self.config.scope,
+                sol["east"],
+                sol["north"],
+                x,
+                y,
+                sol.get("refraction", "not computed"),
+                sol["pa"],
+            )
+        return sol
 
     def set_gains(self, gains: dict[str, float]) -> None:
         merged = {**self.controller.gains.as_json(), **gains}
@@ -357,6 +430,7 @@ class Guider:
             raise GuiderError("stop guiding before locating the fiber")
         if self.backlight is None:
             raise GuiderError("no backlight configured")
+        self.clear_offset()
         self._set_state("locating")
         try:
             await self.backlight.set(True)
@@ -548,6 +622,8 @@ class Guider:
         fine, cal = self.fine, self.fine_cal
         assert fine is not None
         while not self._stop.is_set():
+            if self.offset is not None:
+                self._update_offset()  # proper motion, refraction, field rotation
             frame = await self.camera.expose(c.exposure, self._roi, c.gain)
             self.frames += 1
             m = self._centroider.measure(frame, guess)
@@ -694,6 +770,11 @@ class Guider:
             "acquisition": None if self.acquirer is None else self.acquirer.summary(),
             "mode": c.mode,
             "target": list(c.target) if c.target else None,
+            "guide_mode": "offset" if self.offset is not None else "target",
+            "fiber": list(self.fiber) if self.fiber else (list(c.target) if c.target else None),
+            "offset_guide": None
+            if self.offset is None
+            else {**self.offset.describe(), "now": self.offset_info},
             "roi": self._roi.as_json() if self._roi else None,
             "exposure": c.exposure,
             "centroider": getattr(self._centroider, "name", "?"),
@@ -717,6 +798,12 @@ class Guider:
             "alarms": [asdict(a) for a in self.alarms],
         }
 
+    def status_offset(self) -> dict[str, Any] | None:
+        """The guide mode and star for the FITS headers (:func:`publish_values`)."""
+        if self.offset is None:
+            return {"guide_mode": "target"}
+        return {"guide_mode": "offset", **self.offset.describe(), "now": self.offset_info}
+
     def _publish(self, force: bool = False) -> None:
         now = self.clock.now()
         if not force and now - self._last_publish < self.config.publish_interval:
@@ -730,9 +817,10 @@ class Guider:
                     self.config.scope,
                     self.state,
                     s,
-                    target=self.config.target,
+                    target=self.fiber or self.config.target,
                     exposure=self.config.exposure,
                     tiptilt_position=None if self.tiptilt is None else self.tiptilt.position,
+                    offset=self.status_offset(),
                 )
             except Exception:
                 log.exception("guider: publishing values")
@@ -762,6 +850,17 @@ VALUES: dict[str, tuple[str, str, str]] = {
     "fiber_y": ("YSCIFIB", "pix", "Y pixel of the science fiber (guide camera)"),
     "tiptilt_a": ("TTPOSA", "", "Tip/tilt position, axis A"),
     "tiptilt_b": ("TTPOSB", "", "Tip/tilt position, axis B"),
+    "guide_mode": ("GUIDMODE", "", "Guided on: target (annulus) or offset star"),
+    "gstar_source": ("GSSOURCE", "", "Offset guide star: offset, coordinates, catalog"),
+    "gstar_ra": ("GSRA", "deg", "Offset guide star RA (ICRS, epoch of obs)"),
+    "gstar_dec": ("GSDEC", "deg", "Offset guide star Dec (ICRS, epoch of obs)"),
+    "gstar_g": ("GSMAG", "mag", "Offset guide star magnitude (Gaia G)"),
+    "gstar_id": ("GSID", "", "Offset guide star Gaia DR3 source_id"),
+    "gstar_east": ("GSOFFE", "arcsec", "Guide star minus target, east"),
+    "gstar_north": ("GSOFFN", "arcsec", "Guide star minus target, north"),
+    "gstar_x": ("GSPIXX", "pix", "Guide star setpoint X (guide camera)"),
+    "gstar_y": ("GSPIXY", "pix", "Guide star setpoint Y (guide camera)"),
+    "gstar_dar": ("GSDAR", "arcsec", "Differential refraction across the offset"),
 }
 
 
@@ -776,6 +875,7 @@ def publish_values(
     tiptilt_position: tuple[float, float] | list[float] | None,
     max_age: float = 10.0,
     measured: datetime | None = None,
+    offset: dict[str, Any] | None = None,
 ) -> None:
     """Publish the guider's state to a value registry (design.md 3.8):
     ``<scope>.guide_*`` with FITS keywords (:data:`VALUES`). Used by the
@@ -801,6 +901,8 @@ def publish_values(
                 vals[name] = round(float(v), 6)
     if tiptilt_position is not None:
         vals["tiptilt_a"], vals["tiptilt_b"] = (round(float(p), 6) for p in tiptilt_position)
+    if offset is not None:
+        vals.update(_offset_values(offset))
     for name, value in vals.items():
         kw, unit, comment = VALUES[name]
         registry.publish(
@@ -812,3 +914,28 @@ def publish_values(
             keyword=kw,
             comment=comment,
         )
+
+
+def _offset_values(offset: dict[str, Any]) -> dict[str, Any]:
+    """The ``guide_mode`` and ``gstar_*`` values of a status's offset entry."""
+    vals: dict[str, Any] = {"guide_mode": offset.get("guide_mode", "target")}
+    if vals["guide_mode"] != "offset":
+        return vals
+    star = offset.get("star") or {}
+    now = offset.get("now") or {}
+    vals["gstar_source"] = star.get("source", "?")
+    for name, key in (("gstar_ra", "ra"), ("gstar_dec", "dec"), ("gstar_g", "g")):
+        if star.get(key) is not None:
+            vals[name] = round(float(star[key]), 7)
+    if star.get("source_id") is not None:
+        vals["gstar_id"] = str(star["source_id"])
+    for name, key in (("gstar_east", "east"), ("gstar_north", "north")):
+        if now.get(key) is not None:
+            vals[name] = round(float(now[key]), 3)
+    sp = now.get("setpoint")
+    if sp:
+        vals["gstar_x"], vals["gstar_y"] = (round(float(v), 3) for v in sp)
+    dar = now.get("refraction")
+    if dar:
+        vals["gstar_dar"] = round(math.hypot(float(dar[0]), float(dar[1])), 4)
+    return vals

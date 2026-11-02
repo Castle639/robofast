@@ -407,6 +407,9 @@ class SimWorld:
     plate_scale: float = 0.5
     pa: float = 30.0
     parity: int = 1
+    #: Field rotation: the sky turns about pixel (x, y) at ``deg/s``
+    #: (an alt-az port without a derotator); None: no rotation.
+    rotation: tuple[float, float, float] | None = None
     seed: int = 0
     noise: bool = True
     rng: np.random.Generator = field(init=False, repr=False)
@@ -443,24 +446,50 @@ class SimWorld:
             d += self.mount_matrix @ self.mount.position_at(t)
         return d
 
+    def rotated(self, p: Sequence[float], t: float) -> np.ndarray:
+        """Where the sky's nominal pixel ``p`` is at time ``t`` (field rotation)."""
+        p = np.asarray(p, dtype=float)
+        if self.rotation is None:
+            return p
+        cx, cy, rate = self.rotation
+        a = math.radians(rate * (t - self.t_origin))
+        c, s = math.cos(a), math.sin(a)
+        d = p - (cx, cy)
+        return np.array([cx + c * d[0] - s * d[1], cy + s * d[0] + c * d[1]])
+
     def star_at(self, t: float) -> np.ndarray:
-        return np.asarray(self.star) + self.motion_at(t)
+        return self.rotated(self.star, t) + self.motion_at(t)
+
+    def source_at(self, nominal: Sequence[float], t: float) -> np.ndarray:
+        """Where a source at nominal pixel ``nominal`` (one of ``others``,
+        say the target of an offset-guided observation) truly is at ``t``."""
+        return self.rotated(nominal, t) + self.motion_at(t)
 
     def residual_rms(
-        self, target: tuple[float, float], t0: float, t1: float, dt: float = 1e-3
+        self,
+        target: tuple[float, float],
+        t0: float,
+        t1: float,
+        dt: float = 1e-3,
+        source: Sequence[float] | None = None,
     ) -> float:
-        """Rms distance (pixels) of the true star from ``target`` over
-        [t0, t1] (module doc)."""
+        """Rms distance (pixels) of the true star (or of the source at
+        nominal pixel ``source``) from ``target`` over [t0, t1] (module doc)."""
         ts = np.arange(t0, t1, dt)
         tgt = np.asarray(target)
-        d = np.array([self.star_at(float(t)) - tgt for t in ts])
+        src = self.star if source is None else source
+        d = np.array([self.source_at(src, float(t)) - tgt for t in ts])
         return float(np.sqrt(np.mean(np.sum(d * d, axis=1))))
 
     def render(self, roi: ROI, t0: float, t1: float) -> np.ndarray:
         shift = self.motion(t0, t1)
         k = self.transparency
-        stars = [(self.star[0], self.star[1], self.flux * k)]
-        stars += [(x, y, f * k) for x, y, f in self.others]
+        mid = 0.5 * (t0 + t1)
+        sx, sy = self.rotated(self.star, mid)
+        stars = [(float(sx), float(sy), self.flux * k)]
+        for x, y, f in self.others:
+            ox, oy = self.rotated((x, y), mid)
+            stars.append((float(ox), float(oy), f * k))
         return render_window(
             roi,
             [] if self.backlit else stars,

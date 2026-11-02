@@ -333,7 +333,14 @@ that the guider has not failed; the observation's end stops it. Cleanup
 and a telescope's error path stop the guider *before* aborting the slew
 and parking. A guider failure is that telescope's ordinary error. The
 guider is a separate service reached over HTTP (section 3.1,
-`docs/guider.md`); per telescope, `guider` in the enclosure config.
+`docs/guider.md`); per telescope, `guider` in the enclosure config. A
+configuration with `guiding_config.extra_params.guide: "offset"` is
+*offset guided* (`docs/offset_guiding.md`): the guider holds a nearby
+star (given, or chosen from Gaia) at the fiber plus that star's offset
+from the target, with proper motion, differential refraction and field
+rotation folded in, so a target too faint for annulus guiding still sits
+on the fiber; the guide mode and star go into the FITS headers
+(`GUIDMODE`, `GS*`) and the decision record.
 
 **Saving frames.** With an `images` entry in the enclosure config, every
 frame is saved (`robofast_core/imaging.py`, `docs/data.md`). The image is
@@ -1087,7 +1094,8 @@ Each step is a CI-tested deliverable.
 14. Guider (built, simulators only; `docs/guider.md`): a generic guide
     service next to the camera, with SX AO, PI E-518 and mount-offset
     backends and their simulators, measured calibrations, offloading, fiber
-    acquisition, and the sequencer hook. Next: the ZWO backend on a real
+    acquisition, offset guiding (`docs/offset_guiding.md`), and the
+    sequencer hook. Next: the ZWO backend on a real
     FAU camera, then T2's AO unit commissioned (attended, with JDE's
     approval), then the TRES front end (an Andor Zyla backend).
 15. Autofocus (built; `docs/autofocus.md`): star measurement, the V-curve,

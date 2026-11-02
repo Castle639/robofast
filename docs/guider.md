@@ -287,7 +287,8 @@ built-in `robofast_core.devices` plug-in. In short:
   side, compressed, with the target (fiber) and its radius, the last
   centroid and the guide window to draw over it. Display only: the
   observer console's guider thumbnails (docs/console.md, "Images");
-- `POST /start` (`target`, `mode`, `exposure`, `dec`), `/stop`, `/mode`
+- `POST /start` (`target`, `mode`, `exposure`, `dec`; `offset_guide` to
+  guide on an offset star: `docs/offset_guiding.md`), `/stop`, `/mode`
   (`closed`, or `open`: measure only, for commissioning), `/target` (moves
   the setpoint, keeps the controller's state), `/gains`, `/roi`,
   `/exposure`, `/locate`, `/calibrate`.
@@ -391,5 +392,6 @@ the camera or the telescope.** The unit has never been commissioned.
   the plate scale and PA of each guide camera.
 - The dispatch scheduler does not yet keep `guide` requests off telescopes
   without a guider (such an observation fails on that telescope instead).
-- Sky-fiber and offset guiding (a target pixel offset from the fiber) work
-  through `POST /target`, but nothing in the request model asks for them.
+- Sky-fiber guiding works through `POST /target`, but nothing in the
+  request model asks for it. Offset guiding (on a star near a faint
+  target) is `docs/offset_guiding.md`.

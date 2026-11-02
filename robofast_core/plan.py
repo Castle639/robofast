@@ -100,6 +100,13 @@ class Observation:
     #: stopped when the observation ends (docs/guider.md). A telescope
     #: without a guider fails such an observation.
     guide: bool = False
+    #: Offset guiding (docs/offset_guiding.md): guide on a star near the
+    #: target, held where the target falls on the fiber -- the guider's
+    #: ``offset_guide`` (``star``: ``"auto"``, ``{"east", "north"}`` arcsec
+    #: of the guide star from the target, or its ``{"ra", "dec", ...}``;
+    #: ``target``: ``{"ra", "dec"}`` deg and proper motion; ``site``, for
+    #: differential refraction). None: guide on the target itself.
+    guide_offset: dict[str, Any] | None = None
     #: What to do on the target: ``"expose"`` (``count`` frames),
     #: ``"autofocus"`` (focus the telescope there: :mod:`robofast_core.autofocus`;
     #: ``exptime`` and ``count`` come from the telescope's autofocus config),
@@ -156,6 +163,11 @@ class Observation:
                 f" {tuple(OBSERVATION_KINDS.names())}"
             )
         kind.validate(self)
+        if self.guide_offset is not None:
+            if not self.guide:
+                raise ValueError(f"observation {self.name!r}: guide_offset without guide")
+            if not isinstance(self.guide_offset, dict) or "target" not in self.guide_offset:
+                raise ValueError(f"observation {self.name!r}: guide_offset needs its target")
         for f in _KIND_FIELDS:
             if getattr(self, f) is None or f in kind.fields:
                 continue

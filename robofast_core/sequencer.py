@@ -1929,6 +1929,8 @@ class Sequencer:
                 sigma = self._pointing_sigma(unit, obs.port)
                 if sigma is not None:
                     extra["pointing_sigma"] = sigma
+                if obs.guide_offset is not None:
+                    extra["offset_guide"] = obs.guide_offset
                 st = await unit.guider.start(
                     dec=dec,
                     target_radec=[ra * 15.0, dec],
@@ -1937,11 +1939,18 @@ class Sequencer:
                 )
                 done = (st or {}).get("acquisition") if isinstance(st, dict) else None
                 self._acquired(unit, done)
+                offset = (st or {}).get("offset_guide") if isinstance(st, dict) else None
                 self._event(
                     "guiding",
                     gen=gen,
                     telescope=unit.name,
                     target=obs.name,
+                    guide_mode="offset" if offset else "annulus",
+                    **(
+                        {}
+                        if not offset
+                        else {"guide_star": offset.get("star"), "guide_offset": offset.get("now")}
+                    ),
                     **(
                         {}
                         if not done

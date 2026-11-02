@@ -553,6 +553,7 @@ class DispatchScheduler:
             priority_class=req.group.priority_class,
             score=best.score,
             terms=best.terms,
+            **({"guide": {"on": "offset", **obs.guide_offset}} if obs.guide_offset else {}),
             **({"demoted": best.demoted} if best.demoted else {}),
             **self._summary(best, cands),
         )
@@ -1511,7 +1512,31 @@ class DispatchScheduler:
             acquisition=self._acquisition_entry(visit, c),
             params=params,
         )
-        return Observation(**c.kind.observation(mapping))
+        obs = Observation(**c.kind.observation(mapping))
+        if obs.guide and c.guide_on == "offset":
+            obs.guide_offset = self._guide_offset(c)
+        return obs
+
+    def _guide_offset(self, c: Configuration) -> dict[str, Any]:
+        """The guider's ``offset_guide`` for configuration ``c``
+        (docs/offset_guiding.md): its offset star, the target's astrometry
+        and the site (for differential refraction)."""
+        t = c.target
+        return {
+            "star": "auto" if c.offset_star is None else c.offset_star,
+            "target": {
+                "ra": t.ra,
+                "dec": t.dec,
+                "pmra": t.pm_ra or 0.0,
+                "pmdec": t.pm_dec or 0.0,
+                "epoch": t.epoch or 2000.0,
+            },
+            "site": {
+                "latitude": self.site.latitude,
+                "longitude": self.site.longitude,
+                "elevation": self.site.elevation,
+            },
+        }
 
     def _observation(self, visit: _Visit) -> Observation:
         obs = self._make_observation(visit)

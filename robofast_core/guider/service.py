@@ -31,6 +31,14 @@ calibrated) or 503 (a device failed).
   ``select: "catalog"`` find the target by plate solving the acquisition
   frame (needs ``catalog`` and ``solver`` in the config; docs/sky.md);
   ``unambiguous`` allows the brightest-star fallback when it cannot.
+  ``"offset_guide"?: {"target": {"ra", "dec", "pmra"?, "pmdec"?, "epoch"?},
+  "star": "auto" | {"east", "north"} | {"ra", "dec", "pmra"?, "pmdec"?,
+  "epoch"?, "g"?}, "site"?: {"latitude", "longitude", "elevation", ...},
+  "pa"?: deg}`` guides on an offset star (docs/offset_guiding.md): the
+  guide star is held where the target falls on the fiber, and acquisition
+  looks for the guide star (``target_radec`` is ignored). ``"auto"``
+  chooses it from ``catalog``. ``GET /status`` reports it
+  (``guide_mode``, ``offset_guide``).
 * ``POST /stop`` ``{"reason"?}`` -- stop (bounded); always answers.
 * ``POST /mode`` ``{"mode"}``, ``POST /target`` ``{"x", "y"}`` (moves the
   setpoint without resetting the controller), ``POST /gains`` ``{"kp",
@@ -95,7 +103,7 @@ import math
 import signal
 import sys
 from dataclasses import asdict, dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from http import HTTPStatus
 from typing import Any
 from urllib.parse import parse_qs, urlparse
@@ -174,6 +182,13 @@ class GuiderServiceConfig:
     #: :class:`~robofast_core.guider.acquire.AcqConfig`). Every start then
     #: runs the cascade (``mode`` from the target, default AUTO).
     acquisition: dict[str, Any] | None = None
+    #: Offset guiding (docs/offset_guiding.md): ``update`` (s between
+    #: setpoint updates), ``refraction`` (correct differential refraction,
+    #: default true), ``field_rotation`` (``"none"``: an equatorial mount or
+    #: a derotated port; ``"altaz"`` with ``sense``), ``wavelength`` (um,
+    #: the guide camera's band) and ``auto`` (choosing the guide star:
+    #: :class:`~robofast_core.guider.offset.AutoConfig`).
+    offset_guide: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> GuiderServiceConfig:
@@ -195,7 +210,7 @@ def build_world(spec: dict[str, Any], clock: Clock) -> SimWorld:
     jit = s.pop("jitter", None)
     fib = s.pop("fiber", None)
     ttm = s.pop("tt_matrix", None)
-    for k in ("sensor", "star"):
+    for k in ("sensor", "star", "rotation"):
         if k in s:
             s[k] = tuple(s[k])
     world = SimWorld(
@@ -558,6 +573,9 @@ class GuiderService:
                     g.config.exposure = _positive(args["exposure"], 60.0)
                 if "dec" in args and g.mount is not None:
                     g.mount.dec_deg = float(args["dec"])
+                g.clear_offset()
+                if args.get("offset_guide"):
+                    args = self._set_offset(args)
                 self._set_identifier(args)
                 try:
                     g.start()
@@ -604,6 +622,98 @@ class GuiderService:
             return 503, {"error": f"{type(exc).__name__}: {exc}"}
         except (ValueError, TypeError, KeyError) as exc:
             return 400, {"error": f"bad request: {exc!r}"}
+
+    def _set_offset(self, args: dict[str, Any]) -> dict[str, Any]:
+        """Offset guiding for this start (module doc): choose or take the
+        guide star, set the setpoint, and acquire the guide star instead of
+        the target (returns ``args`` with ``target_radec`` the guide star's)."""
+        from robofast_core.guider import offset as og
+
+        g = self.guider
+        spec = dict(args["offset_guide"])
+        known = {"target", "star", "site", "pa"}
+        if set(spec) - known:
+            raise ValueError(f"offset_guide: unknown keys {sorted(set(spec) - known)}")
+        conf = dict(self.config.offset_guide)
+        target = og.TargetPosition.from_dict(spec["target"])
+        site = None
+        if spec.get("site"):
+            site = og.OffsetSite.from_dict(
+                {"wavelength": conf.get("wavelength", 0.65), **spec["site"]}
+            )
+        pa_cal = self.pa_cal
+        scale = g.config.plate_scale or (pa_cal.plate_scale if pa_cal else None)
+        if not scale:
+            raise _HTTPError(409, "offset guiding needs the guide camera's plate_scale")
+        pa = (
+            float(spec["pa"])
+            if spec.get("pa") is not None
+            else (pa_cal.pa(0.0) if pa_cal else None)
+        )
+        if pa is None:
+            raise _HTTPError(409, "offset guiding needs the port's PA (pa_calibration or 'pa')")
+        flip = False if pa_cal is None else bool(pa_cal.flip)
+        fiber = g.fiber or g.config.target
+        if fiber is None:
+            raise _HTTPError(409, "no fiber pixel: configure it or locate the fiber")
+        now = datetime.now(UTC)
+        star = og.guide_star_from_spec(spec.get("star", "auto"))
+        if star is None:
+            if self._catalog is None:
+                raise _HTTPError(409, "offset_star 'auto' needs a catalog in the guider config")
+            star, notes = self._choose_star(target, now, fiber, scale, pa, flip, conf)
+            if star is None:
+                raise _HTTPError(
+                    409,
+                    "no usable offset guide star in the field" + (f": {notes}" if notes else ""),
+                )
+        offset = og.OffsetGuide(
+            target,
+            star,
+            float(scale),
+            float(pa),
+            flip,
+            site=site,
+            refraction=bool(conf.get("refraction", True)),
+            field_rotation=str(conf.get("field_rotation", "none")),
+            sense=int(conf.get("sense", 1)),
+            update=float(conf.get("update", 10.0)),
+            start=now,
+        )
+        t0 = self.clock.now()
+        g.set_offset(offset, lambda t: now + timedelta(seconds=t - t0))
+        ra, dec = star.radec(target, now)
+        return {**args, "target_radec": [ra, dec]}
+
+    def _choose_star(
+        self, target: Any, now: datetime, fiber: Any, scale: float, pa: float, flip: bool, conf: Any
+    ) -> tuple[Any, list[str]]:
+        """``offset_star: "auto"``: the best catalog star in the field."""
+        from robofast_core.catalog import CatalogUnavailable
+        from robofast_core.guider import offset as og
+
+        nx, ny = self.guider.camera.sensor
+        radius = math.hypot(nx, ny) * scale / 3600.0
+        ra, dec = target.at(now)
+        auto = og.AutoConfig.from_dict(conf.get("auto"))
+        try:
+            stars = self._catalog.cone(ra, dec, radius, epoch=now, mag_limit=auto.g_faint)
+        except CatalogUnavailable as exc:
+            raise _HTTPError(503, f"offset_star 'auto': no catalog ({exc})") from exc
+        star, notes = og.choose_guide_star(
+            stars,
+            target,
+            now,
+            fiber=(float(fiber[0]), float(fiber[1])),
+            sensor=(nx, ny),
+            plate_scale=scale,
+            pa=pa,
+            flip=flip,
+            config=auto,
+        )
+        for n in notes:
+            log.info("offset star candidate %s", n)
+        return star, notes
 
     def _set_identifier(self, args: dict[str, Any]) -> None:
         """Catalog acquisition (``select: "catalog"``) for this start's
@@ -900,12 +1010,14 @@ class GuiderRemote:
         if self.registry is None:
             return
         tt = st.get("tiptilt")
+        offset = {"guide_mode": st.get("guide_mode") or "target", **(st.get("offset_guide") or {})}
         publish_values(
             self.registry,
             self.scope,
             st.get("state", "?"),
             st.get("telemetry") or {},
-            target=st.get("target"),
+            target=st.get("fiber") or st.get("target"),
+            offset=offset if "guide_mode" in st else None,
             exposure=st.get("exposure"),
             tiptilt_position=None if not tt else tt.get("position"),
             max_age=max(3 * self.poll_interval, 10.0),
