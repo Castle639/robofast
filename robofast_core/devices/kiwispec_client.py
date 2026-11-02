@@ -24,23 +24,24 @@ its listener, are not in it), replies are parsed into types, only read-only
 commands are retried (a bounded number of times, in a loop: no recursion),
 and the wire lock is always released (``async with``).
 
-Nothing here connects anywhere but loopback unless the caller passes
-``allow_hardware=True`` (see :func:`check_device_address`).
+Nothing here connects anywhere but a verified simulator unless the caller
+passes ``allow_hardware=True`` (see :func:`check_device_address` and
+:mod:`robofast_core.hwgate`; loopback alone is not enough, since an SSH
+tunnel to the spectrograph PC is loopback too).
 """
 
 from __future__ import annotations
 
 import asyncio
 import contextlib
-import ipaddress
 import logging
 import re
-import socket
 import struct
 import time
 from dataclasses import dataclass
 from typing import Any
 
+from robofast_core import hwgate
 from robofast_core.cancel import stop_task
 from robofast_core.instruments import SpectrographBusy, SpectrographError
 
@@ -91,28 +92,33 @@ class KiwiSpecBusy(KiwiSpecError, SpectrographBusy):
     the spectrograph"): nothing is wrong with the spectrograph."""
 
 
-class HardwareNotAllowed(KiwiSpecError):
-    """A non-loopback address without hardware permission."""
+class HardwareNotAllowed(KiwiSpecError, hwgate.HardwareNotAllowed):
+    """An address that may be real hardware, without hardware permission."""
 
 
-def check_device_address(host: str, *, allow_hardware: bool, what: str = "KiwiSpec") -> str:
+def check_device_address(
+    host: str, port: int, *, allow_hardware: bool, what: str = "KiwiSpec"
+) -> str:
     """Resolve ``host`` once; return the IP literal to connect to.
 
-    Unless ``allow_hardware``, every address it resolves to must be loopback
-    (a simulator); otherwise :class:`HardwareNotAllowed`. Callers connect to
-    the returned literal, so a later DNS change cannot redirect them.
+    Unless ``allow_hardware``, ``host:port`` must be a verified simulator
+    (:func:`robofast_core.hwgate.check_endpoint`); otherwise
+    :class:`HardwareNotAllowed`. Callers connect to the returned literal, so
+    a later DNS change cannot redirect them.
     """
     try:
-        infos = socket.getaddrinfo(host, None, type=socket.SOCK_STREAM)
-    except socket.gaierror as exc:
-        raise HardwareNotAllowed(f"cannot resolve {what} host {host!r}: {exc}") from exc
-    addrs = [ipaddress.ip_address(str(info[4][0]).split("%")[0]) for info in infos]
-    if not allow_hardware and not all(a.is_loopback for a in addrs):
-        raise HardwareNotAllowed(
-            f"{what} host {host!r} ({', '.join(map(str, addrs))}) is not loopback: refusing to"
-            " talk to real hardware without allow_hardware in the config AND --hardware"
+        return hwgate.check_endpoint(
+            host, port, allow_hardware=allow_hardware, what=what, allow_absent=True
         )
-    return str(addrs[0])
+    except hwgate.HardwareNotAllowed as exc:
+        raise HardwareNotAllowed(str(exc)) from None
+
+
+def _guard(host: str, port: int, *, allow_hardware: bool, what: str) -> hwgate.SimulatorGuard:
+    try:
+        return hwgate.SimulatorGuard(host, port, hardware=allow_hardware, what=what)
+    except hwgate.HardwareNotAllowed as exc:
+        raise HardwareNotAllowed(str(exc)) from None
 
 
 # -- the spectrograph server (ASCII) ------------------------------------------------
@@ -332,8 +338,11 @@ class SpecServerClient:
         reply_timeouts: dict[str, float] | None = None,
         max_reply_timeout: float | None = None,
     ) -> None:
-        self.host = check_device_address(host, allow_hardware=allow_hardware, what="spectrograph")
+        self.host = check_device_address(
+            host, port, allow_hardware=allow_hardware, what="spectrograph"
+        )
         self.port = port
+        self._guard = _guard(self.host, port, allow_hardware=allow_hardware, what="spectrograph")
         self.connect_timeout = connect_timeout
         self.send_timeout = send_timeout
         self.max_attempts = max(1, int(max_attempts))
@@ -392,6 +401,10 @@ class SpecServerClient:
         raise AssertionError("unreachable")  # pragma: no cover
 
     async def _exchange(self, name: str, msg: bytes) -> bytes:
+        try:
+            self._guard.check()
+        except hwgate.HardwareNotAllowed as exc:
+            raise HardwareNotAllowed(f"{name}: {exc}") from None
         try:
             async with asyncio.timeout(self.connect_timeout):
                 reader, writer = await asyncio.open_connection(self.host, self.port)
@@ -627,8 +640,11 @@ class SICameraClient:
         connect_timeout: float = 5.0,
         command_timeout: float = 10.0,
     ) -> None:
-        self.host = check_device_address(host, allow_hardware=allow_hardware, what="SI camera")
+        self.host = check_device_address(
+            host, port, allow_hardware=allow_hardware, what="SI camera"
+        )
         self.port = port
+        self._guard = _guard(self.host, port, allow_hardware=allow_hardware, what="SI camera")
         self.connect_timeout = connect_timeout
         self.command_timeout = command_timeout
         self._reader: asyncio.StreamReader | None = None
@@ -648,6 +664,10 @@ class SICameraClient:
         if self.connected:
             return
         await self.close()
+        try:
+            self._guard.check()
+        except hwgate.HardwareNotAllowed as exc:
+            raise HardwareNotAllowed(f"SI camera: {exc}") from None
         try:
             async with asyncio.timeout(self.connect_timeout):
                 self._reader, self._writer = await asyncio.open_connection(self.host, self.port)

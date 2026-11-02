@@ -190,8 +190,10 @@ something. robofast's client sends only the allowlisted ones
   command is bounded; `TerminateAcquisition` goes on the same connection
   while an `Acquire` is outstanding; a dropped connection fails everything
   waiting at once.
-- Both refuse a non-loopback address unless constructed with
-  `allow_hardware=True`.
+- Both refuse anything but a verified simulator unless constructed with
+  `allow_hardware=True` ([the hardware gate](design.md#the-hardware-gate):
+  loopback alone is not enough, since an SSH tunnel to the spectrograph PC
+  is loopback too), and re-verify before every connection.
 
 ### Service (`kiwispec_service.py`)
 

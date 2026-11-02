@@ -23,6 +23,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
+from robofast_core import hwgate
 from robofast_core.alpaca_client import METHODS
 from robofast_core.testing.fakes import FakeDevice, FakeDeviceError
 from robofast_core.weather_server import NOT_IMPLEMENTED, _alpaca
@@ -117,6 +118,8 @@ class FakeAlpacaServer(ThreadingHTTPServer):
         hang_limit: float = 30.0,
     ) -> None:
         super().__init__((host, port), _Handler)
+        #: A robofast simulator: the hardware gate accepts it (hwgate).
+        self.registration = hwgate.SimulatorRegistration(self.server_address[1])
         self.devices = {k.lower() if "/" in k else f"{k.lower()}/0": d for k, d in devices.items()}
         self.hang_limit = hang_limit
         self._thread: threading.Thread | None = None
@@ -143,5 +146,6 @@ class FakeAlpacaServer(ThreadingHTTPServer):
             d.unhang()
         self.shutdown()
         self.server_close()
+        self.registration.close()
         if self._thread is not None:
             self._thread.join(timeout=5)

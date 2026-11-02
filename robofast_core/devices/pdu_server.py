@@ -19,7 +19,8 @@ and state as JSON. This is what the sequencer's recovery ladder
 
 Safety
 ------
-The PDU address must be loopback (a simulator) unless the config says
+The PDU must be a verified simulator (loopback, and the UDP port registered
+by a robofast simulator: :mod:`robofast_core.hwgate`) unless the config says
 ``"allow_hardware": true`` **and** the command line passes ``--hardware``
 (like the Aqawan server). The SNMP communities are read from
 ``credentials`` (a JSON file readable only by its owner: ``{"read": ...,
@@ -43,11 +44,9 @@ import argparse
 import asyncio
 import concurrent.futures
 import contextlib
-import ipaddress
 import json
 import logging
 import secrets
-import socket
 import sys
 import threading
 import time
@@ -57,6 +56,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
+from robofast_core import hwgate
 from robofast_core.devices.apc_pdu import APCPDU, APCPDUSim, Credentials, load_credentials
 from robofast_core.devices.aqawan_server import (
     ACTION_NOT_IMPLEMENTED,
@@ -82,23 +82,19 @@ PDU_TIMEOUT = 0x502
 ACTIONS = ("PowerCycle", "Status")
 
 
-class HardwareNotAllowed(RuntimeError):
+class HardwareNotAllowed(hwgate.HardwareNotAllowed, RuntimeError):
     pass
 
 
-def check_pdu_address(host: str, *, allow_hardware: bool) -> str:
-    """Resolve ``host`` once; unless ``allow_hardware`` it must be loopback."""
+def check_pdu_address(host: str, port: int, *, allow_hardware: bool) -> str:
+    """Resolve ``host`` once; unless ``allow_hardware``, ``host:port`` (UDP)
+    must be a verified simulator (:func:`robofast_core.hwgate.check_endpoint`)."""
     try:
-        infos = socket.getaddrinfo(host, None, type=socket.SOCK_DGRAM)
-    except socket.gaierror as exc:
-        raise HardwareNotAllowed(f"cannot resolve PDU host {host!r}: {exc}") from exc
-    addrs = [ipaddress.ip_address(str(i[4][0]).split("%")[0]) for i in infos]
-    if not allow_hardware and not all(a.is_loopback for a in addrs):
-        raise HardwareNotAllowed(
-            f"PDU host {host!r} is not loopback: refusing to talk to real hardware without"
-            " allow_hardware in the config AND --hardware"
+        return hwgate.check_endpoint(
+            host, port, allow_hardware=allow_hardware, what="PDU", proto="udp", allow_absent=True
         )
-    return str(addrs[0])
+    except hwgate.HardwareNotAllowed as exc:
+        raise HardwareNotAllowed(str(exc)) from None
 
 
 @dataclass
@@ -227,7 +223,9 @@ class PDUServer(ThreadingHTTPServer):
         if config.allow_hardware != hardware:
             log.info("hardware use needs allow_hardware in the config AND --hardware")
         host = str(config.pdu.get("host", "127.0.0.1"))
-        self.pdu_ip = check_pdu_address(host, allow_hardware=allow)
+        self.pdu_ip = check_pdu_address(
+            host, int(config.pdu.get("port", 161)), allow_hardware=allow
+        )
         if allow:
             log.warning("HARDWARE MODE: PDU at %s:%s", self.pdu_ip, config.pdu.get("port", 161))
         if credentials is None:
@@ -243,6 +241,7 @@ class PDUServer(ThreadingHTTPServer):
             credentials,
             timeout=float(config.pdu.get("timeout", 2.0)),
             retries=int(config.pdu.get("retries", 2)),
+            allow_hardware=allow,
         )
         self._stid = 0
         self._lock = threading.Lock()
@@ -432,7 +431,11 @@ def _main(argv: list[str] | None = None) -> None:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--config", required=True)
     mode = ap.add_mutually_exclusive_group()
-    mode.add_argument("--hardware", action="store_true", help="allow a non-loopback PDU")
+    mode.add_argument(
+        "--hardware",
+        action="store_true",
+        help="allow a real PDU (the config must also say allow_hardware)",
+    )
     mode.add_argument("--simulate", action="store_true", help="run against a simulated PDU")
     ap.add_argument("--listen", help="host:port, overriding the config")
     ap.add_argument("--log-level", default="INFO")

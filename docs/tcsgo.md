@@ -267,9 +267,10 @@ Detailed in `tcsgo_server`'s module doc. In short:
 
 ### Safety
 
-- The TCS address must be loopback (the simulator) unless the server config
-  says `"allow_hardware": true` **and** the command line passes
-  `--hardware`. The address is resolved once and only that literal is
+- The TCS must be a verified simulator unless the server config says
+  `"allow_hardware": true` **and** the command line passes `--hardware`
+  ([the hardware gate](design.md#the-hardware-gate): loopback alone is not
+  enough, since an SSH tunnel puts the real TCS on 127.0.0.1). The address is resolved once and only that literal is
   contacted.
 - The client sends nothing outside `ALLOWED`. A query is retried at most
   `max_attempts` times; a set command is re-sent only if its connection

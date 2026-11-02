@@ -25,6 +25,8 @@ from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from robofast_core import hwgate
+
 MST = timezone(timedelta(hours=-7))
 
 #: db 7 as captured 2026-10-31 02:27 MST.
@@ -181,6 +183,8 @@ class RedisFeed(socketserver.ThreadingTCPServer):
         self, feed: RedisFeedState | None = None, host: str = "127.0.0.1", port: int = 0
     ) -> None:
         super().__init__((host, port), _Handler)
+        #: A robofast simulator: the hardware gate accepts it (hwgate).
+        self.registration = hwgate.SimulatorRegistration(self.server_address[1])
         self.feed = feed or RedisFeedState()
         self._thread: threading.Thread | None = None
 
@@ -198,6 +202,7 @@ class RedisFeed(socketserver.ThreadingTCPServer):
         self.feed.delay = 0.0
         self.shutdown()
         self.server_close()
+        self.registration.close()
         if self._thread is not None:
             self._thread.join(timeout=5)
 
