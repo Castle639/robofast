@@ -18,7 +18,8 @@ modes exist and what each means, so "robotic at MINERVA, attended at the
 
 * **robotic** -- unattended observing: the supervisor opens when the
   weather has been safe for the reopen hold and the sequencer holds a lease.
-  Not offered on an enclosure that must not run unattended (below).
+  Not offered on an enclosure with no hardware watchdog unless the site
+  opts in (below).
 * **attended** -- the same plan, but no lease (so no opening) unless an
   operator is on duty through the observer console (docs/console.md,
   "Operator duty"); a duty not renewed for `duty_ttl` raises a critical
@@ -101,8 +102,10 @@ In the enclosure config (the file the supervisor and the sequencer read):
 ```
 
 * `mode` -- the default: the mode the supervisor starts in when its mode
-  file is missing or unreadable. **Make it the site's safe mode.** The
-  shipped sites use `attended`: it cannot open without an operator on duty,
+  file is missing or unreadable. **Make it a mode the site is content to
+  wake up in.** MINERVA uses `robotic` (its Aqawan has a hardware
+  heartbeat that closes it if the supervisor dies); FLWO 60-inch and
+  MEarth South use `attended`: it cannot open without an operator on duty,
   and an open enclosure with nobody on duty closes. (`shadow` is not a safe
   default: it never closes an open enclosure.) A config without `mode`
   keeps the behavior from before modes: `robotic`, or `attended` on an
@@ -126,11 +129,44 @@ lowers that: every mode that may open there needs `attended_only` true and
 `duty_expiry` `close`. The built-in `robotic` is simply not offered there,
 and a site definition that breaks the rule is refused at load.
 
-| Site | Default | Offered |
-|---|---|---|
-| MINERVA (`sites/minerva/aqawan1.json`) | `attended` | robotic, attended, engineering, shadow |
-| FLWO 60-inch (`sites/flwo60/flwo60.json`) | `attended` | attended, engineering, shadow |
-| MEarth South (`sites/mearth_south/mearth_south.json`) | `attended` | attended, engineering, shadow |
+### Unattended without a watchdog: the site's choice
+
+Whether that risk is worth taking is the site's decision, not robofast's
+(JDE 2026-11-02: "some may decide it's worth the dome not closing (with a
+loud warning) to operate unattended. mearth operated robotically for years
+with its dome"). A site opts in explicitly in the enclosure's `safety`:
+
+```json
+"safety": {"allow_unattended_without_watchdog": true}
+```
+
+* `attended_only` then defaults to false: the floor is lifted and every
+  mode, `robotic` included, is offered. The site's default `mode` is still
+  its own choice (MEarth South starts `attended` and is switched to
+  `robotic`).
+* Without the opt-in nothing changes: no heartbeat means attended only, and
+  `attended_only: false` without a heartbeat is **refused** at load, naming
+  the opt-in (before, it was accepted with one log line).
+* With a heartbeat the opt-in changes nothing; with `attended_only: true`
+  given as well, the floor stays.
+
+While it is set, robofast says so, loudly and repeatedly:
+
+| Where | What |
+|---|---|
+| the supervisor's log, at start | a critical line in an unattended mode (a warning otherwise), and an `unwatched` timeline event |
+| every switch into a mode that may open with nobody on duty | a critical log line, an `unwatched` event, and `NO WATCHDOG: ...` appended to the switch notice (the console and the notifier carry it for an hour) |
+| the log, while it lasts | an `unwatched` event and a critical line every `safety.unwatched_warning_interval` s (default 900) |
+| the supervisor's `GET /status` | `mode.unwatched`: `{"active", "text"}` (null without the opt-in) |
+| the observer console | a red, bordered banner on the enclosure panel and a warning in the alarm list for as long as it lasts (an amber note in an attended mode) |
+| the sequencer's status snapshot, the request API's `GET /status` | `unwatched`, `supervisor.mode.unwatched` |
+| the morning report | a bold warning above everything else, with every `unwatched` event (JSON `unwatched`) |
+
+| Site | Default | Offered | Watchdog |
+|---|---|---|---|
+| MINERVA (`sites/minerva/aqawan1.json`) | `robotic` | robotic, attended, engineering, shadow | the Aqawan's heartbeat |
+| FLWO 60-inch (`sites/flwo60/flwo60.json`) | `attended` | attended, engineering, shadow | none; no opt-in |
+| MEarth South (`sites/mearth_south/mearth_south.json`) | `attended` | robotic, attended, engineering, shadow | none; **opted in** |
 
 ## Switching
 

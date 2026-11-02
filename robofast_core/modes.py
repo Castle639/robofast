@@ -43,7 +43,10 @@ An enclosure that must not run unattended (``safety.attended_only``: by
 default, one with no hardware heartbeat) is a floor no mode lowers: every
 mode that may open there needs ``attended_only`` true and ``duty_expiry``
 ``close``; the built-in ``robotic`` is not offered there, and a site's own
-definition that breaks the rule is refused when the config is loaded.
+definition that breaks the rule is refused when the config is loaded. A site
+may lift that floor on purpose (``safety.allow_unattended_without_watchdog``,
+docs/modes.md "Unattended without a watchdog"): then every mode is offered and
+the supervisor warns loudly while it runs in one that is :func:`unattended`.
 
 The active mode is kept in a small JSON state file (:class:`ModeStore`;
 ``mode_file`` in the config, default ``modes/<enclosure>.json`` under the
@@ -78,6 +81,7 @@ __all__ = [
     "lease_survives",
     "mode_path",
     "modes_from_config",
+    "unattended",
 ]
 
 OBSERVE = ("plan", "manual", "shadow")
@@ -246,7 +250,7 @@ def modes_from_config(
     if not isinstance(raw, dict):
         raise ValueError(f"{pre}modes: {{name: {{...}}}} (docs/modes.md)")
     modes: dict[str, ModePolicy] = {
-        name: p for name, p in BUILTIN_MODES.items() if not (attended_floor and _unattended(p))
+        name: p for name, p in BUILTIN_MODES.items() if not (attended_floor and unattended(p))
     }
     for name, entry in raw.items():
         if not isinstance(name, str) or not name.isidentifier():
@@ -267,11 +271,12 @@ def modes_from_config(
                 raise ValueError(f"{at}.like: one of {known}")
             base = modes.get(like) or BUILTIN_MODES[like]
         policy = _policy(name, entry, base, at)
-        if attended_floor and _unattended(policy):
+        if attended_floor and unattended(policy):
             raise ValueError(
                 f"{at}: this enclosure must not run unattended (safety.attended_only: no"
                 " hardware heartbeat), so a mode that may open needs attended_only true and"
-                " duty_expiry 'close'"
+                " duty_expiry 'close' (or the site opts in:"
+                " safety.allow_unattended_without_watchdog, docs/modes.md)"
             )
         if policy.fault_auto_clear and not fault_action:
             raise ValueError(f"{at}.fault_auto_clear: needs safety.fault_action (a fault channel)")
@@ -289,7 +294,7 @@ def modes_from_config(
     return ModeSet(modes, default, attended_floor, configured)
 
 
-def _unattended(p: ModePolicy) -> bool:
+def unattended(p: ModePolicy) -> bool:
     """May open without an operator on duty, or keep open after duty expires."""
     return p.open and (not p.attended_only or p.duty_expiry != "close")
 
@@ -472,6 +477,9 @@ class ModeGate:
         self.mode: str | None = None
         self.observe: str | None = None
         self.policy: dict[str, Any] = {}
+        #: The supervisor's no-watchdog warning (``unwatched`` in its mode
+        #: status; None: the enclosure has a watchdog or is attended only).
+        self.unwatched: dict[str, Any] | None = None
         self._read_at = -math.inf
         self._shadow: dict[str, str] = {}
 
@@ -498,8 +506,11 @@ class ModeGate:
         self._read_at = now
         if st is None:  # a supervisor from before modes
             name, policy = None, {"observe": "plan"}
+            self.unwatched = None
         else:
             name, policy = st.get("mode"), dict(st.get("policy") or {})
+            uw = st.get("unwatched")
+            self.unwatched = dict(uw) if isinstance(uw, dict) else None
         observe = policy.get("observe") if policy.get("observe") in OBSERVE else "shadow"
         if name != self.mode or observe != self.observe:
             was = self.mode

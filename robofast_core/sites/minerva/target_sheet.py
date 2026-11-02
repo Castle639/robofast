@@ -62,6 +62,7 @@ from pathlib import Path
 from typing import Any
 
 from robofast_core.catalogs.model import _ident
+from robofast_core.guider.offset import OffsetCheck, TargetPosition, check_offset_star
 from robofast_core.request_model import Cadence, RequestGroup, load_request_groups
 
 log = logging.getLogger(__name__)
@@ -83,6 +84,7 @@ __all__ = [
     "load",
     "newest_snapshot",
     "read_snapshot",
+    "verify_offsets",
     "write_snapshot",
 ]
 
@@ -269,8 +271,11 @@ class SheetConfig:
     key_file: Path | None = None
     snapshot_dir: Path | None = None
     keep: int = DEFAULT_KEEP
+    #: How acquisition offsets are checked against the star catalog
+    #: (:func:`verify_offsets`; on by default).
+    offset_check: OffsetCheck = field(default_factory=OffsetCheck)
 
-    KEYS = frozenset({"key_file", "snapshot_dir", "keep", "lists"})
+    KEYS = frozenset({"key_file", "snapshot_dir", "keep", "lists", "offset_check"})
 
     @classmethod
     def from_dict(cls, d: Any, base: Path | None = None) -> SheetConfig:
@@ -292,11 +297,16 @@ class SheetConfig:
         keep = d.get("keep", DEFAULT_KEEP)
         if isinstance(keep, bool) or not isinstance(keep, int) or keep < 1:
             raise SheetError("sheet config: 'keep' must be a positive integer")
+        try:
+            check = OffsetCheck.from_dict(d.get("offset_check"))
+        except ValueError as exc:
+            raise SheetError(f"sheet config: {exc}") from None
         return cls(
             lists={k: ListSpec.from_dict(k, v) for k, v in lists.items()},
             key_file=path(d.get("key_file")),
             snapshot_dir=path(d.get("snapshot_dir")),
             keep=keep,
+            offset_check=check,
         )
 
     @classmethod
@@ -341,12 +351,25 @@ class SheetList:
     inactive: int = 0
     blank: int = 0
     warnings: list[str] = field(default_factory=list)
+    #: Sheet row of each group (by id), for messages after conversion.
+    rows: dict[str, int] = field(default_factory=dict)
+    #: Acquisition offsets checked against the catalog (:func:`verify_offsets`):
+    #: found, failed (refused or flagged), not checked (catalog unavailable).
+    offsets_ok: int = 0
+    offsets_failed: int = 0
+    offsets_unchecked: int = 0
 
     def summary(self) -> str:
-        return (
+        text = (
             f"{self.name}: {len(self.groups)} requests, {self.inactive} inactive, "
             f"{len(self.refused)} refused"
         )
+        if self.offsets_ok or self.offsets_failed or self.offsets_unchecked:
+            text += (
+                f"; acquisition offsets: {self.offsets_ok} verified, {self.offsets_failed}"
+                f" failed, {self.offsets_unchecked} not checked"
+            )
+        return text
 
 
 class _Refused(ValueError):
@@ -463,6 +486,7 @@ def convert(rows: list[list[str]], spec: ListSpec, source: str = "") -> SheetLis
             out.refused.append(f"{at}: {exc}")
             continue
         seen_names[name], seen_ids[gid] = n, n
+        out.rows[gid] = n
         out.groups.append(group)
     return out
 
@@ -593,6 +617,88 @@ def _row(cell: Callable[[str], str], spec: ListSpec, n: int) -> dict[str, Any]:
             }
         ],
     }
+
+
+# ------------------------------------------------------------------ offsets
+
+
+def _offset_of(group: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]] | None:
+    """(the configuration, its offset_star) of a group with an explicit
+    east/north offset, else None."""
+    for req in group.get("requests", []):
+        for c in req.get("configurations", []):
+            ep = (c.get("guiding_config") or {}).get("extra_params") or {}
+            star = ep.get("offset_star")
+            if ep.get("guide") == "offset" and isinstance(star, dict) and "east" in star:
+                return c, star
+    return None
+
+
+def verify_offsets(
+    lists: Mapping[str, SheetList],
+    catalog: Any,
+    when: datetime,
+    check: OffsetCheck | None = None,
+) -> None:
+    """Check every row's acquisition offset against the star catalog
+    (:func:`robofast_core.guider.offset.check_offset_star`; docs/minerva_sheet.md):
+    a catalog star must be at the target plus the offset on ``when``
+    (proper motion applied to both), bright enough to guide on and not
+    saturating. A row that fails is refused (``check.action`` ``refuse``)
+    or kept with a warning (``flag``); one the catalog cannot answer for is
+    kept with a warning (not checked). A verified offset star gets its
+    catalog magnitude (``offset_star.g``), which the guiding recommendation
+    uses. Changes ``lists`` in place; the counts are in each summary."""
+    c = check or OffsetCheck()
+    for sl in lists.values():
+        keep: list[dict[str, Any]] = []
+        for group in sl.groups:
+            found = _offset_of(group)
+            if found is None:
+                keep.append(group)
+                continue
+            config, star = found
+            t = config["target"]
+            target = TargetPosition(
+                float(t["ra"]),
+                float(t["dec"]),
+                float(t.get("proper_motion_ra") or 0.0),
+                float(t.get("proper_motion_dec") or 0.0),
+                float(t.get("epoch") or 2000.0),
+            )
+            v = check_offset_star(
+                catalog, target, float(star["east"]), float(star["north"]), when, c
+            )
+            at = f"{sl.name} row {sl.rows.get(group['id'], '?')} ({group['name']})"
+            if v.ok:
+                sl.offsets_ok += 1
+                if v.g is not None:
+                    star["g"] = round(v.g, 3)
+                keep.append(group)
+            elif v.ok is None:
+                sl.offsets_unchecked += 1
+                sl.warnings.append(f"{at}: acquisition offset {v.reason}")
+                keep.append(group)
+            else:
+                sl.offsets_failed += 1
+                msg = f"acquisition offset: {v.reason}"
+                if c.action == "refuse":
+                    sl.refused.append(f"{at}: {msg}")
+                else:
+                    sl.warnings.append(f"{at}: {msg} (kept: offset_check.action flag)")
+                    keep.append(group)
+        sl.groups = keep
+
+
+def offset_catalog(check: OffsetCheck, *, offline: bool) -> Any:
+    """The catalog :func:`verify_offsets` uses: ``check.catalog``'s entry
+    (docs/sky.md), with no tile downloads when ``offline``."""
+    from robofast_core.catalog import catalog_from_config
+
+    entry = dict(check.catalog or {})
+    if offline:
+        entry["fetch"] = False
+    return catalog_from_config(entry)
 
 
 # ------------------------------------------------------------------ fetching
@@ -830,11 +936,16 @@ def load(
     offline: bool | None = None,
     client: Any = None,
     now: datetime | None = None,
+    catalog: Any = None,
 ) -> Loaded:
     """The enabled lists: fetched live (and snapshotted), or, if the Sheet
     cannot be reached (or ``offline``, or ``$ROBOFAST_OFFLINE``), from the
     newest snapshot with a warning giving its age. Logs the snapshot path
-    used. Raises :class:`SheetUnavailable` when there is neither."""
+    used. Raises :class:`SheetUnavailable` when there is neither.
+
+    Acquisition offsets are checked against ``catalog`` (default: the
+    config's ``offset_check.catalog``; :func:`verify_offsets`) unless the
+    config turns ``offset_check`` off."""
     from robofast_core.zenodo import offline as offline_env
 
     now = now or datetime.now(UTC)
@@ -865,6 +976,10 @@ def load(
         )
     log.info("MINERVA target lists from %s", path)
     converted = convert_tables(tables, lists, str(path))
+    if config.offset_check.enabled:
+        if catalog is None:
+            catalog = offset_catalog(config.offset_check, offline=offline)
+        verify_offsets(converted, catalog, now, config.offset_check)
     for sl in converted.values():
         for w in sl.warnings:
             log.warning("%s", w)
@@ -881,6 +996,22 @@ def _sources(args: argparse.Namespace) -> tuple[dict[str, SheetList], str, bool]
     """(converted lists, provenance, whether :func:`load` already logged
     the refusals) from the CLI's inputs."""
     config = SheetConfig.load(args.config) if args.config else None
+    check = config.offset_check if config else OffsetCheck()
+    if args.catalog:
+        check = replace(check, catalog={**(check.catalog or {}), "cache_dir": args.catalog})
+    if args.no_offset_check:
+        check = replace(check, enabled=False)
+    if config is not None:
+        config = replace(config, offset_check=check)
+
+    def verified(out: dict[str, SheetList]) -> dict[str, SheetList]:
+        if check.enabled:
+            from robofast_core.zenodo import offline as offline_env
+
+            catalog = offset_catalog(check, offline=bool(args.offline) or offline_env())
+            verify_offsets(out, catalog, datetime.now(UTC), check)
+        return out
+
     if args.instrument:
         base = config.lists if config else DEFAULT_LISTS
         lists = {k: replace(v, instrument=args.instrument) for k, v in base.items()}
@@ -896,13 +1027,13 @@ def _sources(args: argparse.Namespace) -> tuple[dict[str, SheetList], str, bool]
             if not sep or name not in specs:
                 raise SheetError(f"--csv {item!r}: expected LIST=PATH with LIST in {sorted(specs)}")
             out[name] = convert(read_csv_text(Path(path).read_text()), specs[name], path)
-        return out, "CSV exports " + ", ".join(args.csv), False
+        return verified(out), "CSV exports " + ", ".join(args.csv), False
     if args.snapshot:
         specs = config.enabled() if config else defaults
         fetched, tables = read_snapshot(Path(args.snapshot))
         specs = {k: v for k, v in specs.items() if k in tables}
         out = convert_tables(tables, specs, args.snapshot)
-        return out, f"snapshot {args.snapshot} (fetched {fetched.isoformat()})", False
+        return verified(out), f"snapshot {args.snapshot} (fetched {fetched.isoformat()})", False
     if config is None:
         raise SheetError("give --config, --snapshot or --csv")
     loaded = load(config, offline=args.offline or None)
@@ -983,6 +1114,15 @@ def main(argv: list[str] | None = None) -> int:
         p.add_argument(
             "--instrument",
             help="the spectrograph's instrument_type (required without --config)",
+        )
+        p.add_argument(
+            "--catalog",
+            help="star-catalog cache directory for the acquisition-offset check (docs/sky.md)",
+        )
+        p.add_argument(
+            "--no-offset-check",
+            action="store_true",
+            help="do not check acquisition offsets against the star catalog",
         )
         if name == "export":
             p.add_argument("-o", "--output")

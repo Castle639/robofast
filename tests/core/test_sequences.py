@@ -18,11 +18,13 @@ from robofast_core.devices.pulizzi_server import PulizziServer
 from robofast_core.devices.tres_frontend_server import TRESFrontEndConfig, TRESFrontEndServer
 from robofast_core.lamps import LampSetup
 from robofast_core.plan import CalibrationPlan, Observation, StaticPlan, plan_from_config
+from robofast_core.request_model import NO_LAMPS
 from robofast_core.sequencer_service import check_plan_sequences
 from robofast_core.sequences import SEQUENCE_STEPS, StepType, sequences_from_config
 from robofast_core.testing.checks import wait_until
 from robofast_core.testing.processes import ROOT
 from tests.core.test_pulizzi import LAMPS, lamp_config, switching
+from tests.core.test_request_api import make_api  # noqa: F401 (fixture)
 
 THAR = {
     "instrument": "camera_spectrograph",
@@ -395,3 +397,320 @@ async def test_a_preempted_sequence_cleans_up_before_the_next_observation(server
     done = _events(rig, "sequence_cleanup_done")[0].t
     assert done < _events(rig, "target_start")[1].t
     assert plan.history[0][2] == "interrupted"
+
+
+# -- templates (docs/sequences.md, "Templates") ---------------------------------------
+
+#: THAR, made from the generic arc set.
+THAR_SET = {
+    "template": "arc_set",
+    "instrument": "camera_spectrograph",
+    "lamp": "ThAr1",
+    "warmup": 0.2,
+    "exptime": 0.2,
+    "count": 3,
+    "calstage": "in",
+    "calstage_after": "out",
+}
+
+
+def _steps(seq) -> list:
+    return [(s.type, s.params) for s in seq.steps], [(s.type, s.params) for s in seq.cleanup]
+
+
+def test_the_generic_arc_set_is_the_written_out_sequence():
+    seqs = sequences_from_config(config({"thar": THAR, "thar_set": THAR_SET}))
+    assert _steps(seqs["thar_set"]) == _steps(seqs["thar"])
+    s = seqs["thar_set"]
+    assert s.template == "arc_set" and s.params["count"] == 3 and s.frame_types == ("ARC",)
+    assert s.description == "arcs on one lamp" and s.lamp_time == seqs["thar"].lamp_time
+    # A parameter left null leaves out its step, or its option: no stage
+    # moves, no cleanup, the lamps entry's warm-up.
+    (bare,) = sequences_from_config(
+        config({"b": {"template": "lamp_flat_set", "lamp": "Incand", "exptime": 1, "count": 2}})
+    ).values()
+    assert [s.type for s in bare.steps] == ["lamp", "expose", "lamp"]
+    assert bare.steps[0].params.get("warmup") is None and bare.cleanup == ()
+    assert bare.instrument == "imager" and bare.frame_types == ("LAMP_FLAT",)
+
+
+def test_the_generic_bias_and_dark_sets():
+    seqs = sequences_from_config(
+        config(
+            {
+                "bias": {"template": "bias_set", "count": 5, "description": "morning biases"},
+                "dark": {"template": "dark_set", "exptime": 60, "count": 3, "filter": "dark"},
+            },
+            filterwheel="127.0.0.1:1/0",
+        )
+    )
+    assert _steps(seqs["bias"])[0] == [
+        ("expose", {"type": "BIAS", "exptime": 0.0, "n": 5, "object": None})
+    ]
+    assert seqs["bias"].description == "morning biases" and seqs["bias"].lamps == ()
+    assert [s.type for s in seqs["dark"].steps] == ["filter", "expose"]
+    assert not seqs["dark"].light and seqs["dark"].frame_types == ("DARK",)
+
+
+@pytest.mark.parametrize(
+    ("entry", "match"),
+    [
+        ({"template": "nope"}, r"sequences\.x\.template: one of arc_set, bias_set"),
+        ({"template": "arc_set", "lamp": "ThAr1"}, r"template arc_set\): give exptime, count"),
+        ({**THAR_SET, "lamps": "x"}, r"unknown parameter\(s\) \['lamps'\]"),
+        ({**THAR_SET, "lamp": "ThAr9"}, r"x\.steps\[1\] \(on t1\): no lamp 'ThAr9'"),
+        ({**THAR_SET, "count": 600}, r"more than its max_on 600 s"),
+        ({**THAR_SET, "telescopes": ["t9"]}, r"x\.telescopes: unknown \['t9'\]"),
+    ],
+)
+def test_a_template_instance_is_checked_as_any_sequence(entry, match):
+    with pytest.raises(ValueError, match=match):
+        sequences_from_config(config({"x": entry}))
+
+
+def test_a_site_template_overrides_a_built_in_and_adds_its_own():
+    cfg = config(
+        {
+            "x": {"template": "arc_set", "lamp": "ThAr1", "exptime": 1, "count": 2},
+            "y": {"template": "both", "exptime": 1},
+        }
+    )
+    cfg["sequence_templates"] = {
+        "_note": "a comment",
+        # The site's arc set waits for the lamp to settle after the frames too.
+        "arc_set": {
+            "params": {"lamp": {}, "exptime": {}, "count": {"default": 1}},
+            "steps": [
+                {"lamp": "$lamp", "on": True},
+                {"expose": {"type": "ARC", "exptime": "$exptime", "n": "$count"}},
+                {"wait": 1},
+                {"lamp": "$lamp", "on": False},
+            ],
+        },
+        "both": {
+            "params": {"exptime": {}},
+            "steps": [
+                {"lamp": "ThAr1", "on": True},
+                {"lamp": "Incand", "on": True},
+                {"expose": {"type": "LAMP_FLAT", "exptime": "$exptime"}},
+                {"lamp": "ThAr1", "on": False},
+                {"lamp": "Incand", "on": False},
+            ],
+        },
+    }
+    seqs = sequences_from_config(cfg)
+    assert [s.type for s in seqs["x"].steps] == ["lamp", "expose", "wait", "lamp"]
+    assert seqs["y"].lamps == ("Incand", "ThAr1")
+    cfg["sequence_templates"]["both"]["steps"][2]["expose"]["n"] = "$count"
+    with pytest.raises(ValueError, match=r"sequence_templates\.both: \$count not among its"):
+        sequences_from_config(cfg)
+    cfg["sequence_templates"]["both"] = {"params": {"telescopes": {}}, "steps": []}
+    with pytest.raises(ValueError, match=r"parameter name\(s\) \['telescopes'\] are taken"):
+        sequences_from_config(cfg)
+
+
+def test_a_plug_in_adds_a_template():
+    from robofast_core.sequences import REQUIRED, SEQUENCE_TEMPLATES, SequenceTemplate
+
+    t = SequenceTemplate("waits", {"s": REQUIRED}, {"steps": [{"wait": "$s"}, {"wait": "$s"}]})
+    SEQUENCE_TEMPLATES.register("waits", t)
+    try:
+        (seq,) = sequences_from_config(config({"w": {"template": "waits", "s": 2}})).values()
+        assert [s.params for s in seq.steps] == [2.0, 2.0] and seq.estimate == 4.0
+        assert t.as_json()["params"] == {"s": {}}
+    finally:
+        SEQUENCE_TEMPLATES.unregister("waits")
+
+
+def test_rebuild_sets_parameters_and_checks_again():
+    seqs = sequences_from_config(config({"thar": THAR, "set": THAR_SET}))
+    again = seqs["set"].rebuild({"exptime": 2.0, "count": 4})
+    assert again.steps[2].params["exptime"] == 2.0 and again.steps[2].params["n"] == 4
+    assert again.lamp_time["t1"]["ThAr1"] == pytest.approx(0.2 + 4 * 3.0)
+    with pytest.raises(ValueError, match="max_on 600 s"):
+        seqs["set"].rebuild({"exptime": 20.0, "count": 40})
+    with pytest.raises(ValueError, match=r"takes no \['lamp_power'\]"):
+        seqs["set"].rebuild({"lamp_power": 3})
+    assert seqs["thar"].rebuild is None
+
+
+def test_which_sequences_a_request_may_name():
+    from robofast_core.dispatch import TelescopeLimits
+    from robofast_core.sequences import check_request_sequences, requestable
+
+    seqs = sequences_from_config(
+        config(
+            {
+                "thar": THAR,
+                "set": THAR_SET,
+                "bias": {"template": "bias_set", "count": 2},
+                "sky": {"template": "dark_set", "exptime": 1, "count": 1},
+            }
+        )
+    )
+    assert requestable(seqs["set"], "ARC") is None
+    assert "takes ARC, not LAMP_FLAT" in requestable(seqs["set"], "LAMP_FLAT")
+    assert "not made from a template" in requestable(seqs["thar"], "ARC")
+    assert "takes no lamp frames, not ARC" in requestable(seqs["sky"], "ARC")
+    assert "takes no exptime" in requestable(seqs["bias"], "ARC")
+
+    def lim(*names):
+        return {"t1": TelescopeLimits(["imager"], 20, 90, sequences=list(names))}
+
+    assert set(check_request_sequences(lim("set"), seqs)) == {"set"}
+    with pytest.raises(ValueError, match=r"telescopes\.t1\.sequences: 'nope' is not in"):
+        check_request_sequences(lim("nope"), seqs)
+    with pytest.raises(ValueError, match=r"'thar': no request can name it: .*not made from"):
+        check_request_sequences(lim("thar"), seqs)
+
+
+def test_the_shipped_flwo60_sequences_are_the_generic_sets_and_requestable(tmp_path):
+    import shutil
+
+    from robofast_core.sequences import check_request_sequences
+
+    cfg = load_config(ROOT / "sites/flwo60/flwo60.json")
+    seqs = sequences_from_config(cfg)
+    assert {s.template for s in seqs.values()} == {"arc_set", "lamp_flat_set"}
+    for name in ("dispatch.example.json", "requests.example.json"):
+        shutil.copy(ROOT / "sites/flwo60" / name, tmp_path / name)
+    plan = plan_from_config(
+        json.loads((tmp_path / "dispatch.example.json").read_text()),
+        ["tillinghast"],
+        base=tmp_path,
+    )
+    assert set(check_request_sequences(plan.limits, seqs)) == {"tres_thar", "tres_flat"}
+    check_plan_sequences(plan, seqs)
+    assert set(plan.sequences) == {"tres_thar", "tres_flat"}
+
+
+# -- requests naming a site sequence (docs/sequences.md, "Requests") --------------------
+
+
+def seq_group(gid="arcs", sequence="set", ctype="ARC", exptime=0.1, count=2, **ic_extra) -> dict:
+    from tests.core.test_dispatch import group
+
+    ic = {"exposure_time": exptime, "exposure_count": count}
+    ic["extra_params"] = {"sequence": sequence}
+    ic.update(ic_extra)
+    g = group(gid, ics=[ic])
+    g["requests"][0]["configurations"][0]["type"] = ctype
+    return g
+
+
+def test_a_lamp_request_may_name_a_sequence_instead_of_a_lamp():
+    from robofast_core.request_model import RequestGroup
+
+    g = RequestGroup.from_dict(seq_group())
+    (c,) = g.configurations()
+    ic = c.instrument_configs[0]
+    assert ic.sequence == "set" and ic.lamp is None and not ic.light
+    again = RequestGroup.from_dict(g.to_dict())
+    assert again.configurations()[0].instrument_configs[0].sequence == "set"
+    with pytest.raises(ValueError, match="not both: the sequence says its lamps"):
+        RequestGroup.from_dict(seq_group(optical_elements={"lamp": "ThAr1"}))
+    with pytest.raises(ValueError, match=r"extra_params\.sequence: only for ARC and LAMP_FLAT"):
+        RequestGroup.from_dict(seq_group(ctype="EXPOSE"))
+    with pytest.raises(ValueError, match=r"extra_params\.sequence: a sequence name"):
+        RequestGroup.from_dict(seq_group(sequence="a b"))
+
+
+async def test_dispatch_runs_a_named_sequence_with_the_requests_exptime_and_count():
+    from robofast_core.dispatch import TelescopeLimits
+    from tests.core.test_dispatch import NIGHT, Clock, make
+
+    seqs = sequences_from_config(
+        config({"set": THAR_SET, "flat": {**THAR_SET, "template": "lamp_flat_set"}})
+    )
+    limits = {
+        "t1": TelescopeLimits(["imager"], 20, 90),
+        "t2": TelescopeLimits(["imager"], 20, 90, sequences=["set", "flat"]),
+    }
+    d = make(
+        [seq_group(), seq_group("flats", sequence="set", ctype="LAMP_FLAT")],
+        clock=Clock(NIGHT),
+        limits=limits,
+    )
+    d.sequences = seqs
+    assert any("has no sequence 'set'" in r for r in by_id(d, "t1")["arcs-r"].reasons)
+    flats = by_id(d, "t2")["flats-r"]
+    assert any("takes ARC, not LAMP_FLAT" in r for r in flats.reasons)
+    obs = await d.next_observation("t2")
+    assert isinstance(obs, Observation), obs
+    assert obs.kind == "sequence" and obs.sequence == "set" and not obs.light
+    assert obs.sequence_params == {"exptime": 0.1, "count": 2} and obs.count == 2
+    d.report("t2", obs, "complete", 2)
+    assert d.requests["arcs-r"].done
+
+
+def by_id(d, telescope):
+    return {c.request.id: c for c in d.evaluate(telescope)}
+
+
+async def test_the_request_api_checks_a_named_sequence(make_api):  # noqa: F811
+    api = await make_api()
+    enc = api.app.enclosures["aqawan1"]
+    seqs = sequences_from_config(config({"set": THAR_SET}))
+    r = await api.post("tom", "/requestgroups/", seq_group("a0"))
+    assert r.status_code == 400 and NO_LAMPS in r.text, r.text  # no lamps, no sequences
+    enc.planner.limits["t1"].sequences = ["other"]
+    r = await api.post("tom", "/requestgroups/", seq_group("a0"))
+    assert r.status_code == 400 and "no sequence 'set' on" in r.text, r.text
+    enc.planner.limits["t2"].sequences = ["set"]
+    enc.sequences = enc.planner.sequences = seqs
+    r = await api.post("tom", "/requestgroups/", seq_group("a1", ctype="LAMP_FLAT"))
+    assert r.status_code == 400 and "takes ARC, not LAMP_FLAT" in r.text, r.text
+    r = await api.post("tom", "/requestgroups/", seq_group("a2", exptime=20.0, count=40))
+    assert r.status_code == 400 and "max_on 600 s" in r.text, r.text
+    r = await api.post("tom", "/requestgroups/", seq_group("a3"))
+    assert r.status_code == 202, r.text
+
+
+async def test_a_requested_sequence_runs_with_its_values_and_cleans_up(servers, make_rig):
+    obs = {
+        "name": "arcs",
+        "kind": "sequence",
+        "sequence": "set",
+        "sequence_params": {"exptime": 0.1, "count": 2},
+    }
+    plan = StaticPlan([obs], ["t1"])
+    rig, lamps, stage = tres_rig(make_rig, servers, plan, {"set": THAR_SET})
+    await rig.start()
+    await asyncio.wait_for(asyncio.shield(rig.tasks[-1]), 60)
+    assert plan.history == [("t1", "arcs", "complete", 2)]
+    assert rig.cams[0].exposures_started == 2
+    assert lamps.sim.lit() == [3, 5] and stage_at(stage, 0.0)
+    assert _events(rig, "sequence_cleanup_done")[0].detail["ok"] is True
+
+
+async def test_a_requested_sequence_that_breaks_max_on_fails_before_anything_moves(
+    servers, make_rig
+):
+    obs = {
+        "name": "arcs",
+        "kind": "sequence",
+        "sequence": "set",
+        "sequence_params": {"exptime": 20.0, "count": 40},
+    }
+    plan = StaticPlan([obs], ["t1"])
+    rig, lamps, stage = tres_rig(make_rig, servers, plan, {"set": THAR_SET})
+    await rig.start()
+    await wait_until(lambda: plan.history, 30.0, what="refused")
+    assert plan.history[0][2] == "failed"
+    assert "max_on 600 s" in _events(rig, "observation_failed")[0].detail["error"]
+    assert switching(lamps.sim) == [] and rig.cams[0].exposures_started == 0
+    assert stage_at(stage, 0.0)
+
+
+def test_a_static_plans_sequence_params_are_checked_at_start():
+    seqs = sequences_from_config(config({"thar": THAR, "set": THAR_SET}))
+    ok = {"name": "s", "kind": "sequence", "sequence": "set", "sequence_params": {"count": 2}}
+    check_plan_sequences(StaticPlan([ok], ["t1"]), seqs)
+    bad = {**ok, "sequence_params": {"count": 900}}
+    with pytest.raises(ValueError, match=r"sequence_params: .*max_on"):
+        check_plan_sequences(StaticPlan([bad], ["t1"]), seqs)
+    fixed = {**ok, "sequence": "thar"}
+    with pytest.raises(ValueError, match="not made from a template"):
+        check_plan_sequences(StaticPlan([fixed], ["t1"]), seqs)
+    with pytest.raises(ValueError, match="'sequence_params' is for kind 'sequence'"):
+        Observation("x", sequence_params={"count": 1})

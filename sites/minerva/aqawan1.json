@@ -19,7 +19,7 @@
     "safety.fault_auto_clear (JDE 2026-10-31): the supervisor clears a PAC fault itself only with both shutters closed, never an E-stop, at most once per fault_auto_clear_interval (s), alarming each time; a recurrence within it stops automatic clearing until an operator clears faults (docs/aqawan.md).",
     "help.no_lamps: the request API adds this to its refusal of a lamp calibration (ARC, LAMP_FLAT): MINERVA's advice, not every site's.",
     "spectrograph: the KiwiSpec service (kiwispec.example.json listens on 8130); its telescopes are named T1, T2 (docs/rv_night.md). Spectrum sidecars go under images.data_root.",
-    "mode: the operating mode it starts in when its mode file (modes/aqawan1.json under the data directory) is missing or unreadable: attended, the safe one (nothing opens unless an operator is on duty, and an open enclosure with nobody on duty closes). Switch to robotic for unattended nights: python -m robofast_core.modes --config sites/minerva/aqawan1.json set robotic --operator NAME --reason WHY (or the observer console); the mode is kept across restarts. The built-in modes (robotic, attended, engineering, shadow) apply unchanged; docs/modes.md."
+    "mode: the operating mode it starts in when its mode file (modes/aqawan1.json under the data directory) is missing or unreadable: robotic (JDE 2026-11-02: MINERVA is a robotic observatory, and the Aqawan's hardware heartbeat closes it if the supervisor dies). Switch to attended, engineering or shadow with python -m robofast_core.modes --config sites/minerva/aqawan1.json set MODE --operator NAME --reason WHY (or the observer console); the mode is kept across restarts. The built-in modes (robotic, attended, engineering, shadow) apply unchanged; docs/modes.md."
   ],
   "name": "aqawan1",
   "listen": "127.0.0.1:8100",
@@ -35,7 +35,7 @@
     "t2": {"telescope": "127.0.0.1:11122/0", "camera": "127.0.0.1:11122/0",
            "limits": {"min_alt": 21.0, "max_alt": 83.0}}
   },
-  "mode": "attended",
+  "mode": "robotic",
   "safety": {
     "park_before_close": true,
     "park_wait": 60,
