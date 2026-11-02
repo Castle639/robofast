@@ -42,6 +42,13 @@ def _import(args: argparse.Namespace) -> int:
     if not args.to_requests:
         _write(json.dumps(obj.to_dict(), indent=2) + "\n", args.output)
         return 0
+    if not (args.telescope and args.instrument):
+        print(
+            "--to-requests needs --telescope and --instrument (the names in the site's "
+            "dispatch config, sites/<site>/)",
+            file=sys.stderr,
+        )
+        return 2
     if isinstance(obj, model.PrivateCatalog):
         print(
             f"{args.catalog}: an encrypted catalog; robofast does not decrypt it. Have the "
@@ -107,8 +114,8 @@ def main(argv: list[str] | None = None) -> int:
     imp = sub.add_parser("import", help="a catalog to the intermediate form or requests")
     imp.add_argument("catalog")
     imp.add_argument("--to-requests", action="store_true", help="emit request groups")
-    imp.add_argument("--telescope", default=model.DEFAULT_TELESCOPE)
-    imp.add_argument("--instrument", default=model.DEFAULT_INSTRUMENT)
+    imp.add_argument("--telescope", help="with --to-requests: the telescope (required)")
+    imp.add_argument("--instrument", help="with --to-requests: the instrument (required)")
     imp.add_argument("--exposure-time", type=float, default=model.DEFAULT_EXPOSURE_TIME)
     imp.add_argument("--exposure-count", type=int, default=1)
     imp.add_argument("--private", action="store_true", help="mark the list private")

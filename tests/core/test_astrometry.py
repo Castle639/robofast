@@ -21,6 +21,7 @@ from robofast_core import astrometry as ast
 from robofast_core.catalog import catalog_at, separation
 from robofast_core.photometry import PortPhotometry, SkyConditions
 from robofast_core.pointing import PointingModel
+from robofast_core.testing import TEST_OPTICS
 from robofast_core.testing.skysim import SkyCamera, SkyScene
 from robofast_core.testing.starfield import Detector
 from tests.core.skydata import sky_dir
@@ -31,10 +32,15 @@ DENSE = (285.79486, 25.292175)
 WHEN = datetime(2026, 4, 23, 9, 0, tzinfo=UTC)
 #: A mount a few arcminutes off (TPOINT terms, arcsec).
 ERRORS = PointingModel({"IH": 95.0, "ID": -60.0, "CH": 25.0, "NP": 10.0, "MA": 30.0, "ME": -20.0})
-IMAGER_PHOT = PortPhotometry(efficiency={"optics": 0.6, "qe": 0.8}, gain=1.3, read_noise=6.0)
+IMAGER_PHOT = PortPhotometry(
+    **TEST_OPTICS, efficiency={"optics": 0.6, "qe": 0.8}, gain=1.3, read_noise=6.0
+)
 #: The FAU: the same telescope behind a 2 % beamsplitter, a ZWO ASI174.
 FAU_PHOT = PortPhotometry(
-    efficiency={"optics": 0.6, "qe": 0.7, "beamsplitter": 0.02}, gain=1.3, read_noise=4.0
+    **TEST_OPTICS,
+    efficiency={"optics": 0.6, "qe": 0.7, "beamsplitter": 0.02},
+    gain=1.3,
+    read_noise=4.0,
 )
 
 

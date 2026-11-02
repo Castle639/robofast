@@ -69,8 +69,11 @@ Running
 
     python -m robofast_core.devices.tcsgo_server --config tcsgo.json [--hardware]
 
-with a JSON config (``sites/flwo60/tcsgo.json``; every key except ``tcs`` is
-optional). It prints one JSON line, ``{"url": ..., "tcs": ...}``, once
+with a JSON config (``sites/flwo60/tcsgo.json``). The site and telescope
+values in ``REQUIRED`` (name, latitude, longitude, elevation, min_alt, the
+park position and command, guide_rate, aperture_diameter) and, with a
+focuser, ``focus_min``/``focus_max`` are required; the rest (timeouts, poll
+rates) are optional. It prints one JSON line, ``{"url": ..., "tcs": ...}``, once
 listening.
 """
 
@@ -94,6 +97,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
+from robofast_core.config import load_device_config, require_keys
 from robofast_core.devices.aqawan_server import (
     ACTION_NOT_IMPLEMENTED,
     DRIVER_ERROR,
@@ -122,7 +126,7 @@ from robofast_core.devices.tcsgo_client import (
     TCSTimeout,
     check_tcs_address,
 )
-from robofast_core.devices.tcsgo_sim import FLWO_LATITUDE, FLWO_LONGITUDE, hadec_to_altaz
+from robofast_core.devices.tcsgo_sim import hadec_to_altaz
 
 log = logging.getLogger(__name__)
 
@@ -148,28 +152,49 @@ class TCSConfig:
     max_attempts: int = 2
 
 
+#: Site and telescope values a TCSGO config must give (no defaults: a missing
+#: one is an error, never another telescope's number; docs/design.md 3.10).
+#: ``focus_min``/``focus_max`` are also required while ``focuser`` is true.
+REQUIRED = (
+    "name",
+    "latitude",
+    "longitude",
+    "elevation",
+    "min_alt",
+    "park_command",
+    "park_alt",
+    "park_az",
+    "guide_rate",
+    "aperture_diameter",
+)
+
+
 @dataclass
 class TCSGOConfig:
+    name: str
+    #: The telescope's site: deg N, deg E, m.
+    latitude: float
+    longitude: float
+    elevation: float
+    #: robofast refuses slews below this altitude (deg), before the TCS's own.
+    min_alt: float
+    #: "park" (#58) or "zenith" (#10 + #12,2).
+    park_command: str
+    #: Where the mount is when parked (for AtPark).
+    park_alt: float
+    park_az: float
+    #: The TCS's handpaddle guide rate (#15), arcsec/s; robofast never sets it.
+    guide_rate: float
+    #: Metres; null where unknown (Alpaca ApertureDiameter not implemented).
+    aperture_diameter: float | None
     tcs: TCSConfig = field(default_factory=TCSConfig)
     #: Must be true (and ``--hardware`` given) for a non-loopback TCS.
     allow_hardware: bool = False
-    name: str = "flwo60"
     listen: str = "127.0.0.1:11140"
-    latitude: float = FLWO_LATITUDE
-    longitude: float = FLWO_LONGITUDE
-    elevation: float = 2344.0
     #: Equinox sent with #6 (and reported as EquatorialSystem J2000).
     equinox: float = 2000.0
-    #: robofast refuses slews below this altitude (deg), before the TCS's own.
-    min_alt: float = 20.0
-    #: "park" (#58) or "zenith" (#10 + #12,2).
-    park_command: str = "park"
-    #: Where the mount is when parked (for AtPark) and how close counts.
-    park_alt: float = 90.0
-    park_az: float = 0.0
+    #: How close to (park_alt, park_az) counts as parked, deg.
     park_tolerance: float = 1.0
-    #: The TCS's handpaddle guide rate (#15), arcsec/s; robofast never sets it.
-    guide_rate: float = 5.0
     max_pulse_ms: int = 10000
     #: Offset action: per-axis bound (arcsec; legacy MAX_JOG) and the #12
     #: mode sent after #7 unless already chasing (2 slew, 3 chase; None: none).
@@ -181,11 +206,11 @@ class TCSGOConfig:
     status_max_age: float = 0.5
     #: Bound on each Alpaca request.
     request_timeout: float = 8.0
-    aperture_diameter: float | None = 1.524
     focal_length: float | None = None
     focuser: bool = True
-    focus_min: float = -5000.0
-    focus_max: float = 5000.0
+    #: The TCS focus range, microns (required while ``focuser`` is true).
+    focus_min: float = 0.0
+    focus_max: float = 0.0
     focus_settle: float = 0.5
     dome: bool = False
     shutter_open_order: tuple[str, ...] = ("upper", "lower")
@@ -200,6 +225,9 @@ class TCSGOConfig:
         unknown = set(d) - names
         if unknown:
             raise ValueError(f"unknown config keys: {sorted(unknown)}")
+        require_keys(d, REQUIRED)
+        if d.get("focuser", True):
+            require_keys(d, ("focus_min", "focus_max"), "config (focuser: true)")
         tcs = d.pop("tcs", {})
         tcs_names = {f.name for f in dataclasses.fields(TCSConfig)}
         if set(tcs) - tcs_names:
@@ -215,7 +243,7 @@ class TCSGOConfig:
         for key in ("shutter_open_order", "shutter_close_order"):
             if sorted(getattr(cfg, key)) != ["lower", "upper"]:
                 raise ValueError(f"{key} must name 'upper' and 'lower' once each")
-        if cfg.focus_max <= cfg.focus_min:
+        if cfg.focuser and cfg.focus_max <= cfg.focus_min:
             raise ValueError("focus_max must exceed focus_min")
         return cfg
 
@@ -1221,8 +1249,7 @@ def main(argv: list[str] | None = None) -> None:
     logging.basicConfig(
         level=args.log_level, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
     )
-    with open(args.config) as f:
-        config = TCSGOConfig.from_dict(json.load(f))
+    config = load_device_config(args.config, TCSGOConfig.from_dict)
     if args.listen:
         config.listen = args.listen
     try:

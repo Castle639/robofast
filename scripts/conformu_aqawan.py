@@ -92,7 +92,12 @@ def main() -> None:
     config = out / "aqawan.json"
     config.write_text(
         json.dumps(
-            {"name": "conformu", "listen": "127.0.0.1:0", "pac": {"host": host, "port": int(port)}}
+            {
+                "name": "conformu",
+                "open_order": [2, 1],
+                "listen": "127.0.0.1:0",
+                "pac": {"host": host, "port": int(port)},
+            }
         )
     )
     procs = [sim]

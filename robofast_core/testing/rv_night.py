@@ -380,6 +380,7 @@ class SimulatedNight:
         """The real sky through ``mount`` (opt-in, ``sky_catalog``)."""
         from robofast_core.catalog import catalog_at
         from robofast_core.photometry import PortPhotometry
+        from robofast_core.testing import TEST_OPTICS
         from robofast_core.testing.skysim import SkyCamera, SkyFocusScene, SkyScene
 
         assert self.s.sky_catalog is not None
@@ -393,7 +394,7 @@ class SimulatedNight:
         sky = SkyScene(
             catalog,
             camera,
-            PortPhotometry(band="V", efficiency={"all": 0.4}),
+            PortPhotometry(**TEST_OPTICS, band="V", efficiency={"all": 0.4}),
             site=(MINERVA.latitude, MINERVA.longitude),
             seeing=2.0,
             seed=31 + i,
@@ -584,6 +585,7 @@ class SimulatedNight:
         cfg["spectrograph"] = {
             "url": self.kiwispec_url,
             "telescopes": {"t1": "T1", "t2": "T2"},
+            "instrument": "kiwispec",
             "timeout": 5.0,
             "abort_timeout": 8.0,
         }

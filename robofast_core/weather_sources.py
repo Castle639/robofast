@@ -26,7 +26,7 @@ import httpx
 
 from robofast_core import resp
 from robofast_core.cancel import isolated
-from robofast_core.sun import LEGACY_PRESSURE_HPA, LEGACY_TEMPERATURE_C, sun_altitude
+from robofast_core.sun import standard_atmosphere, sun_altitude
 
 
 class SourceError(Exception):
@@ -227,10 +227,10 @@ class SunSource(WeatherSource):
     and temperature; geometric if ``pressure_hpa`` is 0) and
     ``altitude_geometric``, both degrees, of the Sun's centre.
 
-    Options (all optional): ``pressure_hpa`` and ``temperature_c`` (default
-    PyEphem's 1010 hPa and 15 degC, which the legacy code's refraction
-    used), ``relative_humidity`` (0..1, default 0), ``wavelength_um``
-    (default 0.55).
+    Options (all optional): ``pressure_hpa`` and ``temperature_c`` (default:
+    the standard atmosphere at the site's ``elevation``, which is required;
+    :func:`robofast_core.sun.standard_atmosphere`), ``relative_humidity``
+    (0..1, default 0), ``wavelength_um`` (default 0.55).
     """
 
     live = True
@@ -242,7 +242,7 @@ class SunSource(WeatherSource):
         *,
         latitude: float,
         longitude: float,
-        elevation: float = 0.0,
+        elevation: float,
     ) -> None:
         super().__init__(config)
         extra = set(config.options) - self._OPTIONS
@@ -250,9 +250,10 @@ class SunSource(WeatherSource):
             raise ValueError(f"source {config.name}: unknown options {sorted(extra)}")
         self.latitude, self.longitude, self.elevation = latitude, longitude, elevation
         opts = config.options
+        pressure, temperature = standard_atmosphere(float(elevation))
         self.refraction = {
-            "pressure_hpa": float(opts.get("pressure_hpa", LEGACY_PRESSURE_HPA)),
-            "temperature_c": float(opts.get("temperature_c", LEGACY_TEMPERATURE_C)),
+            "pressure_hpa": float(opts.get("pressure_hpa", pressure)),
+            "temperature_c": float(opts.get("temperature_c", temperature)),
             "relative_humidity": float(opts.get("relative_humidity", 0.0)),
             "wavelength_um": float(opts.get("wavelength_um", 0.55)),
         }
@@ -455,7 +456,7 @@ SOURCE_TYPES: dict[str, SourceFactory] = {
         cfg,
         latitude=site["latitude"],
         longitude=site["longitude"],
-        elevation=float(site.get("elevation", 0.0)),
+        elevation=float(site["elevation"]),
     ),
     "redis": lambda cfg, site, **kw: RedisSource(cfg),
 }

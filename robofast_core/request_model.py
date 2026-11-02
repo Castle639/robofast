@@ -193,22 +193,20 @@ def _check_keys(d: Any, allowed: set[str], required: set[str], what: str) -> dic
 
 #: OCS configuration types for spectrograph lamp calibrations. They run
 #: only where a telescope has lamps (its dispatch limits list them in
-#: ``lamps``: the FLWO 60-inch's TRES, docs/pulizzi.md); the request API
-#: refuses them, with :data:`NO_LAMPS`, for an enclosure without (MINERVA:
-#: KiwiSpec has none, JDE 2026-10-31). ``extra_params`` keys that would ask
-#: for a lamp are refused everywhere (:data:`LAMPS_HOW`).
+#: ``lamps``; docs/pulizzi.md); the request API refuses them, with
+#: :data:`NO_LAMPS` and the enclosure config's ``help.no_lamps`` (the site's
+#: advice: what to do instead), for an enclosure without. ``extra_params``
+#: keys that would ask for a lamp are refused everywhere (:data:`LAMPS_HOW`).
 LAMP_TYPES = ("ARC", "LAMP_FLAT")
 LAMP_KEYS = ("lamp", "lamps", "thar", "arc", "calibration_lamp")
 NO_LAMPS = (
-    "spectrograph lamp calibrations (ThAr arcs, lamp flats) are not available:"
-    " MINERVA's KiwiSpec has no ThAr or flat lamp and no way to switch to one"
-    " (it is iodine only); observe a rapidly rotating B star through the iodine"
-    " cell instead (SPECTRUM with extra_params.iodine true; docs/kiwispec.md)"
+    "spectrograph lamp calibrations (arcs, lamp flats) are not available here:"
+    " no telescope of this enclosure has calibration lamps"
 )
 LAMPS_HOW = (
     "a lamp calibration is an ARC or LAMP_FLAT configuration naming its lamp in"
     " each instrument config's optical_elements.lamp, and runs only on a telescope"
-    " with that lamp (the FLWO 60-inch's TRES; docs/pulizzi.md). On MINERVA: " + NO_LAMPS
+    " whose configuration lists that lamp (docs/pulizzi.md)"
 )
 
 

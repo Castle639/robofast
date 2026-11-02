@@ -736,13 +736,92 @@ broker outage costs only ToOs, never the night.
 - Deployment on a control host (users and groups, units, layout, secrets,
   firewall, time sync, backups, upgrades and rollback): `docs/deploy.md`.
 
-### 3.10 Configuration
+### 3.10 Configuration, modes and site code
 
-Per-site YAML: which Alpaca endpoint each device is, enclosure membership,
-timeouts, limits, and policies (the first is `sites/minerva/weather.yaml`).
+JDE asked (2026-11-01): what lets robofast operate in different modes at
+different sites, and add site- or instrument-specific sequences? Three
+layers, so that adding a site is configuration plus device servers (section
+1), never a fork and never an `if site == ...` in core.
+
+**(a) Config: every site value lives under `sites/<site>/`.** Per-site JSON
+or YAML says which Alpaca endpoint each device is, enclosure membership,
+timeouts, limits and policies (`sites/minerva/aqawan1.json`,
+`sites/minerva/weather.yaml`, `sites/flwo60/`, `sites/mearth_south/`).
 `sites/minerva/README.md` maps every MINERVA value to its legacy
 minerva-control `config/*.ini` source and lists the conflicts between them.
-A new site is a new config directory plus any device servers it needs.
+The rules:
+
+- Core (`robofast_core/`, outside `robofast_core/sites/`) has no site
+  names and no site numbers: no coordinates, elevations, apertures, port
+  geometry, altitude limits, telescope or instrument names, help text.
+- A site, telescope or instrument value that is missing is an error that
+  names the key and the file, never another site's default (the error
+  comes from `robofast_core.config.require_keys` or the config's own
+  `from_dict`). Generic device tuning (timeouts, poll rates, retry counts)
+  may keep defaults. Values derived from site values are derived, not
+  assumed: the Sun's refraction uses the standard atmosphere at the
+  configured elevation unless a pressure and temperature are configured
+  (`docs/weather_bridge.md`).
+- A driver for specific hardware (`robofast_core/devices/`: the Aqawan
+  PAC, the KiwiSpec PC, the TCSGalil, the TRES front end, ...) may name its
+  own hardware; the core modules that use it (sequencer, plan, dispatch,
+  request intake, console, safety, imaging, photometry, vetting, Sun,
+  weather) may not. Per-site advice goes in config too: MINERVA's "observe
+  a B star through the iodine cell" for a refused lamp calibration is the
+  enclosure config's `help.no_lamps`, so MEarth South's refusal does not
+  carry it.
+- `tests/core/test_no_site_values.py` enforces this on the AST of core
+  (docstrings and comments may mention sites). What core still names is an
+  explicit allowlist, each entry tagged with the step below that removes it;
+  the test fails when an entry goes stale, so the list only shrinks.
+
+**(b) Modes: one operating mode per enclosure (planned, step 3).** An
+enclosure's `mode` is one of `robotic`, `attended`, `shadow` or
+`engineering`, each a named policy bundle defined in the site config (may
+it open without an operator on duty, may the scheduler run, may a request
+be accepted, may the console move hardware by hand, is the weather verdict
+enforced or only reported). The supervisor, the sequencer, the observer
+console and the request API all read the same mode and honor it; every
+switch is an audited, logged event with who and why. Today's pieces become
+modes rather than flags: `safety.attended_only` (section 3.3) is
+`attended`, the weather bridge's `--shadow` is `shadow`.
+
+**(c) Sequences and plug-ins: site code without forking core (planned,
+steps 2 and 4).** Two mechanisms, for two kinds of difference:
+
+- *Sequences* (step 4): a site's or instrument's routine that is only an
+  ordering of existing operations (calibration stage, lamp on/off, wait,
+  expose, ...) is a step list in config, run as an observation kind: e.g.
+  the TRES ThAr and flat sets, MINERVA's iodine B-star calibration.
+- *Plug-ins* (step 2): what a site needs that is new code (plan types,
+  observation kinds, instrument handlers such as KiwiSpec, TRES and the
+  imager, weather sources, guider hardware, recovery rungs) registers in a
+  registry keyed by name, and an installed package can add entries through
+  the `robofast.plugins` entry-point group. An observation kind is one
+  handler object that owns its validation, its request mapping and its
+  execution, instead of an if-chain across `plan.KINDS`, the sequencer,
+  the request model and dispatch. The registries that exist already
+  (weather `SOURCE_TYPES`, notifier `SINK_TYPES`) move onto the same
+  mechanism; Alpaca `Action` names move into config.
+
+The plan, approved by JDE 2026-11-01:
+
+1. **Done:** site values out of core: the console's manual-slew limits
+   from the telescope's config (refused when none are configured); the
+   Sun's refraction from the site's elevation; required keys instead of
+   another site's defaults in the device servers, dispatch, photometry,
+   vetting, the guider's pulse guiding and the catalog CLI; neutral lamp
+   messages with per-enclosure help; the guard test.
+2. Registries and `robofast.plugins` entry points (plan types, observation
+   kinds, instrument handlers, guider hardware, recovery rungs, weather
+   sources), KiwiSpec decoupled from the sequencer, Action names in config,
+   the legacy importers (MINERVA CSV, TRES catalogs, tres-guider
+   calibration) moved under `robofast_core/sites/<site>/`.
+3. Enclosure operating modes, (b) above.
+4. Config-defined sequences, (c) above.
+
+A new site is a new config directory, plus any device servers it needs,
+plus (after step 2) any plug-ins it needs in its own package.
 
 Site code that is not configuration (a new weather source type for the
 bridge, `robofast_core.weather_sources.SOURCE_TYPES`; a new plan type,
@@ -979,6 +1058,10 @@ Each step is a CI-tested deliverable.
     plate solver, solved WCS and zero points in every frame. Next: target
     vetting and catalog-based acquisition, the per-port zero points
     measured on real frames, a pointing-model builder.
+
+18. Site configuration, modes and site code (section 3.10): step 1
+    (site values out of core, the guard test) done; registries and
+    plug-ins, operating modes and config-defined sequences next.
 
 ## 9. Borrowed ideas
 

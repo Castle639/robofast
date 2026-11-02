@@ -617,7 +617,8 @@ class MountOffset(_Tally):
 
     ``method`` ``"offset"`` sends ``Action(action, {"east", "north"})``;
     ``"pulseguide"`` sends ``PulseGuide`` for ``|arcsec| / guide_rate``
-    seconds per axis (``guide_rate`` in arcsec/s on the sky; east pulses are
+    seconds per axis (``guide_rate`` in arcsec/s on the sky, the mount's
+    configured rate: required for this method; east pulses are
     lengthened by 1/cos(dec), from :attr:`dec_deg`). A move larger than
     ``max_offset`` on an axis is clipped and reported."""
 
@@ -629,7 +630,7 @@ class MountOffset(_Tally):
         *,
         method: str = "offset",
         action: str = "Offset",
-        guide_rate: float = 7.5,
+        guide_rate: float | None = None,
         max_offset: float = 30.0,
         min_offset: float = 0.0,
         timeout: float = 5.0,
@@ -638,6 +639,9 @@ class MountOffset(_Tally):
         super().__init__(None)
         if method not in ("offset", "pulseguide"):
             raise ValueError(f"mount offset method {method!r}")
+        if method == "pulseguide" and not guide_rate:
+            # The mount's own rate, a telescope value: never another site's.
+            raise ValueError("mount.guide_rate (arcsec/s) is required with method 'pulseguide'")
         self.driver = driver
         self.method = method
         self.action = action

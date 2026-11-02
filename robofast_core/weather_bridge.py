@@ -147,7 +147,16 @@ def parse_config(raw: dict[str, Any]) -> BridgeConfig:
         raise ValueError(f"unknown config keys: {sorted(extra)}")
     site = dict(raw["site"])
     for key in ("latitude", "longitude"):
+        if key not in site:
+            raise ValueError(f"site.{key} is required")
         site[key] = float(site[key])
+    if "elevation" in site:
+        site["elevation"] = float(site["elevation"])
+    elif any(
+        isinstance(s, dict) and s.get("type") == "sun" and s.get("enabled", True)
+        for s in raw["sources"].values()
+    ):
+        raise ValueError("site.elevation is required by the sun source (its refraction)")
     sources: list[tuple[SourceConfig, SourceSpec]] = []
     for name, spec in raw["sources"].items():
         spec = dict(spec)
@@ -441,7 +450,10 @@ def main(argv: list[str] | None = None) -> int:
         stream=sys.stderr,
     )
     logging.getLogger("httpx").setLevel(logging.WARNING)  # not one line per request
-    cfg = parse_config(load_config(args.config))
+    try:
+        cfg = parse_config(load_config(args.config))
+    except (KeyError, ValueError) as exc:
+        raise SystemExit(f"{args.config}: {exc}") from exc
     if args.poll_interval is not None:
         cfg.poll_interval = args.poll_interval
     return asyncio.run(_main(args, cfg))

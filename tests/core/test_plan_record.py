@@ -190,6 +190,7 @@ def test_record_in_the_plan_entry(tmp_path):
     entry = {
         "site": {"latitude": 31.68, "longitude": -110.88, "elevation": 2316},
         "requests": [],
+        "telescopes": {"t1": {"instruments": ["imager"], "min_alt": 21, "max_alt": 83}},
         "record": {"dir": "plans", "night_rollover_hour": 14, "timezone": "America/Phoenix"},
     }
     d = dispatch_from_config(entry, ["t1"], base=tmp_path)

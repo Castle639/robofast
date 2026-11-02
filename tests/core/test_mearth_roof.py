@@ -358,7 +358,9 @@ async def test_server_stop_sends_nothing_and_the_latch_holds(make_rig):
     await wait_until(sim.closed, 4, what="closed by the latched command")
     assert len(sim.commands()) == n
     rig.server = MEarthRoofServer(  # for the fixture's teardown
-        MEarthRoofConfig.from_dict({"listen": "127.0.0.1:0", "port": {"type": "sim"}, **FAST})
+        MEarthRoofConfig.from_dict(
+            {"name": "r", "listen": "127.0.0.1:0", "port": {"type": "sim"}, **FAST}
+        )
     ).start()
 
 
@@ -368,11 +370,13 @@ async def test_server_stop_sends_nothing_and_the_latch_holds(make_rig):
 def test_config_validation_and_the_hardware_gate(tmp_path):
     with pytest.raises(ValueError, match="unknown config keys"):
         MEarthRoofConfig.from_dict({"allow_hardwar": True})
+    with pytest.raises(ValueError, match=r"missing required key\(s\) name"):
+        MEarthRoofConfig.from_dict({})
     with pytest.raises(ValueError, match=r"port\.type"):
-        MEarthRoofConfig.from_dict({"port": {"type": "serial"}})
+        MEarthRoofConfig.from_dict({"name": "r", "port": {"type": "serial"}})
     with pytest.raises(ValueError, match="departure_timeout"):
-        MEarthRoofConfig.from_dict({"departure_timeout": 500})
-    real = {"listen": "127.0.0.1:0", "port": {"type": "ppdev", "device": "/dev/null"}}
+        MEarthRoofConfig.from_dict({"name": "r", "departure_timeout": 500})
+    real = {"name": "r", "listen": "127.0.0.1:0", "port": {"type": "ppdev", "device": "/dev/null"}}
     with pytest.raises(HardwareNotAllowed):
         MEarthRoofServer(MEarthRoofConfig.from_dict(real))
     with pytest.raises(HardwareNotAllowed):  # the config alone is not enough

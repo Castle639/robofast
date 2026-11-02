@@ -233,10 +233,10 @@ sources:
       # load_config is never used. `altitude` is apparent (refracted), as
       # legacy's PyEphem altitude was; `altitude_geometric` is logged too.
       altitude: {open: [-90.0, 6.0], close: [-90.0, 6.0]}
-    # Refraction as legacy: ephem.Observer's default pressure and temperature
-    # (legacy never set them). Agrees with PyEphem to 0.002 deg at +6 deg.
-    pressure_hpa: 1010.0
-    temperature_c: 15.0
+    # Refraction for the site's air: no pressure_hpa or temperature_c, so the
+    # standard atmosphere at site.elevation (764 hPa, -0.1 degC). Legacy
+    # refracted at PyEphem's sea-level defaults (1010 hPa, 15 degC; it never
+    # set them): 0.025 deg more at +6 deg. Set both here to override.
 
   mearth_weather:
     # legacy getWeatherMearth; disabled there since 2022-10-20 ("MEarth

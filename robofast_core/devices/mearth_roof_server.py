@@ -98,6 +98,7 @@ from http.server import ThreadingHTTPServer
 from typing import Any
 
 from robofast_core.cancel import stop_task
+from robofast_core.config import load_device_config, require_keys
 from robofast_core.devices.aqawan_server import (
     ACTION_NOT_IMPLEMENTED,
     CAN,
@@ -166,10 +167,11 @@ class PortConfig:
 
 @dataclass
 class MEarthRoofConfig:
+    #: The enclosure's name: a site value, required.
+    name: str
     port: PortConfig = field(default_factory=PortConfig)
     #: Must be true (and ``--hardware`` given) for a real port.
     allow_hardware: bool = False
-    name: str = "mearth-south"
     listen: str = "127.0.0.1:11150"
     #: Whole-move bounds (legacy South: 180 s each way).
     open_timeout: float = 180.0
@@ -192,6 +194,7 @@ class MEarthRoofConfig:
         unknown = set(d) - names
         if unknown:
             raise ValueError(f"unknown config keys: {sorted(unknown)}")
+        require_keys(d, ("name",))
         port = {k: v for k, v in d.pop("port", {}).items() if not k.startswith("_")}
         port_names = {f.name for f in dataclasses.fields(PortConfig)}
         if set(port) - port_names:
@@ -745,8 +748,7 @@ def main(argv: list[str] | None = None) -> None:
     logging.basicConfig(
         level=args.log_level, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
     )
-    with open(args.config) as f:
-        config = MEarthRoofConfig.from_dict(json.load(f))
+    config = load_device_config(args.config, MEarthRoofConfig.from_dict)
     if args.listen:
         config.listen = args.listen
     if args.simulate:

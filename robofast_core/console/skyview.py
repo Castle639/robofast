@@ -5,8 +5,9 @@ Read only. Positions come from the sequencer's status snapshot (each
 telescope's ``tel.alt``/``tel.az`` in the value registry, and what it is
 observing); targets from the dispatch scheduler's requests (through the
 request API's read-only view of its state file); the site and the altitude
-limits from the dispatch plan (else the enclosure config's ``site`` and the
-design defaults, 21 and 83 deg). Every target's altitude, azimuth and
+limits from the dispatch plan (else the enclosure config's ``site`` and each
+telescope's ``limits``; a telescope with neither shows none, and the console
+refuses to slew it by hand). Every target's altitude, azimuth and
 airmass are computed now and ``later`` hours ahead, with astropy and the
 bundled IERS tables (never a download).
 """
@@ -26,7 +27,15 @@ log = logging.getLogger(__name__)
 LATER = (1.0, 2.0)
 #: Most targets listed per enclosure.
 MAX_TARGETS = 60
-DEFAULT_LIMITS = (21.0, 83.0)
+
+
+def limits_for(enc: ConsoleEnclosure, view: Any, tel: str) -> tuple[float, float] | None:
+    """A telescope's altitude limits (min_alt, max_alt), deg: the running
+    dispatch scheduler's, else the configured ones
+    (:attr:`ConsoleEnclosure.alt_limits`); None if neither has them."""
+    if view is not None and tel in getattr(view, "limits", {}):
+        return (view.limits[tel].min_alt, view.limits[tel].max_alt)
+    return enc.alt_limits.get(tel)
 
 
 def _airmass(alt: float) -> float | None:
@@ -112,9 +121,7 @@ def sky_for(
     tels: dict[str, Any] = {}
     for t in enc.telescopes:
         alt, az = values.get(f"{t}.tel.alt"), values.get(f"{t}.tel.az")
-        lim = DEFAULT_LIMITS
-        if view is not None and t in getattr(view, "limits", {}):
-            lim = (view.limits[t].min_alt, view.limits[t].max_alt)
+        lim = limits_for(enc, view, t) or (None, None)
         cur = current.get(t) if isinstance(current.get(t), dict) else {}
         tels[t] = {
             "alt": alt.get("value") if isinstance(alt, dict) and not alt.get("stale") else None,

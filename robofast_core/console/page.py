@@ -769,7 +769,7 @@ function skyChart(e) {
   const line = css("--line"), dim = css("--dim"), text = css("--text");
   svg.append(s("circle", {cx: C, cy: C, r: R, fill: "none", stroke: dim}));
   for (const alt of [30, 60]) svg.append(s("circle", {cx: C, cy: C, r: R * (90 - alt) / 90, fill: "none", stroke: line}));
-  const lims = Object.values(e.telescopes || {});
+  const lims = Object.values(e.telescopes || {}).filter((t) => t.min_alt != null && t.max_alt != null);
   if (lims.length) {
     const lo = Math.max(...lims.map((t) => t.min_alt)), hi = Math.min(...lims.map((t) => t.max_alt));
     svg.append(s("circle", {cx: C, cy: C, r: R * (90 - lo) / 90, fill: "none", stroke: css("--bad"), "stroke-dasharray": "4 3"}));
