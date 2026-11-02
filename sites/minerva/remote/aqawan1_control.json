@@ -1,0 +1,18 @@
+{
+  "_note": [
+    "!!! DANGER: FULL CONTROL OF THE REAL AQAWAN 1 PAC (through the tunnel on 127.0.0.1:7100): it can OPEN the enclosure. !!!",
+    "Not for the first hardware sessions. Use aqawan1_shadow.json (read-only) first.",
+    "Only after JDE has confirmed (a) the PAC tolerates a second client, or the legacy dome daemon (domeControl.py) is stopped with his explicit approval, and (b) nothing else will command the enclosure meanwhile.",
+    "The PAC's own 60 s heartbeat closes the enclosure if robofast's pings stop after an open.",
+    "allow_hardware true is useless without --hardware on the command line:",
+    "  robofast-aqawan-server --config sites/minerva/remote/aqawan1_control.json --hardware",
+    "docs/remote.md, docs/aqawan.md."
+  ],
+  "name": "aqawan1",
+  "listen": "127.0.0.1:11113",
+  "pac": {"host": "127.0.0.1", "port": 7100},
+  "allow_hardware": true,
+  "open_order": [2, 1],
+  "close_command": "CLOSE_SEQUENTIAL",
+  "interlock_doors": []
+}

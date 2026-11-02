@@ -1,0 +1,21 @@
+{
+  "_note": [
+    "!!! CAUTION: THIS TALKS TO THE REAL AQAWAN 1 PAC (through the tunnel on 127.0.0.1:7100). !!!",
+    "The legacy dome daemon (domeControl.py on the site gateway) is connected to this PAC and is mission-critical.",
+    "It is NOT yet known whether the PAC tolerates a second client. Do not start this until JDE has decided it may be tried, and stop it at the first sign of trouble in the legacy dome log.",
+    "read_only: this server sends the PAC only STATUS, GET_FAULTS and GET_ERRORS (the client refuses anything else before the wire); OpenShutter, CloseShutter, AbortSlew, Heartbeat and ClearFaults are refused. It CANNOT CLOSE THE ENCLOSURE: never point a safety supervisor at it as its only dome.",
+    "status_max_age 10: at most one STATUS per 10 s from robofast, whatever polls this server.",
+    "allow_hardware true is useless without --hardware on the command line:",
+    "  robofast-aqawan-server --config sites/minerva/remote/aqawan1_shadow.json --hardware",
+    "docs/remote.md (order of services, the tunnel), docs/aqawan.md."
+  ],
+  "name": "aqawan1",
+  "listen": "127.0.0.1:11113",
+  "pac": {"host": "127.0.0.1", "port": 7100},
+  "allow_hardware": true,
+  "read_only": true,
+  "open_order": [2, 1],
+  "close_command": "CLOSE_SEQUENTIAL",
+  "interlock_doors": [],
+  "status_max_age": 10.0
+}

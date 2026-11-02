@@ -1075,7 +1075,11 @@ Each step is a CI-tested deliverable.
 6. Windows bridge on one control PC: ASCOM Remote for the camera and PWI4;
    measure command latency and full-frame download time.
 7. Shadow mode: robofast's supervisor runs read-only alongside the legacy
-   system and logs what it *would* have done, for comparison.
+   system and logs what it *would* have done, for comparison. Off-site
+   engineering through an SSH tunnel (built: `docs/remote.md`,
+   `sites/minerva/remote/`): the hardware gate no longer takes loopback
+   for a simulator (section 3.1), a read-only Aqawan server for a first
+   connection beside the legacy dome daemon, engineering-mode configs.
 8. One telescope, attended nights, then robotic; then the rest of MINERVA.
 9. Dispatch scheduler, request model, target-of-opportunity interrupts
    and the authenticated request API (built; sections 3.7, 3.7.1), with

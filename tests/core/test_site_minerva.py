@@ -59,6 +59,7 @@ COVERED = {
     "throughput.example.json",
     "too.example.json",
     "weather.yaml",
+    "remote",
 }
 
 
@@ -78,7 +79,7 @@ def test_every_site_file_is_covered():
 def test_no_addresses_or_credentials():
     """Only loopback placeholders; no LAN addresses, hostnames of site
     devices, or credentials (the weather pages' public URLs excepted)."""
-    for path in SITE.iterdir():
+    for path in (p for p in SITE.rglob("*") if p.is_file()):
         text = path.read_text()
         for ip in re.findall(r"\b\d{1,3}(?:\.\d{1,3}){3}\b", text):
             assert ip == "127.0.0.1", f"{path.name}: {ip}"

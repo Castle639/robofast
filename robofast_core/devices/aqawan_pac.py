@@ -121,6 +121,10 @@ COMMANDS = frozenset(
     }
 )
 
+#: What a read-only client may send (``read_only``): queries, nothing that
+#: moves, switches, resets or restarts a timer -- not even ``HEARTBEAT``.
+READ_ONLY_COMMANDS = frozenset({"STATUS", "GET_FAULTS", "GET_ERRORS"})
+
 #: Commands that pre-empt a routine exchange in flight.
 URGENT = frozenset(
     {"STOP", "CLOSE_SHUTTERS", "CLOSE_SEQUENTIAL", "CLOSE_SHUTTER_1", "CLOSE_SHUTTER_2"}
@@ -179,6 +183,11 @@ class PACRefused(PACError):
         super().__init__(f"PAC refused {command}: {reason or '(no reason given)'}")
         self.command = command
         self.reason = reason
+
+
+class PACReadOnly(PACError):
+    """A command other than a query, refused by a read-only client (nothing
+    was sent)."""
 
 
 class PACPreempted(PACError):
@@ -416,8 +425,12 @@ class PACClient:
         resend_after: float = 0.5,
         max_attempts: int = 3,
         idle_end: float = 0.3,
+        read_only: bool = False,
     ) -> None:
         ipaddress.ip_address(host)  # ValueError for a hostname
+        #: Send only :data:`READ_ONLY_COMMANDS` (a shadow connection to a PAC
+        #: another controller owns).
+        self.read_only = read_only
         try:
             self._guard = hwgate.SimulatorGuard(host, port, hardware=allow_hardware, what="PAC")
         except hwgate.HardwareNotAllowed as exc:
@@ -441,6 +454,8 @@ class PACClient:
         """Send ``command``; return the reply text (not checked for success)."""
         if command not in COMMANDS:
             raise ValueError(f"{command!r} is not an allowed PAC command")
+        if self.read_only and command not in READ_ONLY_COMMANDS:
+            raise PACReadOnly(f"PAC {command}: refused, this client is read-only (nothing sent)")
         timeout = self.command_timeout if timeout is None else timeout
         urgent = command in URGENT
         if urgent and self._inflight is not None:

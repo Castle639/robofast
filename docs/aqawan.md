@@ -90,3 +90,20 @@ simulator says `STOPPED`). The server does not depend on it: any shutter
 string it does not recognise is `shutterError`, and the raw string is logged
 (once per distinct value) so the real one can be learned. After `AbortSlew`
 the server re-reads `STATUS` and logs what the PAC reports.
+
+## Read-only (shadow) server
+
+`"read_only": true` in the server's config makes a shadow server for a PAC
+that another controller owns, such as MINERVA's legacy dome daemon. It
+sends only `STATUS`, `GET_FAULTS` and `GET_ERRORS`: the PAC client refuses
+every other command before it reaches the wire (`PACReadOnly`), and the
+server answers `OpenShutter`, `CloseShutter`, `AbortSlew`,
+`Action("Heartbeat")` and `Action("ClearFaults")` with
+`InvalidOperationException`. `ShutterStatus`, `Action("Status")`,
+`Action("Faults")` and the fault texts work as usual. Set a long
+`status_max_age` so the PAC sees few extra `STATUS` requests. A read-only
+server cannot close the enclosure, so it refuses an `emergency_close`
+entry, and a safety supervisor must never use it as its dome. The remote
+config `sites/minerva/remote/aqawan1_shadow.json` is one;
+[remote.md](remote.md) says when it may be started (whether the PAC
+tolerates a second client is not yet known).
