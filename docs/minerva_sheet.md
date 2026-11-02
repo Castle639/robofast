@@ -9,7 +9,7 @@ CSV with a Google service account (`downloadList`) and read the CSV
 (`rdlist`, `mkdict`) for its scheduler (`scheduler.py`) and its nightly
 schedule (`rv_control.mkschedule`).
 
-`robofast_core/catalogs/minerva_sheet.py` reads the same tabs with the
+`robofast_core/sites/minerva/target_sheet.py` reads the same tabs with the
 same service account and a **read-only** scope, keeps a timestamped
 snapshot of every fetch, and turns each active row into one request group
 in the request language (`docs/request_language.md`), ready for the
@@ -19,11 +19,11 @@ row that legacy would misread, or that robofast cannot honour, is
 **refused** with its sheet row number and the reason; nothing is guessed.
 
 ```
-python -m robofast_core.catalogs.minerva_sheet fetch  --config target_sheet.json   # live -> snapshot
-python -m robofast_core.catalogs.minerva_sheet check  --config target_sheet.json   # validate, list refusals
-python -m robofast_core.catalogs.minerva_sheet export --config target_sheet.json -o minerva-requests.json
-python -m robofast_core.catalogs.minerva_sheet check  --instrument spectrograph --csv targets=targets.csv --csv bstars=bstars.csv
-python -m robofast_core.catalogs.minerva_sheet export --config target_sheet.json --snapshot /var/lib/robofast/data/minerva_sheet/20261101T120000Z
+python -m robofast_core.sites.minerva.target_sheet fetch  --config target_sheet.json   # live -> snapshot
+python -m robofast_core.sites.minerva.target_sheet check  --config target_sheet.json   # validate, list refusals
+python -m robofast_core.sites.minerva.target_sheet export --config target_sheet.json -o minerva-requests.json
+python -m robofast_core.sites.minerva.target_sheet check  --instrument spectrograph --csv targets=targets.csv --csv bstars=bstars.csv
+python -m robofast_core.sites.minerva.target_sheet export --config target_sheet.json --snapshot /var/lib/robofast/data/minerva_sheet/20261101T120000Z
 ```
 
 `check` and `export` take one source: `--config` (fetch live; if the Sheet

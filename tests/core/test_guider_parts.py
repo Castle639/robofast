@@ -24,8 +24,6 @@ from robofast_core.guider.calibration import (
     Calibration,
     CalibrationStore,
     fit_matrix,
-    from_sx_legacy,
-    from_tres_legacy,
     measure,
     sky_matrix,
 )
@@ -60,6 +58,8 @@ from robofast_core.guider.tiptilt import (
     alpaca_telescope,
     open_pi_gcs,
 )
+from robofast_core.sites.flwo60.guider_calibration import from_tres_legacy
+from robofast_core.sites.minerva.guider_calibration import from_sx_legacy
 from robofast_core.testing.fakes import FakeCamera
 
 ROI32 = ROI(100, 200, 32, 32)

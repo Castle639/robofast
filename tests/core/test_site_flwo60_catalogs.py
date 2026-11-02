@@ -17,26 +17,28 @@ from pathlib import Path
 import pytest
 
 from robofast_core.catalogs import (
-    CatalogError,
     CatalogTarget,
     OffsetPattern,
     PrivateCatalog,
     Program,
     TargetList,
     from_dict,
+    to_requests,
+)
+from robofast_core.request_model import load_request_groups
+from robofast_core.sequencer_service import load_plan
+from robofast_core.sites.flwo60.catalogs import (
+    CatalogError,
     kind_of,
     load,
     parse_mct,
+    parse_object_line,
     parse_off,
     read_sec,
     resolve,
-    to_requests,
     write_mct,
     write_off,
 )
-from robofast_core.catalogs.tres import parse_object_line
-from robofast_core.request_model import load_request_groups
-from robofast_core.sequencer_service import load_plan
 
 ROOT = Path(__file__).resolve().parents[2]
 SITE = ROOT / "sites" / "flwo60"
@@ -437,7 +439,7 @@ def test_requests_run_on_the_flwo60_dispatch_plan(tmp_path):
 
 def _cli(*args: str, cwd: Path) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        [sys.executable, "-m", "robofast_core.catalogs", *args],
+        [sys.executable, "-m", "robofast_core.sites.flwo60.catalogs", *args],
         cwd=cwd,
         capture_output=True,
         text=True,

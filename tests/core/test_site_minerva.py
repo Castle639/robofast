@@ -21,13 +21,15 @@ from robofast_core.autofocus_plan import TriggerConfig
 from robofast_core.devices.kiwispec_service import KiwiSpecConfig
 from robofast_core.fits_writer import Optics
 from robofast_core.guider.base import HardwareNotAllowed, RealClock
-from robofast_core.guider.calibration import Calibration, from_sx_legacy, sky_matrix
+from robofast_core.guider.calibration import Calibration, sky_matrix
 from robofast_core.guider.loop import GuideConfig
 from robofast_core.guider.service import GuiderServiceConfig, build_parts
 from robofast_core.imaging import ImagingConfig
 from robofast_core.plan import plan_from_config
 from robofast_core.request_model import load_request_groups
 from robofast_core.sequencer_service import build, load_plan
+from robofast_core.sites.minerva.guider_calibration import from_sx_legacy
+from robofast_core.sites.minerva.legacy_csv import from_legacy_csv
 from robofast_core.supervisor_service import build as build_supervisor
 from robofast_core.timeline import Timeline
 from robofast_core.weather_bridge import build_sources, parse_config
@@ -369,11 +371,39 @@ def test_throughput_config_loads():
 
 def test_target_sheet_config_loads():
     """target_sheet.example.json: the Google Sheet reader
-    (robofast_core.catalogs.minerva_sheet; docs/minerva_sheet.md), with
+    (robofast_core.sites.minerva.target_sheet; docs/minerva_sheet.md), with
     placeholders for the sheet keys and a key path outside the repository."""
-    from robofast_core.catalogs.minerva_sheet import SheetConfig, _placeholder
+    from robofast_core.sites.minerva.target_sheet import SheetConfig, _placeholder
 
     cfg = SheetConfig.load(SITE / "target_sheet.example.json")
     assert set(cfg.enabled()) == {"targets", "bstars"}
     assert cfg.key_file is not None and cfg.key_file.is_absolute()
     assert all(_placeholder(spec.sheet) for spec in cfg.lists.values())
+
+
+# -- the legacy target CSV (request importer minerva.legacy_csv) ---------------------
+
+
+def test_legacy_csv(tmp_path):
+    # The columns minerva-control's targetlist.mkdict reads (units in
+    # parentheses are stripped, as the legacy reader did).
+    path = tmp_path / "targets.csv"
+    path.write_text(
+        "name,ra (hours),dec (deg),exptime (s),priority,seplimit,maxobs,active,vmag\n"
+        "HD 1,1.5,20,300,5,7200,3,1,6.1\n"
+        "HD 2,2.5,30,600,2,,,1,7.0\n"
+        "HD 3,3.5,40,600,9,,,0,5.0\n"
+    )
+    groups = from_legacy_csv(path)
+    assert [g.name for g in groups] == ["HD 1", "HD 2"]  # HD 3 is inactive
+    r1, r2 = groups[0].requests[0], groups[1].requests[0]
+    assert r1.cadence.min_interval == 7200 and r1.cadence.max_per_night == 3
+    assert r2.cadence.min_interval == 3 * 3600 and r2.cadence.max_per_night == 2  # legacy defaults
+    c = r1.configurations[0]
+    assert (c.target.ra_hours, c.target.dec_deg, c.instrument) == (1.5, 20.0, "spectrograph")
+    assert c.type == "SPECTRUM" and c.target.ra == 22.5
+    assert groups[0].priority == 5
+    assert groups[0].to_dict()["requests"][0]["extra_params"]["cadence"]["max_per_night"] == 3
+    path.write_text("name,ra,dec,exptime,priority,active\nHD 1,1.5,95,300,5,1\n")
+    with pytest.raises(ValueError, match=r"targets.csv:2: .*target.dec"):
+        from_legacy_csv(path)

@@ -15,6 +15,13 @@ correctly become warnings.
 ``.sec`` catalogs are encrypted by an external helper that is not part of
 telshell's source. They are read only from outside (:func:`read_sec`):
 robofast does not decrypt them.
+
+Command line (``__main__``; docs/catalogs.md)::
+
+    python -m robofast_core.sites.flwo60.catalogs import foo.mct                 # JSON form
+    python -m robofast_core.sites.flwo60.catalogs import foo.mct --to-requests   # requests
+    python -m robofast_core.sites.flwo60.catalogs check foo.mct bar.off          # validate
+    python -m robofast_core.sites.flwo60.catalogs export foo.json -o foo.mct     # telshell
 """
 
 from __future__ import annotations

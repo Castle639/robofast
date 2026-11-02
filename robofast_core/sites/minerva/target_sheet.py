@@ -17,7 +17,8 @@ mapping):
   a cadence pool, so at most one B star, whichever, is taken a night
   (legacy's "1 Bstar per night").
 
-Same stance as the TRES importer (:mod:`.tres`): what legacy reads is read
+Same stance as the TRES importer
+(:mod:`robofast_core.sites.flwo60.catalogs`): what legacy reads is read
 the way legacy meant it; a row legacy would misread, or that robofast
 cannot honour, is refused with its sheet row number and the reason; nothing
 is guessed. Inactive rows are skipped, not checked.
@@ -28,10 +29,10 @@ Every live fetch is written as a timestamped snapshot (a CSV per tab and a
 back to the newest snapshot, with a warning that gives its age; either way
 it logs the one snapshot path the lists came from. Command line::
 
-    python -m robofast_core.catalogs.minerva_sheet fetch --config sheet.json
-    python -m robofast_core.catalogs.minerva_sheet check --config sheet.json
-    python -m robofast_core.catalogs.minerva_sheet export --config sheet.json -o rv.json
-    python -m robofast_core.catalogs.minerva_sheet check --csv targets=targets.csv
+    python -m robofast_core.sites.minerva.target_sheet fetch --config sheet.json
+    python -m robofast_core.sites.minerva.target_sheet check --config sheet.json
+    python -m robofast_core.sites.minerva.target_sheet export --config sheet.json -o rv.json
+    python -m robofast_core.sites.minerva.target_sheet check --csv targets=targets.csv
 
 gspread and google-auth are optional imports (``pip install --group
 sheets``), needed only for a live fetch. The key file and the sheet ids
@@ -870,7 +871,7 @@ def _export(args: argparse.Namespace) -> int:
     load_request_groups(groups)  # refuse anything the request model would
     doc = {
         "_note": [
-            f"MINERVA target lists, from {prov}, by robofast_core.catalogs.minerva_sheet.",
+            f"MINERVA target lists, from {prov}, by robofast_core.sites.minerva.target_sheet.",
             f"{len(groups)} request groups; {refused} rows refused (listed when exported).",
         ],
         "groups": groups,
@@ -885,7 +886,7 @@ def _export(args: argparse.Namespace) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(
-        prog="python -m robofast_core.catalogs.minerva_sheet",
+        prog="python -m robofast_core.sites.minerva.target_sheet",
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )

@@ -256,7 +256,7 @@ altitude (degrees):
 ```
 
 (legacy `telescope_N.ini` C2 and G0, focuser steps = microns;
-`robofast_core.focusmodel.legacy_model` converts a whole legacy set). The
+`robofast_core.sites.minerva.focus_model.legacy_model` converts a whole legacy set). The
 sequencer publishes `{tel}.focuser.temperature` and `{tel}.tel.alt` before
 each run, and every result records them (and any model terms) whether the
 model uses them or not, so the terms can be **fitted from the autofocus

@@ -1,10 +1,10 @@
-"""Command line for the catalog importers (docs/catalogs.md).
+"""Command line for the TRES / FLWO 60-inch catalog importer (docs/catalogs.md).
 
 ::
 
-    python -m robofast_core.catalogs import CATALOG [--to-requests] [-o OUT]
-    python -m robofast_core.catalogs check CATALOG...
-    python -m robofast_core.catalogs export FORM.json [-o OUT]
+    python -m robofast_core.sites.flwo60.catalogs import CATALOG [--to-requests] [-o OUT]
+    python -m robofast_core.sites.flwo60.catalogs check CATALOG...
+    python -m robofast_core.sites.flwo60.catalogs export FORM.json [-o OUT]
 
 ``import`` prints the intermediate form (JSON) of a ``.mct``, ``.off`` or
 ``.sec`` file; with ``--to-requests``, request groups for a ``.mct``
@@ -22,8 +22,9 @@ import json
 import sys
 from pathlib import Path
 
-from robofast_core.catalogs import model, tres
+from robofast_core.catalogs import model
 from robofast_core.request_model import load_request_groups
+from robofast_core.sites.flwo60 import catalogs as tres
 
 
 def _write(text: str, out: str | None) -> None:
@@ -70,7 +71,8 @@ def _import(args: argparse.Namespace) -> int:
     load_request_groups(groups)  # refuse anything the request model would
     doc = {
         "_note": [
-            f"Imported from TRES catalog {Path(args.catalog).name} by robofast_core.catalogs.",
+            f"Imported from TRES catalog {Path(args.catalog).name}"
+            " by robofast_core.sites.flwo60.catalogs.",
             f"exposure_time {args.exposure_time} s x {args.exposure_count}: "
             "set per program; the catalog has none.",
         ],
@@ -109,7 +111,9 @@ def _export(args: argparse.Namespace) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(prog="python -m robofast_core.catalogs", description=__doc__)
+    ap = argparse.ArgumentParser(
+        prog="python -m robofast_core.sites.flwo60.catalogs", description=__doc__
+    )
     sub = ap.add_subparsers(dest="cmd", required=True)
     imp = sub.add_parser("import", help="a catalog to the intermediate form or requests")
     imp.add_argument("catalog")

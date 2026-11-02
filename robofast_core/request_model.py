@@ -63,10 +63,10 @@ the first time they are written.
 from __future__ import annotations
 
 import copy
-import csv
 import json
 import logging
 import math
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import StrEnum
@@ -75,12 +75,14 @@ from typing import Any, ClassVar
 
 from robofast_core.instruments import instrument_params
 from robofast_core.kinds import ObservationKind, kind_for_request, request_types
+from robofast_core.plugins import Registry
 
 log = logging.getLogger(__name__)
 
 __all__ = [
     "INTERRUPT_POLICIES",
     "OBSERVATION_TYPES",
+    "REQUEST_IMPORTERS",
     "TOO_DEFAULTS",
     "Cadence",
     "Configuration",
@@ -92,7 +94,7 @@ __all__ = [
     "Target",
     "TooSpec",
     "Window",
-    "from_legacy_csv",
+    "import_requests",
     "load_request_groups",
     "ocs_state",
     "upgrade_legacy",
@@ -1208,72 +1210,34 @@ def load_request_groups(source: str | Path | list[Any]) -> list[RequestGroup]:
     return groups
 
 
-def from_legacy_csv(path: str | Path, *, instrument: str = "spectrograph") -> list[RequestGroup]:
-    """Convert a legacy MINERVA target spreadsheet export (``targets.csv``,
-    as read by minerva-control's ``targetlist.mkdict``) to request groups.
+#: Request importers: ``importer(path, **options) -> [RequestGroup]``,
+#: by name. A dispatch plan's ``imports`` names them
+#: (``[{"type": name, "path": file, ...options}]``); a site's plug-in
+#: registers its legacy formats here (MINERVA's target CSV:
+#: ``robofast_core.sites.minerva``).
+REQUEST_IMPORTERS: Registry[Callable[..., list[RequestGroup]]] = Registry("request importer")
 
-    Columns used: ``name``, ``ra`` (hours), ``dec`` (deg), ``exptime`` (s),
-    ``priority``, ``active`` (1 to include), and optionally ``seplimit``
-    (s between visits; legacy default 3 h), ``maxobs`` (visits per night;
-    legacy default 2) and ``num`` (exposures; default 1). A header's
-    parenthesised unit, e.g. ``ra (hours)``, is ignored, as the legacy reader
-    did. Each active row becomes a standing request with that cadence
-    (``extra_params.cadence``) and ``ipp_value`` the legacy priority; with
-    the default instrument its configuration is a ``SPECTRUM`` (fed by every
-    free telescope, as legacy's ``doSpectra`` with its ``tele_list``).
-    """
-    groups = []
-    with Path(path).open(newline="") as f:
-        reader = csv.DictReader(f)
-        for n, raw in enumerate(reader, start=2):
-            row = {k.split("(")[0].strip(): (v or "").strip() for k, v in raw.items() if k}
-            what = f"{path}:{n}"
-            try:
-                if row.get("active", "1") not in ("1", "1.0", "True", "true"):
-                    continue
-                name = row["name"]
-                seplimit = float(row["seplimit"]) if row.get("seplimit") else 3 * 3600.0
-                maxobs = int(float(row["maxobs"])) if row.get("maxobs") else 2
-                count = int(float(row["num"])) if row.get("num") else 1
-                key = name.replace(" ", "_")
-                spectrum = instrument == "spectrograph"
-                config = {
-                    "id": f"{key}/c",
-                    "type": "SPECTRUM" if spectrum else "EXPOSE",
-                    "instrument_type": instrument,
-                    "target": {
-                        "type": "ICRS",
-                        "name": name,
-                        "ra": float(row["ra"]) * 15.0,
-                        "dec": float(row["dec"]),
-                    },
-                    "instrument_configs": [
-                        {"exposure_time": float(row["exptime"]), "exposure_count": count}
-                    ],
-                }
-                cadence = {"min_interval": seplimit, "max_per_night": maxobs}
-                groups.append(
-                    RequestGroup.from_dict(
-                        {
-                            "id": key,
-                            "name": name,
-                            "proposal": "legacy",
-                            "ipp_value": float(row["priority"]),
-                            "operator": "SINGLE",
-                            "observation_type": "NORMAL",
-                            "requests": [
-                                {
-                                    "id": f"{key}/r",
-                                    "extra_params": {"cadence": cadence},
-                                    "configurations": [config],
-                                }
-                            ],
-                        },
-                        what,
-                    )
-                )
-            except (KeyError, ValueError) as exc:
-                raise ValueError(f"{what}: {exc}") from exc
+
+def import_requests(
+    entries: Any, base: Path | None = None, where: str = "imports"
+) -> list[RequestGroup]:
+    """Run a dispatch plan's ``imports`` (see :data:`REQUEST_IMPORTERS`);
+    a relative ``path`` is relative to ``base``."""
+    if not isinstance(entries, list):
+        raise ValueError(f"{where}: a list of {{'type': ..., 'path': ...}}")
+    groups: list[RequestGroup] = []
+    for i, e in enumerate(entries):
+        if not isinstance(e, dict) or not isinstance(e.get("path"), str):
+            raise ValueError(f"{where}[{i}]: {{'type': importer, 'path': file, ...}}")
+        opts = {k: v for k, v in e.items() if k not in ("type", "path") and not k.startswith("_")}
+        fn = REQUEST_IMPORTERS.lookup(e.get("type"), f"{where}[{i}].type")
+        path = Path(e["path"])
+        if base is not None and not path.is_absolute():
+            path = base / path
+        try:
+            groups += fn(path, **opts)
+        except TypeError as exc:
+            raise ValueError(f"{where}[{i}]: {exc}") from exc
     return groups
 
 

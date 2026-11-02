@@ -189,7 +189,7 @@ from robofast_core.request_model import (
     Request,
     RequestGroup,
     Status,
-    from_legacy_csv,
+    import_requests,
     load_request_groups,
 )
 
@@ -1672,7 +1672,8 @@ def dispatch_from_config(
         {
           "site": {"latitude": 31.680407, "longitude": -110.878977, "elevation": 2316},
           "requests": "requests.json",        # file, or an inline list of groups
-          "legacy_csv": "targets.csv",        # optional: legacy target list too
+          "imports": [{"type": "minerva.legacy_csv", "path": "targets.csv"}],
+                                              # optional: a plug-in's importers
           "state": "/var/lib/robofast/aqawan1-dispatch.json",   # optional
           "too_dropbox": "/var/lib/robofast/too",                # optional
           "record": {"dir": "/var/lib/robofast/plans",            # optional
@@ -1726,7 +1727,12 @@ def dispatch_from_config(
     else:
         groups += load_request_groups(requests)
     if "legacy_csv" in config:
-        groups += from_legacy_csv(_resolve(config.pop("legacy_csv"), base))
+        raise ValueError(
+            "dispatch plan: 'legacy_csv' is now an entry of 'imports' ({'type': the "
+            "importer a site plug-in registers, 'path': ...}; docs/plugins.md)"
+        )
+    if "imports" in config:
+        groups += import_requests(config.pop("imports"), base, "dispatch plan: imports")
     state = config.pop("state", None)
     dropbox = config.pop("too_dropbox", None)
     vetting = config.pop("vetting", None)

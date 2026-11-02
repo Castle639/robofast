@@ -285,14 +285,16 @@ def record_from_header(
     port: str | None = None,
     filt: str | None = None,
     port_map: Mapping[str, Mapping[str, int]] | None = None,
+    file_ports: Mapping[str, str] | None = None,
     longitude: float | None = None,
     source: str = "fits",
 ) -> dict[str, Any]:
     """A FITS header (robofast's or the legacy MINERVA one) and its zero point
     as a store record. The telescope from ``TELESCOP``; the port from
     ``PORT`` (a name; a legacy port *number* through ``port_map``,
-    ``{telescope: {port name: number}}`` as in instruments.json, or ``FAU``
-    in the file name); the night from the file name (``nYYYYMMDD``), else
+    ``{telescope: {port name: number}}`` as in instruments.json; or the
+    first ``file_ports`` text, ``{text: port}``, in the file name, case
+    ignored: MINERVA's ``{".FAU.": "fau"}``); the night from the file name (``nYYYYMMDD``), else
     ``NIGHT``, else from DATE-OBS (local mean time at ``longitude``, UTC
     without it, rolling over at noon)."""
     tel = str(telescope or h.get("TELESCOP") or "").strip().lower()
@@ -305,8 +307,9 @@ def record_from_header(
         elif p is not None and port_map and tel in port_map:
             inv = {int(v): k for k, v in port_map[tel].items()}
             port = inv.get(int(p))
-        if port is None and ".FAU." in Path(file).name.upper():
-            port = "fau"
+        if port is None and file_ports:
+            name = Path(file).name.upper()
+            port = next((p for text, p in file_ports.items() if text.upper() in name), None)
     if filt is None:
         f = h.get("FILTER")
         filt = str(f).strip() if isinstance(f, str) and f.strip() else None
@@ -426,6 +429,10 @@ class ThroughputConfig:
     expected: str = "chain"
     #: A frame with no port: this port (or ``{telescope: port}``).
     default_port: Any = None
+    #: A legacy FITS frame with no port name: ``{text: port}``, the port of
+    #: a file whose name contains the text (case ignored; MINERVA's
+    #: ``{".FAU.": "fau"}``).
+    file_ports: dict[str, str] = field(default_factory=dict)
     #: Extinction (mag/airmass) by series, ``<telescope>/<port>``, filter or
     #: ``default``; else the port photometry's ``extinction``.
     extinction: dict[str, float] = field(default_factory=dict)
@@ -1288,6 +1295,7 @@ def main(argv: list[str] | None = None) -> int:
                     batch.append(
                         record_from_header(h, zp, file=str(p), telescope=args.telescope,
                                            port=args.port, port_map=port_map,
+                                           file_ports=cfg.file_ports,
                                            longitude=cfg.longitude)
                     )  # fmt: skip
                 except ValueError as exc:

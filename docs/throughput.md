@@ -100,7 +100,8 @@ legacy frame:
 
 * the header RA/Dec are JNow (`--jnow` precesses them, as `rotcal` does);
 * `PORT` is a number, which `--instruments` maps to a port name
-  (`instruments.json`'s `ports`), or `.FAU.` in the file name means the FAU;
+  (`instruments.json`'s `ports`), or the config's `file_ports` maps text in
+  the file name to a port (MINERVA: `{".FAU.": "fau"}`);
 * `GAIN` is the *spectrograph's*, so only robofast's `EGAIN` is used, and
   legacy zero points are in ADU/s (stored 16-bit ADU, as
   `sky.example.json` says);
