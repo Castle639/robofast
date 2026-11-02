@@ -105,11 +105,11 @@ from robofast_core.alpaca import alpaca_owner
 from robofast_core.config import device_address, load_config, telescopes
 from robofast_core.owner import DeviceError
 from robofast_core.safety import (
-    ENCLOSURE_MEMBERS,
     OpenLease,
     RecoveryRefused,
     SafetyConfig,
     SafetySupervisor,
+    enclosure_members,
 )
 from robofast_core.timeline import Timeline
 
@@ -372,7 +372,7 @@ def build(config: dict[str, Any], timeline: Timeline) -> SafetySupervisor:
         )
     return SafetySupervisor(
         config.get("name", "safety"),
-        dome=owner("dome", "dome", True, privileged_members=ENCLOSURE_MEMBERS),
+        dome=owner("dome", "dome", True, privileged_members=enclosure_members(scfg)),
         safety_monitor=owner("safetymonitor", "safetymonitor", True),
         observing_conditions=owner("observingconditions", "observingconditions"),
         telescopes=scopes,

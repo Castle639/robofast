@@ -7,6 +7,8 @@ TRES: ThAr and incandescent lamps on a Pulizzi power switch) has a
     "lamps": {
       "switch": "127.0.0.1:11170/0",   # robofast's lamp Switch server
       "frame_overhead": 30,            # s per frame beyond its exposure (readout)
+      "status_action": "Status",       # optional: the switch's action names
+      "off_action": "LampsOff",        #   (defaults: robofast's lamp server's)
       "lamps": {
         "ThAr1": {"warmup": 60, "calstage": "in"},
         "Incand": {"warmup": 30, "calstage": "in"}
@@ -52,13 +54,25 @@ class LampSetup:
     frame_overhead: float = 30.0
     #: Bound on one switch command (the server reads the unit back).
     switch_timeout: float = 15.0
+    #: The switch's Alpaca actions: its outlets' state (JSON ``{"outlets":
+    #: [{"name", "on", ...}]}``) and every lamp off (JSON ``{"off":
+    #: [names]}``). The defaults are robofast's lamp server's.
+    status_action: str = "Status"
+    off_action: str = "LampsOff"
 
     @classmethod
     def from_dict(cls, d: Any) -> LampSetup:
         if not isinstance(d, dict):
             raise ValueError("lamps: expected an object")
         d = {k: v for k, v in d.items() if not k.startswith("_")}
-        known = {"switch", "lamps", "frame_overhead", "switch_timeout"}
+        known = {
+            "switch",
+            "lamps",
+            "frame_overhead",
+            "switch_timeout",
+            "status_action",
+            "off_action",
+        }
         if set(d) - known:
             raise ValueError(f"lamps: unknown keys {sorted(set(d) - known)}")
         if not isinstance(d.get("switch"), str) or not d["switch"]:
@@ -86,11 +100,16 @@ class LampSetup:
             lamps,
             float(d.get("frame_overhead", 30.0)),
             float(d.get("switch_timeout", 15.0)),
+            d.get("status_action", "Status"),
+            d.get("off_action", "LampsOff"),
         )
         for k in ("frame_overhead", "switch_timeout"):
             v = getattr(setup, k)
             if not math.isfinite(v) or v <= 0:
                 raise ValueError(f"lamps.{k} must be positive")
+        for k in ("status_action", "off_action"):
+            if not isinstance(getattr(setup, k), str) or not getattr(setup, k):
+                raise ValueError(f"lamps.{k}: an Alpaca action name")
         return setup
 
     def duration(self, name: str, exptime: float, count: int) -> float:
@@ -98,15 +117,19 @@ class LampSetup:
         return self.lamps[name].warmup + count * (exptime + self.frame_overhead)
 
 
-async def switch_status(grant: Any, timeout: float) -> dict[str, dict[str, Any]]:
-    """The switch's outlets by name (its ``Action("Status")``)."""
-    raw = await grant.call("Action", "Status", "", timeout=timeout)
+async def switch_status(
+    grant: Any, timeout: float, action: str = "Status"
+) -> dict[str, dict[str, Any]]:
+    """The switch's outlets by name (its status action, ``Action("Status")``
+    on robofast's lamp server)."""
+    raw = await grant.call("Action", action, "", timeout=timeout)
     data = json.loads(raw) if isinstance(raw, str) else raw
     return {o["name"]: o for o in data["outlets"]}
 
 
-async def lamps_off(grant: Any, timeout: float) -> list[str]:
-    """Every lamp off (``Action("LampsOff")``); the names switched off."""
-    raw = await grant.call("Action", "LampsOff", "", timeout=timeout)
+async def lamps_off(grant: Any, timeout: float, action: str = "LampsOff") -> list[str]:
+    """Every lamp off (the off action, ``Action("LampsOff")`` on robofast's
+    lamp server); the names switched off."""
+    raw = await grant.call("Action", action, "", timeout=timeout)
     data = json.loads(raw) if isinstance(raw, str) else raw
     return list(data.get("off", []))

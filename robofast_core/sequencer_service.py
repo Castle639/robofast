@@ -161,6 +161,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from robofast_core.adc import ADCSwitches, adc_entry
 from robofast_core.alpaca import alpaca_owner
 from robofast_core.autofocus import AutofocusSetup
 from robofast_core.autofocus_plan import AutofocusTriggers, TriggerConfig
@@ -223,6 +224,7 @@ def build_units(
     ``aux["rotator"]`` by telescope name, if ``aux`` is given; a telescope
     with an ``autofocus`` entry also lets the sequencer move its focuser."""
     units = []
+    adc_switches: dict[str, ADCSwitches] = {}
     for name, entry in telescopes(config).items():
         if "camera" not in entry:
             raise ValueError(f"telescope {name!r} has no camera")
@@ -242,7 +244,10 @@ def build_units(
         ):
             if kind not in entry:
                 continue
-            address, number = device_address(entry[kind])
+            spec = entry[kind]
+            if kind == "adc":
+                spec, adc_switches[name] = adc_entry(spec, f"telescope {name!r}: adc")
+            address, number = device_address(spec)
             owners[kind] = alpaca_owner(
                 f"{name}.{kind}",
                 {"calstage": "filterwheel", "adc": "switch"}.get(kind, kind),
@@ -322,6 +327,7 @@ def build_units(
                 filterwheel=owners.get("filterwheel"),
                 calstage=owners.get("calstage"),
                 adc=owners.get("adc"),
+                adc_switches=adc_switches.get(name) or ADCSwitches(),
                 lamps=lamps_owner,
                 lamp_setup=lamp_setup,
                 port_action=port_action,
@@ -428,6 +434,7 @@ def build(
         focusers=aux.get("focuser"),
         rotators=aux.get("rotator"),
         adcs=aux.get("adc"),
+        adc_switches={u.name: u.adc_switches for u in units if u.adc is not None},
         base=base,
     )
     if imaging is not None:

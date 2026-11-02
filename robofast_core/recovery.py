@@ -49,6 +49,8 @@ log = logging.getLogger(__name__)
 __all__ = ["RUNGS", "DevicePolicy", "PDUSwitch", "RecoveryLadder", "RecoveryResult"]
 
 RUNGS = ("reconnect", "restart", "powercycle")
+#: robofast's PDU server's power-cycle action (``powercycle.action``).
+POWERCYCLE_ACTION = "PowerCycle"
 DEVICES = ("telescope", "camera", "focuser", "rotator", "filterwheel")
 #: The member read to check a device answers.
 VERIFY = {
@@ -68,8 +70,10 @@ class DevicePolicy:
     #: ``{"command": [...]}`` (run, must exit 0) or ``{"url": ..., "method":
     #: "POST"}``; ``settle`` s after it.
     restart: dict[str, Any] | None = None
-    #: ``{"pdu": "host:port", "switch": id, "boot_time": s}`` (the PDU's
-    #: Alpaca Switch server and the switch id of this device's outlet).
+    #: ``{"pdu": "host:port", "switch": id, "boot_time": s, "action":
+    #: name}`` (the PDU's Alpaca Switch server, the switch id of this
+    #: device's outlet, and the server's power-cycle action: default
+    #: ``"PowerCycle"``, robofast's PDU server's).
     powercycle: dict[str, Any] | None = None
     step_timeout: float = 180.0
     verify_timeout: float = 60.0
@@ -92,6 +96,10 @@ class DevicePolicy:
             pc = self.powercycle or {}
             if not pc.get("pdu") or pc.get("switch") is None:
                 raise ValueError("recovery: a powercycle step needs powercycle.pdu and .switch")
+        if self.powercycle is not None:
+            action = self.powercycle.get("action", POWERCYCLE_ACTION)
+            if not isinstance(action, str) or not action:
+                raise ValueError("recovery.powercycle.action: an Alpaca action name")
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> DevicePolicy:
@@ -119,13 +127,13 @@ class PDUSwitch:
         self.address = address
         self.timeout = timeout
 
-    async def cycle(self, switch: int) -> None:
+    async def cycle(self, switch: int, action: str = POWERCYCLE_ACTION) -> None:
         from robofast_core.alpaca_client import AlpacaDevice
 
         dev = AlpacaDevice(self.address, "switch", 0)
         try:
             await dev.connect(timeout=self.timeout)
-            await dev.call("Action", "PowerCycle", str(int(switch)), timeout=self.timeout)
+            await dev.call("Action", action, str(int(switch)), timeout=self.timeout)
         finally:
             await dev.aclose()
 
@@ -278,7 +286,9 @@ class RecoveryLadder:
         await self._may_cycle(kind, pol, probe, others)
         pc = pol.powercycle
         self.cycles.setdefault(kind, []).append(self.clock())
-        await self.pdu(str(pc["pdu"])).cycle(int(pc["switch"]))
+        await self.pdu(str(pc["pdu"])).cycle(
+            int(pc["switch"]), action=str(pc.get("action", POWERCYCLE_ACTION))
+        )
         self.event("recovery_powercycle", device=kind, switch=int(pc["switch"]))
         await self.sleep(float(pc.get("boot_time", 60.0)))
         reconnect()

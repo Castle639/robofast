@@ -18,7 +18,11 @@ built-in plug-in (:func:`robofast_core.devices.register`):
   s, ...}`` builds a
   :class:`~robofast_core.devices.kiwispec_service.KiwiSpecRemote`
   (whose ``record_keys`` put the iodine stage each frame was taken with at
-  the top of its sidecar record).
+  the top of its sidecar record);
+* the guider: the fiber backlight behind the FAU, a guider backlight kind
+  (:data:`robofast_core.guider.hardware.BACKLIGHTS`): ``"backlight":
+  {"kind": "kiwispec", "url": "http://host:port"}`` switches it with the
+  service's ``POST /backlight``.
 """
 
 from __future__ import annotations
@@ -66,4 +70,33 @@ KIWISPEC = InstrumentType(
     calibration_kinds=CALIBRATION_KINDS,
     client_factory=_client,
     client_keys=frozenset({"url", "timeout", "abort_timeout", "queue_wait"}),
+    status_fields=(
+        ("exp. meter", "expmeter_total", 0, ""),
+        ("CCD", "ccd_temp", 1, "C"),
+        ("iodine stage", "stage", None, ""),
+        ("pressure", "spec_pressure", 4, ""),
+    ),
 )
+
+
+def backlight(spec: dict[str, Any], ctx: Any) -> Any:
+    """The guider's backlight kind ``kiwispec``: the KiwiSpec service's
+    ``POST /backlight`` (docs/kiwispec.md) at ``spec["url"]``."""
+    from robofast_core.cancel import isolated
+    from robofast_core.guider.base import GuiderError
+    from robofast_core.guider.loop import Backlight
+
+    if not isinstance(spec.get("url"), str) or not spec["url"]:
+        raise ValueError("backlight: the KiwiSpec service's 'url' is required")
+    url = spec["url"].rstrip("/")
+    timeout = float(spec.get("timeout", 15.0))
+
+    async def _set(on: bool) -> None:
+        import httpx
+
+        async with httpx.AsyncClient(timeout=timeout, trust_env=False) as client:
+            r = await isolated(client.post(url + "/backlight", json={"on": on}))
+        if r.status_code >= 400:
+            raise GuiderError(f"backlight {on}: {r.status_code} {r.text[:200]}")
+
+    return Backlight(_set)

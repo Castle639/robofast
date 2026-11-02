@@ -18,7 +18,7 @@
   "tiptilt": {"kind": "sxao-sim", "limits": [[-400, 400], [-400, 400]], "travel": 1000},
   "mount": {"kind": "sim", "method": "offset", "max_offset": 30},
   "offload": {"threshold": 0.5, "period": 30, "min_pixels": 1.0, "window": 2.0, "settle": 3.0},
-  "backlight": {"sim": true},
+  "backlight": {"kind": "sim"},
   "guide": {
     "exposure": 0.02,
     "roi_size": 48,

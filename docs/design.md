@@ -831,8 +831,12 @@ The plan, approved by JDE 2026-11-01:
    (neutral `SpectrographBusy`/`SpectrographError`, `spectrograph.type`),
    weather sources (MINERVA's adapters loaded from its weather config) and
    notifier sinks.
-   2b next: guider hardware, ADC switch ids, Action names, the legacy
-   importers, the console's spectrograph panel.
+   2b: guider hardware registries (`robofast_core/guider/hardware.py`;
+   KiwiSpec's backlight registered by `robofast_core.devices`), ADC
+   switches found by name (`robofast_core/adc.py`), Action names in config
+   with robofast's servers' names as defaults, the console's spectrograph
+   panel described by the instrument type (`status_fields`) done; next,
+   the legacy importers.
 3. Enclosure operating modes, (b) above.
 4. Config-defined sequences, (c) above.
 
@@ -929,6 +933,7 @@ support is often worse. So:
 | `heartbeat_interval` | none | supervisor ping period; at most `heartbeat_timeout`/4, or the config is rejected |
 | `heartbeat_timeout` | none | the enclosure's own heartbeat timeout (Aqawan PAC: 60 s, confirmed); required with `heartbeat_interval` |
 | `fault_action` | none | the dome's read-only fault channel (Aqawan: `Faults`); any fault alarms and blocks opening, and a fault with the enclosure not closed closes it |
+| `clear_faults_action`, `heartbeat_action` | `ClearFaults`, `Heartbeat` | the dome's clear-faults action (privileged: the supervisor's alone) and the heartbeat device's ping; the defaults are robofast's own servers' names |
 | `fault_auto_clear` | off (MINERVA: on) | clear a fault automatically, only with the enclosure closed, never an E-stop; a recurrence stops it until an operator clears (`docs/aqawan.md`) |
 | `fault_auto_clear_interval`, `fault_auto_clear_settle` | 1 h, 15 s | at most one automatic clear per interval; a fault still there `settle` after one counts as a recurrence |
 | `attended_only` | true without a heartbeat device | no lease unless an operator is on duty (section 3.3); FLWO 60-inch and MEarth South: on; MINERVA: off |

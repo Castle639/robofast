@@ -14,6 +14,7 @@ it names core's own.
 | `robofast_core.plan.PLAN_TYPES` | a plan's `type` | `static`, `calibration`, `dispatch` |
 | `robofast_core.kinds.OBSERVATION_KINDS` | an observation's `kind`; each kind's `request_types` are OCS configuration `type`s | `expose` (EXPOSE, DARK, BIAS), `autofocus` (AUTO_FOCUS), `spectrum` (SPECTRUM), `spectrograph_calibration`, `manual`, `pointing_model` (POINTING_MODEL), `rotator_calibration` (ROTATOR_CALIBRATION), `sky_flat` (SKY_FLAT), `arc` (ARC), `lamp_flat` (LAMP_FLAT) |
 | `robofast_core.instruments.INSTRUMENT_TYPES` | a dispatch config's `instruments.<name>.type`; an enclosure config's `spectrograph.type` | `imager`, `camera_spectrograph`, `kiwispec` |
+| `robofast_core.guider.hardware.CAMERAS`, `TIPTILTS`, `MOUNTS`, `BACKLIGHTS` | a guider config's `camera`, `tiptilt`, `mount`, `backlight` `kind` | cameras `sim`, `alpaca`, `zwo`, `framegrabber`; tip/tilts `sim`, `sxao`, `sxao-sim`, `pi`, `pi-sim`; mounts `sim`, `alpaca`; backlights `sim`, `kiwispec` (by `robofast_core.devices`) |
 | `robofast_core.notifier.sinks.SINK_TYPES` | a notifier sink's `type` | `email`, `webhook`, `command` |
 | `robofast_core.weather_sources.SOURCE_TYPES` | a weather source's `type` | `sun`, `redis`; MINERVA's `minerva.ridge`, `minerva.sky_temps`, `minerva.mearth` (a plug-in) |
 
@@ -102,6 +103,11 @@ The other registries work the same way:
   entry. A dispatch config then declares which of its instrument names is
   of that type: `"instruments": {"echelle": {"type": "mysite.echelle"}}`
   (a name it does not declare is its own type, so `imager` needs none).
+* **A guider backend**: `CAMERAS.register("mysite.cam", factory)` (or
+  `TIPTILTS`, `MOUNTS`, `BACKLIGHTS`) with `factory(spec, ctx)`: `spec` the
+  part's config less its `kind`, `ctx` a `BuildContext` (`allowed`: the
+  hardware gate, which a real device's driver must honor; `clock`; `world`,
+  the simulated sky) (`robofast_core/guider/hardware.py`).
 * **An observation kind**: subclass `robofast_core.kinds.ObservationKind`
   and register an instance under its `name`. The kind owns its validation
   (`validate`, `fields`), its request mapping (`request_types`,
@@ -112,3 +118,15 @@ The other registries work the same way:
 A plug-in that fails to import, or registers a name that is taken, stops
 the service at start-up with the reason: a config that names it cannot be
 served without it.
+
+## Not code: device action names
+
+Where core sends an Alpaca `Action` to a device, the action's name is
+configuration, its default the name robofast's own server uses (that is
+robofast's protocol): the safety config's `fault_action`,
+`clear_faults_action` (`ClearFaults`) and `heartbeat_action`
+(`Heartbeat`); a recovery policy's `powercycle.action` (`PowerCycle`); a
+telescope's `lamps.status_action` (`Status`) and `lamps.off_action`
+(`LampsOff`); `port_action`. A device server of another make needs a
+config line, not a plug-in. Likewise the ADC's switches are found by name
+(`adc.switches`, docs/adc.md).

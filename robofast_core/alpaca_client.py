@@ -203,6 +203,7 @@ METHODS: dict[str, tuple[str, tuple[str, ...]]] = {
     "SetSwitch": ("PUT", ("Id", "State")),
     "GetSwitch": ("GET", ("Id",)),
     "GetSwitchValue": ("GET", ("Id",)),
+    "GetSwitchName": ("GET", ("Id",)),
     # any device: a driver-specific action (the enclosure heartbeat)
     "Action": ("PUT", ("Action", "Parameters")),
 }

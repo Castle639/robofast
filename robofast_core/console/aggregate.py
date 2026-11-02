@@ -104,6 +104,25 @@ def _alt_limits(
     return out
 
 
+def _spectrograph_fields(
+    config: dict[str, Any], where: Path
+) -> tuple[tuple[str, str, int | None, str], ...] | None:
+    """The enclosure's spectrograph type's panel readings (None when the
+    config names no type, or one with no ``status_fields``)."""
+    entry = config.get("spectrograph")
+    if not isinstance(entry, dict) or not isinstance(entry.get("type"), str):
+        return None
+    from robofast_core.instruments import INSTRUMENT_TYPES
+    from robofast_core.plugins import load_config_plugins
+
+    load_config_plugins(config, f"{where}: plugins")
+    itype = INSTRUMENT_TYPES.get(entry["type"])
+    if itype is None:
+        log.warning("%s: spectrograph.type %r is not registered", where, entry["type"])
+        return None
+    return tuple(itype.status_fields) or None
+
+
 @dataclass
 class ConsoleEnclosure:
     """One enclosure as the console sees it: where to read each part."""
@@ -146,6 +165,9 @@ class ConsoleEnclosure:
     #: the telescope's ``limits`` in the enclosure config, else its entry in
     #: a dispatch plan. A telescope missing here gets no manual slews.
     alt_limits: dict[str, tuple[float, float]] = field(default_factory=dict)
+    #: The spectrograph panel's readings (its instrument type's
+    #: ``status_fields``, robofast_core/instruments.py); None: every reading.
+    spectrograph_fields: tuple[tuple[str, str, int | None, str], ...] | None = None
 
     @classmethod
     def from_spec(
@@ -259,6 +281,7 @@ class ConsoleEnclosure:
             if spec.get("throughput") is None
             else _resolve(spec["throughput"], base),
             alt_limits=alt_limits,
+            spectrograph_fields=_spectrograph_fields(config, cpath),
         )
 
 
@@ -586,6 +609,11 @@ class Aggregator:
             r = readings.get(k)
             return r.get("value") if isinstance(r, dict) else None
 
+        described = enc.spectrograph_fields
+        if described is None:  # no type known: every reading, by its name
+            described = tuple((k, k, None, "") for k in sorted(readings))
+        fields = [[label, reading(key), digits, unit] for label, key, digits, unit in described]
+
         job = spec.get("job") if isinstance(spec.get("job"), dict) else None
         jv = None
         if job is not None:
@@ -616,10 +644,9 @@ class Aggregator:
             "reachable": True,
             "busy": spec.get("busy"),
             "job": jv,
-            "expmeter_total": reading("expmeter_total"),
-            "ccd_temp": reading("ccd_temp"),
-            "stage": reading("stage"),
-            "spec_pressure": reading("spec_pressure"),
+            # The readings its instrument type describes: [label, value,
+            # digits, unit] each.
+            "fields": fields,
             "led_on": spec.get("led_on"),
             # Who waits for the spectrograph (its shared queue).
             "queue": [q for q in spec.get("queue") or [] if isinstance(q, dict)],
