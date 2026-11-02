@@ -53,6 +53,7 @@ filled in there:
 | `lists.<name>.pool`, `per_night` | B stars: the cadence pool and how many of it a night (default the list's name, 1) |
 | `lists.<name>.limit` | the cadence's nightly limit: `hard` (default: refused once reached) or `soft` (still taken, but only when nothing else is observable). MINERVA's B stars: `soft` |
 | `lists.<name>.enabled` | `false` skips the list |
+| `offset_check` | how acquisition offsets are checked against the star catalog (below, "Acquisition offsets"): `tolerance` (arcsec, 3), `g_bright`, `g_faint` (catalog magnitude, 7 and 14.5), `search` (arcsec, 60), `action` (`refuse`, the default, or `flag`), `catalog` (a catalog entry, docs/sky.md; default the default catalog). On by default; `false` turns it off |
 | `snapshot_dir`, `keep` | where snapshots go (default `$ROBOFAST_DATA_DIR/minerva_sheet`, see `robofast_core.zenodo.data_dir`) and how many are kept (30) |
 
 The live fetch needs `gspread` and `google-auth`: `pip install --group
@@ -129,7 +130,7 @@ inactive and not checked (legacy skipped them). Blank rows are skipped.
 | `maxobs` (`targets`) | visits a night; blank or unreadable: 2. (The scheduler's test `observed > maxobs` let one more through) | `extra_params.cadence.max_per_night`, as written; blank: 2. Not a whole number >= 1: **refused** (legacy silently used 2) |
 | `seplimit (sec)` | minimum time between visits; blank: 3 h | `cadence.min_interval` (start to start); blank: 10800 s |
 | `fauexptime (sec)` | the acquisition camera's exposure time | `acquisition_config.exposure_time` (accepted by the request model; the guider sets its own exposure today). Blank: absent |
-| `acquisition_offset_north`, `_east (arcsec)` | offset guiding: the target is this far from the star the guider locks on (target minus guide star; applied only when **both** are non-zero, and its star selection was broken: docs/offset_guiding.md, "Legacy") | offset guiding (docs/offset_guiding.md): `guiding_config.extra_params` `guide: "offset"`, `offset_star: {"east": -east, "north": -north}`, when either is non-zero. Blank or 0: none |
+| `acquisition_offset_north`, `_east (arcsec)` | offset guiding: the target is this far from the star the guider locks on (target minus guide star; applied only when **both** are non-zero, and its star selection was broken: docs/offset_guiding.md, "Legacy") | offset guiding (docs/offset_guiding.md): `guiding_config.extra_params` `guide: "offset"`, `offset_star: {"east": -east, "north": -north}`, when either is non-zero, **after a catalog star is found there** ("Acquisition offsets" above; else refused). Blank or 0: none |
 | `iodine` (`targets`; the red list) | **not read**: `mkdict` sets `i2` true for every target | 1 or blank: iodine in (as legacy). 0: **refused**, since legacy observed such a row through the cell anyway and robofast will not guess which was meant (set 1, or ask for a template, a `SPECTRUM` with iodine false, separately) |
 | `active` | 1: observe; anything else: skip | 1: convert; 0 or blank: inactive; anything else (`yes`, `TRUE`, 2): **refused** |
 | `comment` | FITS header | in `observation_note` |
@@ -140,6 +141,46 @@ inactive and not checked (legacy skipped them). Blank rows are skipped.
 A row that passes these checks is also validated by the request model
 (`RequestGroup.from_dict`): whatever that refuses refuses the row, with
 its reason.
+
+### Acquisition offsets
+
+Legacy trusted `acquisition_offset_north`/`_east` as typed. robofast
+checks each one against the star catalog (`docs/sky.md`) before the row
+becomes a request (`verify_offsets`; the check itself is
+`robofast_core.guider.offset.check_offset_star`, usable for any explicit
+offset). The guide star the offset implies is the target, moved along its
+proper motion from J2000 to the date of the import, plus the offset; the
+catalog's stars are moved to the same date. The row passes when a catalog
+star lies within `offset_check.tolerance` (3") of that position and is a
+sensible guide star: fainter than `g_bright` (7, which saturates the FAU)
+and brighter than `g_faint` (14.5), the limits `offset_star: "auto"`
+uses. A verified offset gets the star's catalog magnitude
+(`offset_star.g`), which the guiding recommendation (`guide: "auto"`)
+then uses instead of its assumed one.
+
+A row that fails is **refused** (`action: "refuse"`), with what was found:
+
+```
+refused: targets row 8 (SYN-ZETA): acquisition offset: no catalog star within 3" of
+target + offset; the nearest (mag 11.0) is 12.0" away, at east +12.0" north -5.0" from the target
+```
+
+(the nearest star within `search`, 60", and its own offset from the
+target, which is perhaps what the sheet meant). With `action: "flag"`
+the row is kept and the failure is a warning. When the catalog cannot
+answer (its tiles are not cached and it may not fetch them: `--offline`,
+`$ROBOFAST_OFFLINE`, or `fetch: false`), the row is kept with a "not
+checked" warning: robofast refuses only on evidence. Each list's summary
+counts the offsets verified, failed and not checked:
+
+```
+targets: 41 requests, 3 inactive, 2 refused; acquisition offsets: 6 verified, 1 failed, 0 not checked
+```
+
+On the command line, `check` and `export` run the same check (the
+config's `offset_check`, or the defaults with `--csv`/`--snapshot`);
+`--catalog DIR` names the catalog's cache directory, `--no-offset-check`
+skips it.
 
 ## The requests
 

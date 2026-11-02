@@ -18,6 +18,7 @@ from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 from robofast_core.dispatch import DispatchScheduler, TelescopeLimits
@@ -304,6 +305,9 @@ INSTRUMENT = {"instrument": "spectrograph"}
 
 
 def config(tmp: Path, **kw) -> ms.SheetConfig:
+    # The offset check has tests of its own (below); here it is off, so a
+    # live load never reaches for a star catalog.
+    kw.setdefault("offset_check", False)
     d = {
         "key_file": "/etc/robofast/secrets/k.json",
         "snapshot_dir": str(tmp / "snaps"),
@@ -463,6 +467,7 @@ def test_cli_check_and_export_from_csv(tmp_path, capsys):
     assert ms.main(["check", "--csv", b]) == 2  # no instrument: a site value
     assert "no instrument" in capsys.readouterr().err
     inst = ["--instrument", "spectrograph"]
+    inst += ["--no-offset-check"]
     assert ms.main(["check", *inst, "--csv", t, "--csv", b]) == 2  # refused rows
     err = capsys.readouterr().err
     assert "refused: targets row 6: pmra is blank" in err
@@ -500,10 +505,130 @@ def test_cli_offline_and_snapshot(tmp_path, capsys, monkeypatch):
     assert ms.main(["check", "--config", str(cfile), "--offline"]) == 2
     out = capsys.readouterr().out
     assert f"fallback snapshot {loaded.path}" in out
-    assert ms.main(["check", "--instrument", "spectrograph", "--snapshot", str(loaded.path)]) == 2
+    snap = ["--instrument", "spectrograph", "--no-offset-check", "--snapshot", str(loaded.path)]
+    assert ms.main(["check", *snap]) == 2
     assert f"snapshot {loaded.path}" in capsys.readouterr().out
     # fetch with no key file: an error, no fallback, exit 2.
     monkeypatch.delenv(ms.KEY_ENV, raising=False)
     monkeypatch.delenv(ms.GOOGLE_KEY_ENV, raising=False)
     assert ms.main(["fetch", "--config", str(cfile)]) == 2
     assert "no service-account key" in capsys.readouterr().err
+
+
+# -- acquisition offsets against the catalog ----------------------------------------
+
+from robofast_core import catalog as cat  # noqa: E402
+from robofast_core.guider.offset import OffsetCheck, TargetPosition  # noqa: E402
+
+#: SYN-ZETA (row 8): its guide star is 5" south of it.
+ZETA = TargetPosition(105.0, 32.0, 10.5, -3.25, 2000.0)
+
+
+def star_catalog(tmp: Path, stars: list[tuple[float, float, float]]) -> cat.Catalog:
+    """A catalog of stars at (east, north) arcsec from SYN-ZETA at J2016,
+    each of the given G and moving with it, on tiles in ``tmp``."""
+    ra0, dec0 = ZETA.at(cat.GAIA_EPOCH)
+    rec = np.zeros(len(stars), cat.TILE_DTYPE)
+    for i, (e, n, g) in enumerate(stars):
+        ra, dec = cat._untan(ra0, dec0, np.radians(e / 3600.0), np.radians(n / 3600.0))
+        rec[i] = (i + 1, ra, dec, ZETA.pmra, ZETA.pmdec, g, 0.8)
+    tiles = cat.TileCache(tmp, fetch=None)
+    pix = cat.ang2pix(tiles.level, rec["ra"], rec["dec"])
+    for p in cat.tiles_in_cone(tiles.level, ra0, dec0, 0.1):
+        tiles.save(p, rec[pix == p])
+    return cat.Catalog(tiles, bright=None)
+
+
+def checked(catalog, check=None) -> ms.SheetList:
+    lists = {"targets": ms.convert(table("targets"), spec("targets"), "targets.csv")}
+    ms.verify_offsets(lists, catalog, NOW, check or OffsetCheck())
+    return lists["targets"]
+
+
+def zeta_star(sl: ms.SheetList) -> dict | None:
+    g = next((g for g in sl.groups if g["name"] == "SYN-ZETA"), None)
+    if g is None:
+        return None
+    return g["requests"][0]["configurations"][0]["guiding_config"]["extra_params"]["offset_star"]
+
+
+def test_offset_with_its_star_in_the_catalog_is_verified(tmp_path):
+    # The star 0.4" from where the sheet says (a legacy offset is rounded),
+    # with a brighter one 20" away that must not be taken instead.
+    sl = checked(star_catalog(tmp_path, [(0.3, -5.3, 11.0), (15.0, 12.0, 9.0)]))
+    assert zeta_star(sl) == {"east": 0.0, "north": -5.0, "g": 11.0}
+    assert sl.offsets_ok == 1 and sl.offsets_failed == 0
+    assert "acquisition offsets: 1 verified, 0 failed, 0 not checked" in sl.summary()
+    assert not any("SYN-ZETA" in r for r in sl.refused)
+
+
+def test_offset_with_no_star_is_refused_and_says_where_the_nearest_is(tmp_path):
+    sl = checked(star_catalog(tmp_path, [(12.0, -5.0, 11.0)]))
+    assert zeta_star(sl) is None and sl.offsets_failed == 1
+    [r] = [r for r in sl.refused if "SYN-ZETA" in r]
+    assert r.startswith("targets row 8 (SYN-ZETA): acquisition offset: no catalog star within 3")
+    assert 'the nearest (mag 11.0) is 12.0" away, at east +12.0" north -5.0"' in r
+    assert "1 failed" in sl.summary()
+
+
+@pytest.mark.parametrize(
+    ("g", "why"), [(15.5, "too faint to guide on"), (6.0, "saturates the guider")]
+)
+def test_offset_star_of_the_wrong_brightness_is_refused(tmp_path, g, why):
+    sl = checked(star_catalog(tmp_path, [(0.0, -5.0, g)]))
+    assert zeta_star(sl) is None
+    assert any(why in r and "SYN-ZETA" in r for r in sl.refused)
+
+
+def test_flag_keeps_the_row_with_a_warning(tmp_path):
+    sl = checked(star_catalog(tmp_path, []), OffsetCheck(action="flag"))
+    assert zeta_star(sl) == {"east": 0.0, "north": -5.0}
+    assert any("SYN-ZETA" in w and "kept: offset_check.action flag" in w for w in sl.warnings)
+    assert sl.offsets_failed == 1 and not any("SYN-ZETA" in r for r in sl.refused)
+
+
+def test_proper_motion_is_applied(tmp_path):
+    # A guide star that does not share the target's motion: right in 2016,
+    # 0.3"/yr off by 2026, so 3" off now: the check uses the date.
+    ra0, dec0 = ZETA.at(cat.GAIA_EPOCH)
+    ra, dec = cat._untan(ra0, dec0, 0.0, np.radians(-5.0 / 3600.0))
+    rec = np.zeros(1, cat.TILE_DTYPE)
+    rec[0] = (1, ra, dec, ZETA.pmra + 350.0, ZETA.pmdec, 11.0, 0.8)
+    tiles = cat.TileCache(tmp_path, fetch=None)
+    for p in cat.tiles_in_cone(tiles.level, ra0, dec0, 0.1):
+        tiles.save(p, rec[cat.ang2pix(tiles.level, rec["ra"], rec["dec"]) == p])
+    catalog = cat.Catalog(tiles, bright=None)
+    assert checked(catalog).offsets_failed == 1
+    assert checked(catalog, OffsetCheck(tolerance=5.0)).offsets_ok == 1
+
+
+def test_a_catalog_that_cannot_answer_is_a_warning_not_a_refusal(tmp_path):
+    empty = cat.Catalog(cat.TileCache(tmp_path, fetch=None), bright=None)
+    sl = checked(empty)
+    assert zeta_star(sl) == {"east": 0.0, "north": -5.0}
+    assert sl.offsets_unchecked == 1
+    assert any("SYN-ZETA" in w and "not checked" in w for w in sl.warnings)
+
+
+def test_load_checks_offsets_and_the_config_turns_it_off(tmp_path):
+    good = star_catalog(tmp_path / "cat", [(0.0, -5.0, 11.0)])
+    cfg = config(tmp_path, offset_check={"tolerance": 2.0, "action": "refuse"})
+    assert cfg.offset_check == OffsetCheck(tolerance=2.0)
+    loaded = ms.load(cfg, offline=False, client=live_client(), now=NOW, catalog=good)
+    assert loaded.lists["targets"].offsets_ok == 1
+    empty = cat.Catalog(cat.TileCache(tmp_path / "none", fetch=None), bright=None)
+    loaded = ms.load(cfg, offline=False, client=live_client(), now=NOW, catalog=empty)
+    assert loaded.lists["targets"].offsets_unchecked == 1
+    off = ms.load(config(tmp_path), offline=False, client=live_client(), now=NOW, catalog=empty)
+    assert off.lists["targets"].offsets_unchecked == 0
+    for bad in ({"action": "ignore"}, {"tolerance": 0}, {"nope": 1}, "yes"):
+        with pytest.raises(ms.SheetError, match="offset_check"):
+            config(tmp_path, offset_check=bad)
+
+
+def test_cli_checks_offsets_against_a_catalog_directory(tmp_path, capsys):
+    star_catalog(tmp_path, [(0.0, -5.0, 11.0)])
+    t = f"targets={DATA / 'targets.csv'}"
+    args = ["check", "--instrument", "spectrograph", "--catalog", str(tmp_path), "--csv", t]
+    assert ms.main(args) == 2  # the sheet's other refused rows
+    assert "acquisition offsets: 1 verified, 0 failed" in capsys.readouterr().err

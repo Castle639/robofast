@@ -606,6 +606,8 @@ def snapshot(seq: Sequencer, interval: float = 5.0) -> dict[str, Any]:
         # The enclosure's operating mode as the sequencer last read it.
         "mode": seq.modes.mode,
         "observe": seq.modes.observe,
+        # A site that runs unattended with no hardware watchdog (docs/modes.md).
+        "unwatched": seq.modes.unwatched,
         "telescopes": tels,
         # The latest of the sequencer's own timeline (the console's log).
         "timeline": seq.timeline.recent(TIMELINE_IN_SNAPSHOT, skip_sent=True),

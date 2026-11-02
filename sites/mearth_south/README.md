@@ -14,9 +14,14 @@ weather bridge has no real station source yet.
 
 ## Policy
 
-- **Attended only.** The roof has no hardware watchdog, so the supervisor
-  grants no lease, and the roof never opens, unless an operator is on duty
-  (`docs/design.md` section 3.3, `docs/console.md`).
+- **Attended by default; robotic by the site's choice.** The roof has no
+  hardware watchdog, so nothing closes it if the supervisor dies. The site
+  opts in to running unattended anyway
+  (`safety.allow_unattended_without_watchdog`; JDE 2026-11-02: MEarth ran
+  robotically for years with this roof): it starts in `attended` (no lease,
+  so no opening, unless an operator is on duty; `docs/console.md`) and may
+  be switched to `robotic`, with a loud warning everywhere it shows
+  (`docs/modes.md`, "Unattended without a watchdog").
 - **Park before close.** The roof rolls over the telescopes.
 - **Faults block opening.** The roof server's fault channel (`Faults`)
   reports a move that failed, an unknown position or both limits made;

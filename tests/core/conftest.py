@@ -44,8 +44,9 @@ from robofast_core.testing.fakes import (
 #: Fast timings for unit tests (seconds).
 FAST_SAFETY = dict(
     # The fakes have no hardware heartbeat; these tests are not about
-    # operator duty (test_attended.py is).
-    attended_only=False,
+    # operator duty (test_attended.py is), so they opt in to running
+    # unattended without one (docs/modes.md).
+    allow_unattended_without_watchdog=True,
     poll_interval=0.05,
     read_timeout=0.3,
     stale_after=0.6,

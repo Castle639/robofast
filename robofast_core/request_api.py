@@ -1307,6 +1307,8 @@ class RequestApi:
                 "since": mode.get("since"),
                 "requests": (mode.get("policy") or {}).get("requests"),
                 "open": (mode.get("policy") or {}).get("open"),
+                # Unattended with no hardware watchdog (docs/modes.md).
+                "unwatched": mode.get("unwatched"),
             },
             # The weather verdict (the supervisor's, from the safety monitor).
             "safe": s.get("safe"),
