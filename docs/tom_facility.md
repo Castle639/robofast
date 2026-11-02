@@ -92,7 +92,7 @@ at the end of the request's window. Normal requests are ranked by
 - **Time accounting.** Proposals are a static list; no time is allocated,
   charged or refunded, and `ipp_value` is a plain priority (no IPP
   debit/credit).
-- Non-sidereal targets (`ORBITAL_ELEMENTS`, ...), `max_seeing`,
+- Non-sidereal targets (`ORBITAL_ELEMENTS`, ...),
   `min_transparency`, `REPEAT_*` configuration types and `repeat_duration`,
   rotator modes, regions of interest; the dither and mosaic expansion
   endpoints (`/api/configurations/dither/`, `/api/requests/mosaic/`; the

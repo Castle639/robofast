@@ -117,7 +117,8 @@ acted on.
 | `max_lunar_phase` | illuminated fraction 0-1 | | enforced whether or not the Moon is up |
 | `extra_params.min_alt`, `max_alt`, `max_sun_alt`* | deg | | previously top level |
 | `extra_params.min_ha`, `max_ha`* | hours | | previously top level |
-| `max_seeing`, `min_transparency` | | | refused unless null |
+| `max_seeing` | arcsec FWHM | | the seeing now, from the plan's seeing source (docs/seeing.md: by default the guiders' live FWHM); with no seeing known, the plan's `seeing.unknown` decides (default: pass) |
+| `min_transparency` | | | refused unless null |
 
 Constraints only tighten the telescope's and the site's limits.
 

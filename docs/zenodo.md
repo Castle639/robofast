@@ -3,8 +3,11 @@
 robofast's repository is BSD 3-Clause, so data under other licences -- the
 Gaia DR3 extracts, under ESA's CC BY-NC 3.0 IGO -- are not in it. They live
 in a Zenodo record and are fetched on first use (`docs/sky.md`, "What is
-downloaded, from where"). Three pieces, adapted from EXOZIPPy's tooling (BSD
-3-Clause, same author):
+downloaded, from where"). A record whose licence is non-commercial is
+listed in `zenodo_assets.NONCOMMERCIAL_RECORDS`; with
+`ROBOFAST_ALLOW_NONCOMMERCIAL=0` it is never downloaded (`fetch` skips it,
+`fetch_file` refuses it; `docs/sky.md`, "Licences"). Three pieces, adapted
+from EXOZIPPy's tooling (BSD 3-Clause, same author):
 
 | Piece | What it does |
 |---|---|

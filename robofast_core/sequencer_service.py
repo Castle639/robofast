@@ -472,6 +472,14 @@ def build(
     )
     if triggers is not None:
         triggers.bind(seq.registry)
+    bind_values = getattr(plan, "bind_values", None)
+    if callable(bind_values) and bind_values(seq.registry):
+        # The plan's seeing source collects the guiders' FWHM from the
+        # registry (docs/seeing.md): every guider publishes there, with or
+        # without a frame pipeline.
+        for u in units:
+            if u.guider is not None and getattr(u.guider, "registry", 0) is None:
+                u.guider.registry = seq.registry
     return seq, remote
 
 

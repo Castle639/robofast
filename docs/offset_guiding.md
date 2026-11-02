@@ -155,21 +155,35 @@ the assumed one.
 - TRES: `sites/flwo60/dispatch.example.json`.
 
 The thresholds are `max_error` (KiwiSpec 0.3", TRES 0.25"), `min_snr` (5)
-and `prefer_annulus` (1.5). The hardware values are marked there as
-assumed until measured. With them, annulus guiding fails below about
-V 13.5 on MINERVA (the FAU sees ~2 % of the light) and G 15.5 on TRES.
+and `prefer_annulus` (1.5). Each hardware value carries its source in the
+config's `_note`:
+
+| Value | MINERVA (KiwiSpec, FAU) | TRES |
+|---|---|---|
+| `fiber_diameter` | 2.27": the 50 um core at 22 um/arcsec (Swift et al. 2015, JATIS 1, 027002, sec. III.3) | 2.3" (unconfirmed) |
+| `plate_scale` | 0.265"/px, confirmed from the FAU frames' FITS WCS | 0.161"/px, tres-guider `config/zyla.ini` (Andor Zyla 4.2P) |
+| `exposure` | 10 s (FAU frames use 8.6-15 s) | 1 s (assumed) |
+| `read_noise` | 6 e-: ZWO ASI174MM datasheet at gain 0 (the legacy code runs gain 0); about 3.9 e-/ADU there. Datasheet estimates, consistent with the measured 0.9-1.5 ADU frame noise | 1.4 e- (assumed) |
+| `throughput` | 0.02, **unconfirmed**: six recent T2 FAU frames show no spill within 40" of the fiber at 8 sigma, so it may be much lower | 0.1 (assumed) |
+
+With these, annulus guiding works to about V 14.5 on MINERVA (offset from
+15.0) and G 16.0 on TRES (offset from 16.5). The MINERVA crossover moves
+with the unconfirmed throughput: 13.1 at 0.5 %, 12.2 at 0.2 %, 11.4 at
+0.1 %.
 
 **For `guide: "auto"`** the dispatch scheduler applies the recommendation
 when a visit starts:
 
 - the sky is the model's dark sky, brightened by the Moon's illuminated
   fraction while it is up (`sky_full_moon`);
-- the seeing is the model's `seeing`.
+- the seeing is the plan's seeing source (docs/seeing.md): by default the
+  guiders' live FWHM, the median of the last 30 minutes; with nothing
+  recent, the model's `seeing`.
 
-The decision record's `guide` entry carries the choice and the
-recommendation (both predictions and the reason). Without a model or a
-`target_mag`, `auto` guides on the target, and the record says why. Live
-seeing is not used yet.
+The decision record's `guide` entry carries the choice, the
+recommendation (both predictions and the reason) and the `seeing` used
+(its value, source, samples and age). Without a model or a `target_mag`,
+`auto` guides on the target, and the record says why.
 
 From the command line:
 
