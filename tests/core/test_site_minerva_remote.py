@@ -104,3 +104,26 @@ def test_enclosure_config_is_engineering_and_builds():
     assert tel["t1"]["camera"].startswith("127.0.0.1:7151")
     assert tel["t2"]["camera"].startswith("127.0.0.1:7152")
     build_supervisor(config, Timeline())
+
+
+@pytest.mark.parametrize(
+    "name, port",
+    [
+        ("t1_pwi2.json", 7101),
+        ("t2_pwi2.json", 7102),
+        ("t1_pwi4.json", 7141),
+        ("t2_pwi4.json", 7142),
+    ],
+)
+def test_pwi_configs_are_refused_without_hardware(name, port):
+    from robofast_core.devices.pwi_server import PWIConfig, PWIServer
+
+    d = _json(name)
+    assert d["pwi"]["host"] == "127.0.0.1" and d["pwi"]["port"] == port
+    assert d["allow_find_home"] is False
+    with FakeTunnel() as tunnel:
+        d["pwi"] = {**d["pwi"], "port": tunnel.port}
+        d["listen"] = "127.0.0.1:0"
+        with pytest.raises(hwgate.HardwareNotAllowed, match="tunnel"):
+            PWIServer(PWIConfig.from_dict(d))  # no --hardware
+        assert not tunnel.touched
