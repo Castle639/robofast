@@ -127,12 +127,12 @@ jobs:
   # (scripts/conformu_tres_frontend.py), the 60-inch's calibration-lamp
   # Switch server on its Pulizzi simulator (scripts/conformu_pulizzi.py), and
   # the 60-inch's ADC Rotator/Switch server on its prism-motor simulator
-  # (scripts/conformu_adc.py), and the PlaneWave PWI Telescope/Focuser/
-  # Rotator server on its PWI4 and PWI2 simulators (scripts/conformu_pwi.py).
+  # (scripts/conformu_adc.py). The PlaneWave PWI server has its own job
+  # below (conformu-pwi), run in parallel: its two backends take ~20 min.
   conformu:
     name: conformu
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -172,9 +172,6 @@ jobs:
       - name: ConformU against the ADC Rotator and Switch server
         if: ${{ !cancelled() }}
         run: python scripts/conformu_adc.py --conformu "$CONFORMU_BIN" --out "${{ runner.temp }}/conformu-adc"
-      - name: ConformU against the PWI Telescope, Focuser and Rotator server
-        if: ${{ !cancelled() }}
-        run: python scripts/conformu_pwi.py --conformu "$CONFORMU_BIN" --out "${{ runner.temp }}/conformu-pwi"
       - name: Upload ConformU logs
         if: always()
         continue-on-error: true
@@ -189,9 +186,43 @@ jobs:
             ${{ runner.temp }}/conformu-tres-frontend
             ${{ runner.temp }}/conformu-pulizzi
             ${{ runner.temp }}/conformu-adc
-            ${{ runner.temp }}/conformu-pwi
           if-no-files-found: warn
 
+  # ConformU against the PlaneWave PWI Telescope/Focuser/Rotator server on
+  # its PWI4 and PWI2 simulators (scripts/conformu_pwi.py).
+  conformu-pwi:
+    name: conformu-pwi
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade "pip>=25.1"
+          python -m pip install --group core
+      - name: Cache the ConformU download
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/robofast/conformu
+          key: conformu-${{ runner.os }}-${{ hashFiles('scripts/fetch_conformu.sh') }}
+      - name: Fetch ConformU
+        run: |
+          set -euo pipefail
+          bin=$(scripts/fetch_conformu.sh "$HOME/.cache/robofast/conformu" | tail -1)
+          echo "CONFORMU_BIN=$bin" >> "$GITHUB_ENV"
+      - name: ConformU against the PWI Telescope, Focuser and Rotator server
+        run: python scripts/conformu_pwi.py --conformu "$CONFORMU_BIN" --out "${{ runner.temp }}/conformu-pwi"
+      - name: Upload ConformU logs
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v7
+        with:
+          name: conformu-pwi-logs
+          path: ${{ runner.temp }}/conformu-pwi
+          if-no-files-found: warn
   # End to end: a whole simulated MINERVA RV night (docs/demo.md) on
   # simulators and fakes, the scheduler's clock compressed: calibrations,
   # autofocus, spectra fed by two telescopes, imaging, bad weather, a ToO,
@@ -260,7 +291,7 @@ jobs:
   test:
     name: test
     if: always()
-    needs: [pytest, alpaca-sim, conformu, e2e, lint, install]
+    needs: [pytest, alpaca-sim, conformu, conformu-pwi, e2e, lint, install]
     runs-on: ubuntu-latest
     steps:
       - name: Fail if any required job did not succeed
@@ -268,12 +299,14 @@ jobs:
           echo "pytest:     ${{ needs.pytest.result }}"
           echo "alpaca-sim: ${{ needs.alpaca-sim.result }}"
           echo "conformu:   ${{ needs.conformu.result }}"
+          echo "conformu-pwi: ${{ needs.conformu-pwi.result }}"
           echo "e2e:        ${{ needs.e2e.result }}"
           echo "lint:       ${{ needs.lint.result }}"
           echo "install:    ${{ needs.install.result }}"
           test "${{ needs.pytest.result }}" = "success"
           test "${{ needs.alpaca-sim.result }}" = "success"
           test "${{ needs.conformu.result }}" = "success"
+          test "${{ needs.conformu-pwi.result }}" = "success"
           test "${{ needs.e2e.result }}" = "success"
           test "${{ needs.lint.result }}" = "success"
           test "${{ needs.install.result }}" = "success"
