@@ -298,6 +298,39 @@ async def test_actions_and_unimplemented_members(make_rig):
             await dome.get(member)
 
 
+async def test_read_only_server_sends_only_queries(make_rig):
+    """A shadow server (read_only) for a PAC another controller owns: status
+    and faults are served; every command is refused before the wire."""
+    rig = make_rig({"heartbeat_timeout": None}, read_only=True)
+    dome = rig.dome()
+    assert await dome.get("ShutterStatus") == CLOSED
+    status = json.loads(await dome.call("Action", "Status", ""))
+    assert status["shutter1"] == "CLOSED"
+    rig.sim.set_fault("Estop active")
+    assert "Estop active" in await dome.call("Action", "GetFaults", "")
+    for member in ("OpenShutter", "CloseShutter", "AbortSlew"):
+        with pytest.raises(InvalidOperationException, match="read-only"):
+            await dome.call(member)
+    for action in ("Heartbeat", "ClearFaults"):
+        with pytest.raises(InvalidOperationException, match="read-only"):
+            await dome.call("Action", action, "test")
+    # The client refuses too, whatever the caller.
+    from robofast_core.devices.aqawan_pac import PACReadOnly
+
+    with pytest.raises(PACReadOnly):
+        await rig.server.aqawan.pac.command("HEARTBEAT")
+    assert set(rig.sim.commands()) <= {"STATUS", "GET_FAULTS", "GET_ERRORS"}
+    with pytest.raises(ValueError, match="read_only"):
+        AqawanConfig.from_dict(
+            {
+                "name": "a",
+                "open_order": [1, 2],
+                "read_only": True,
+                "emergency_close": {"token_sha256": ["0" * 64], "log": "x.jsonl"},
+            }
+        )
+
+
 async def faults_text(dome, timeout: float = 2.0) -> dict:
     """The Faults action, once the PAC's fault text has been fetched."""
     t0 = time.monotonic()

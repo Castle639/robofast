@@ -1124,7 +1124,11 @@ Each step is a CI-tested deliverable.
    its cutover; next, a first attended small-move session on T1 through a
    tunnel (`docs/pwi.md`, "First hardware session").
 7. Shadow mode: robofast's supervisor runs read-only alongside the legacy
-   system and logs what it *would* have done, for comparison.
+   system and logs what it *would* have done, for comparison. Off-site
+   engineering through an SSH tunnel (built: `docs/remote.md`,
+   `sites/minerva/remote/`): the hardware gate no longer takes loopback
+   for a simulator (section 3.1), a read-only Aqawan server for a first
+   connection beside the legacy dome daemon, engineering-mode configs.
 8. One telescope, attended nights, then robotic; then the rest of MINERVA.
 9. Dispatch scheduler, request model, target-of-opportunity interrupts
    and the authenticated request API (built; sections 3.7, 3.7.1), with

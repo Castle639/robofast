@@ -1,0 +1,97 @@
+{
+  "_note": [
+    "MINERVA Aqawan 1 run OFF-SITE through an SSH tunnel (docs/remote.md): engineering mode, attended, nothing autonomous.",
+    "!!! Points at REAL hardware through the tunnel: the robofast servers it names must each be started with --hardware. !!!",
+    "Not for the first hardware session (telescope status and small moves only: docs/pwi.md, no supervisor or sequencer).",
+    "dome: the robofast Aqawan server on 11113. Run the supervisor only against aqawan1_control.json (full control), never aqawan1_shadow.json (read-only: it cannot close). See the Aqawan caution in docs/remote.md.",
+    "safetymonitor, observingconditions: a local weather bridge (sites/minerva/weather.yaml). Off-site, sources it cannot reach read as unknown, so the weather is unsafe and nothing opens.",
+    "t1, t2 telescope: the robofast PWI server for that telescope (t1_pwi2.json / t1_pwi4.json listen on 11121, t2 on 11122; run one backend per telescope). camera: ASCOM Remote through the tunnel, 7151 / 7152 (not installed yet).",
+    "port_action: the PWI server's M3 port Action, SelectPort, with a port number or a name from its config's ports (docs/pwi.md).",
+    "mode engineering, with its own mode file (modes/aqawan1-remote.json under the data directory) so it never shares the on-site enclosure's mode.",
+    "Everything else as sites/minerva/aqawan1.json (its notes say where each value comes from)."
+  ],
+  "name": "aqawan1",
+  "listen": "127.0.0.1:8100",
+  "site": {
+    "latitude": 31.680407,
+    "longitude": -110.878977,
+    "elevation": 2316.0
+  },
+  "devices": {
+    "dome": "127.0.0.1:11113",
+    "safetymonitor": "127.0.0.1:11111",
+    "observingconditions": "127.0.0.1:11111"
+  },
+  "telescopes": {
+    "t1": {
+      "telescope": "127.0.0.1:11121/0",
+      "camera": "127.0.0.1:7151/0",
+      "port_action": "SelectPort",
+      "limits": {
+        "min_alt": 21.0,
+        "max_alt": 83.0
+      }
+    },
+    "t2": {
+      "telescope": "127.0.0.1:11122/0",
+      "camera": "127.0.0.1:7152/0",
+      "port_action": "SelectPort",
+      "limits": {
+        "min_alt": 21.0,
+        "max_alt": 83.0
+      }
+    }
+  },
+  "mode": "engineering",
+  "mode_file": "modes/aqawan1-remote.json",
+  "safety": {
+    "park_before_close": true,
+    "park_wait": 60,
+    "heartbeat_interval": 10,
+    "heartbeat_timeout": 60,
+    "fault_action": "Faults",
+    "fault_auto_clear": true,
+    "fault_auto_clear_interval": 3600
+  },
+  "sequencer_name": "aqawan1-sequencer",
+  "command_timeout": 10,
+  "sequencer": {
+    "error_backoff": 300,
+    "max_consecutive_errors": 3,
+    "idle_release_after": 900
+  },
+  "images": {
+    "data_root": "/data",
+    "site": "minerva",
+    "compress": false,
+    "queue_size": 4,
+    "telescopes": {
+      "t1": {
+        "plate_scale": 0.61,
+        "position_angle": 0.0,
+        "flip": false,
+        "aperture": 700.0,
+        "focal_length": 4560.0
+      },
+      "t2": {
+        "plate_scale": 0.679,
+        "position_angle": 0.0,
+        "flip": false,
+        "aperture": 700.0,
+        "focal_length": 4560.0
+      }
+    }
+  },
+  "status_file": "aqawan1-remote-status.json",
+  "operator_control": "aqawan1-remote-control",
+  "plan": {
+    "type": "calibration",
+    "biases": 10,
+    "darks": [
+      [
+        60,
+        5
+      ]
+    ]
+  }
+}

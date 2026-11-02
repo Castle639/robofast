@@ -77,6 +77,15 @@ Members
   ``ClearFaults``; each close and clear is logged to ``emergency_close.log``.
 * No azimuth, altitude, park, home or slaving: those members raise
   ``NotImplementedException``; the ``Can*`` flags say so.
+* ``"read_only": true`` makes a **shadow** server for a PAC that another
+  controller owns (MINERVA's legacy dome daemon): it sends only ``STATUS``,
+  ``GET_FAULTS`` and ``GET_ERRORS`` (the PAC client refuses anything else
+  before it reaches the wire), and ``OpenShutter``, ``CloseShutter``,
+  ``AbortSlew``, ``Action("Heartbeat")`` and ``Action("ClearFaults")``
+  answer ``InvalidOperationException``. It **cannot close the enclosure**:
+  never point a safety supervisor at it. ``emergency_close`` is refused in
+  the same config. Use a long ``status_max_age`` so the PAC sees few extra
+  ``STATUS`` requests.
 
 ``Connected`` is tracked per Alpaca ``ClientID``, so one client
 disconnecting (ConformU, an operator tool) never disconnects the safety
@@ -135,6 +144,7 @@ from robofast_core.devices.aqawan_pac import (
     HardwareNotAllowed,
     PACClient,
     PACError,
+    PACReadOnly,
     PACRefused,
     PACStatus,
     PACTimeout,
@@ -215,6 +225,8 @@ class AqawanConfig:
     #: The emergency close channel (:mod:`robofast_core.emergency`):
     #: ``{"token_sha256": [hex, ...], "log": path}``; None: no such channel.
     emergency_close: dict[str, Any] | None = None
+    #: Shadow mode: queries only, every command refused (module doc).
+    read_only: bool = False
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> AqawanConfig:
@@ -237,6 +249,8 @@ class AqawanConfig:
             raise ValueError("open_order must be [1, 2] or [2, 1]")
         if cfg.close_command not in ("CLOSE_SEQUENTIAL", "CLOSE_SHUTTERS"):
             raise ValueError("close_command must be CLOSE_SEQUENTIAL or CLOSE_SHUTTERS")
+        if cfg.read_only and cfg.emergency_close is not None:
+            raise ValueError("read_only: a read-only server cannot offer emergency_close")
         return cfg
 
 
@@ -763,6 +777,8 @@ class AqawanServer(ThreadingHTTPServer):
         self.pac_ip = check_pac_address(config.pac.host, config.pac.port, allow_hardware=allow)
         if allow:
             log.warning("HARDWARE MODE: PAC at %s:%d", self.pac_ip, config.pac.port)
+        if config.read_only:
+            log.warning("READ-ONLY: only STATUS, GET_FAULTS and GET_ERRORS go to the PAC")
         host, _, port = config.listen.rpartition(":")
         super().__init__((host, int(port)), _Handler)
         self.config = config
@@ -790,6 +806,7 @@ class AqawanServer(ThreadingHTTPServer):
             resend_after=p.resend_after,
             max_attempts=p.max_attempts,
             idle_end=p.idle_end,
+            read_only=self.config.read_only,
         )
         ecfg = EmergencyConfig.from_dict(self.config.emergency_close)
         return Aqawan(pac, self.config, None if ecfg is None else EmergencyGate(ecfg))
@@ -827,6 +844,9 @@ class AqawanServer(ThreadingHTTPServer):
             ) from None
         except AlpacaException:
             raise
+        except PACReadOnly as exc:
+            log.warning("%s: %s", what, exc)
+            raise AlpacaException(INVALID_OPERATION, str(exc)) from None
         except PACRefused as exc:
             log.error("%s: %s", what, exc)
             raise AlpacaException(PAC_REFUSED, str(exc)) from None
@@ -955,6 +975,8 @@ class AqawanServer(ThreadingHTTPServer):
                 raise AlpacaException(NOT_IMPLEMENTED, f"{member} is not implemented")
             return self._unknown(verb, member)
         # PUT
+        if self.config.read_only and member in ("openshutter", "closeshutter", "abortslew"):
+            raise AlpacaException(INVALID_OPERATION, f"{member}: this server is read-only")
         if member == "openshutter":
             return self._call(a.open, "OpenShutter")
         if member == "closeshutter":
@@ -978,6 +1000,8 @@ class AqawanServer(ThreadingHTTPServer):
     def _action(self, name: str, parameters: str, client: int) -> str:
         a = self.aqawan
         key = name.lower()
+        if self.config.read_only and key in ("heartbeat", "clearfaults"):
+            raise AlpacaException(INVALID_OPERATION, f"action {name!r}: this server is read-only")
         if key == "heartbeat":
             return self._call(a.heartbeat, "Heartbeat")
         if key == "status":

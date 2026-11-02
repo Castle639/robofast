@@ -19,6 +19,7 @@ only in `instruments.json`, with `"enabled": false`.
 | `throughput.example.json` | the throughput monitor (`throughput.ThroughputConfig`; docs/throughput.md) |
 | `weather.yaml` | `weather_bridge` |
 | `instruments.json` | reference catalog: every legacy value, including those no module reads yet |
+| `remote/` | off-site engineering through an SSH tunnel (docs/remote.md): `aqawan1.json` (enclosure, engineering mode), `aqawan1_shadow.json` (read-only Aqawan server), `aqawan1_control.json`, and the telescopes' PWI server configs (docs/pwi.md). Every file there says `allow_hardware: true` and is refused without `--hardware`. |
 
 `tests/core/test_site_minerva.py` loads every file here through its real
 loader and checks the copies of a value against `instruments.json`.
