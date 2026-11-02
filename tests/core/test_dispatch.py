@@ -475,6 +475,61 @@ async def test_an_offset_guided_request_carries_its_guide_star():
     assert plain.guide_offset is None
 
 
+#: A generic guiding model for "auto" (test values, not a site's).
+GUIDING = {
+    "aperture": 1.0,
+    "fiber_diameter": 2.0,
+    "plate_scale": 0.3,
+    "read_noise": 2.0,
+    "throughput": 0.1,
+    "exposure": 1.0,
+}
+
+
+async def test_guide_auto_follows_the_recommendation(tmp_path):
+    from robofast_core.plan_record import PlanRecord, read_record
+
+    def auto(gid, mag):
+        g = group(gid, ha=-1)
+        g["requests"][0]["configurations"][0]["guiding_config"] = {
+            "mode": "ON",
+            "extra_params": {"guide": "auto", "target_mag": mag},
+        }
+        return g
+
+    rec = PlanRecord(tmp_path, longitude=MINERVA.longitude)
+    d = make(
+        [auto("faint", 19.0), auto("bright", 9.0)],
+        limits={"t1": tlimits()},
+        instruments={"imager": {"type": "imager", "guiding": GUIDING}},
+        record=rec,
+    )
+    visit = d._new_visit(d.requests["faint-r"], NIGHT, 0.0)
+    obs = d._make_observation(visit)
+    plan = visit.guide["faint-c"]
+    assert plan["on"] == "offset" and obs.guide_offset["star"] == "auto"
+    assert "too faint" in plan["recommendation"]["reason"]
+    visit = d._new_visit(d.requests["bright-r"], NIGHT, 0.0)
+    obs = d._make_observation(visit)
+    assert visit.guide["bright-c"]["on"] == "annulus" and obs.guide_offset is None
+    # The decision record says how and why.
+    await d.next_observation("t1")
+    decision = next(
+        e for e in read_record(next(tmp_path.glob("*.jsonl"))) if e.get("kind") == "decision"
+    )
+    assert decision["guide"]["on"] in ("annulus", "offset")
+    assert "recommendation" in decision["guide"]
+    # No model, or no magnitude: guide on the target, and say why.
+    d = make([auto("faint", 19.0)], limits={"t1": tlimits()})
+    visit = d._new_visit(d.requests["faint-r"], NIGHT, 0.0)
+    assert d._make_observation(visit).guide_offset is None
+    assert "no guiding model" in visit.guide["faint-c"]["reason"]
+    with pytest.raises(ValueError, match=r"instruments\.imager\.guiding"):
+        make(
+            [], limits={"t1": tlimits()}, instruments={"imager": {"type": "imager", "guiding": {}}}
+        )
+
+
 async def test_one_request_on_one_telescope_at_a_time():
     d = make([group("a", count=2, ics=[ic(1), ic(2)])])
     obs = await d.next_observation("t1")

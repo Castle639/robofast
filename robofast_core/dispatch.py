@@ -346,6 +346,9 @@ class _Visit:
     obs: Observation | None = None
     priority_class: int = 0
     score: float = 0.0
+    #: Per configuration id: how it is guided (``on``, and for ``guide:
+    #: "auto"`` the recommendation), decided once a visit.
+    guide: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     @property
     def config(self) -> Configuration:
@@ -393,6 +396,18 @@ class DispatchScheduler:
             dict.fromkeys(n for lim in self.limits.values() for n in lim.instruments),
             "dispatch plan: instruments",
         )
+        #: Instruments' guiding models (``instruments.<name>.guiding``), for
+        #: ``guide: "auto"`` (robofast_core.guider.recommend).
+        self.guide_models: dict[str, Any] = {}
+        self._instrument_conf = dict(instruments or {})
+        for name, d in self._instrument_conf.items():
+            if isinstance(d, dict) and d.get("guiding") is not None:
+                from robofast_core.guider.recommend import GuideModel
+
+                try:
+                    self.guide_models[name] = GuideModel.from_dict(d["guiding"])
+                except ValueError as exc:
+                    raise ValueError(f"dispatch plan: instruments.{name}.guiding: {exc}") from None
         self.config = config or DispatchConfig()
         self.clock = clock or (lambda: datetime.now(UTC))
         self.state_path = Path(state) if state is not None else None
@@ -541,7 +556,7 @@ class DispatchScheduler:
             priority_class=req.group.priority_class,
             score=best.score,
             terms=best.terms,
-            **({"guide": {"on": "offset", **obs.guide_offset}} if obs.guide_offset else {}),
+            **self._guide_record(visit, obs),
             **({"demoted": best.demoted} if best.demoted else {}),
             **self._summary(best, cands),
         )
@@ -1499,9 +1514,62 @@ class DispatchScheduler:
             params=params,
         )
         obs = Observation(**c.kind.observation(mapping))
-        if obs.guide and c.guide_on == "offset":
-            obs.guide_offset = self._guide_offset(c)
+        if obs.guide and c.guide_on != "annulus":
+            plan = visit.guide.get(c.id)
+            if plan is None:
+                plan = visit.guide[c.id] = self._guide_plan(c)
+            if plan["on"] == "offset":
+                obs.guide_offset = self._guide_offset(c)
         return obs
+
+    def _guide_plan(self, c: Configuration) -> dict[str, Any]:
+        """How configuration ``c`` is guided: ``offset``, or for ``guide:
+        "auto"`` the recommendation of its instrument's guiding model for
+        the target's ``target_mag`` under tonight's sky (Moon) and the
+        model's seeing (docs/offset_guiding.md). Without a model or a
+        magnitude, ``auto`` guides on the target."""
+        if c.guide_on == "offset":
+            return {"on": "offset"}
+        from robofast_core.guider import recommend as rc
+
+        name = c.instrument
+        if name is None:
+            name = next(
+                (n for n in self.guide_models if self._takes(self.instrument_types[n], c)), None
+            )
+        model = self.guide_models.get(name) if name is not None else None
+        if model is None:
+            return {"on": "annulus", "reason": f"auto: no guiding model for {name!r}"}
+        if c.guide_mag is None:
+            return {"on": "annulus", "reason": "auto: no target_mag"}
+        star_g = None
+        if isinstance(c.offset_star, dict) and c.offset_star.get("g") is not None:
+            star_g = float(c.offset_star["g"])
+        sky_mag = model.sky
+        try:
+            now = self.clock()
+            sn = sky.sky_now(self.site, now)
+            moon_alt = float(
+                sky.altitudes(self.site, [sn.moon.ra.hour], [sn.moon.dec.deg], [[now]])[0][0]
+            )
+            sky_mag = rc.sky_brightness(model, _moon_illumination(sn), moon_alt)
+        except Exception as exc:
+            log.warning("guide auto: no Moon for the sky brightness (%r); dark sky assumed", exc)
+        rec = rc.recommend(model, c.guide_mag, sky=sky_mag, star_g=star_g)
+        log.info("guide auto for %s (%s): %s -- %s", c.id, name, rec.method, rec.reason)
+        return {"on": rec.method, "instrument": name, "recommendation": rec.as_json()}
+
+    @staticmethod
+    def _guide_record(visit: _Visit, obs: Observation) -> dict[str, Any]:
+        """The decision record's ``guide`` entry: the mode, the offset star
+        and, for ``auto``, the recommendation."""
+        plan = visit.guide.get(visit.config.id)
+        if plan is None and obs.guide_offset is None:
+            return {}
+        out: dict[str, Any] = dict(plan or {"on": "offset"})
+        if obs.guide_offset is not None:
+            out["offset_star"] = obs.guide_offset["star"]
+        return {"guide": out}
 
     def _guide_offset(self, c: Configuration) -> dict[str, Any]:
         """The guider's ``offset_guide`` for configuration ``c``
@@ -1606,7 +1674,15 @@ class DispatchScheduler:
                 "elevation": self.site.elevation,
             },
             "telescopes": {t: asdict(lim) for t, lim in self.limits.items()},
-            "instruments": {n: {"type": t.name} for n, t in self.instrument_types.items()},
+            "instruments": {
+                n: {"type": t.name}
+                | (
+                    {"guiding": self._instrument_conf[n]["guiding"]}
+                    if n in self.guide_models
+                    else {}
+                )
+                for n, t in self.instrument_types.items()
+            },
             "config": asdict(self.config),
             "groups": [g.to_dict() for g in self.groups.values()],
             "state": self._state(),

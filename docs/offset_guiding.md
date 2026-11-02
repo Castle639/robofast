@@ -60,8 +60,10 @@ A request configuration does it through `guiding_config.extra_params`:
                                     "offset_star": {"east": 25.0, "north": -10.0}}}
 ```
 
-- **`guide`** is `"annulus"`, the default (guide on the target itself), or
-  `"offset"`.
+- **`guide`** is `"annulus"`, the default (guide on the target itself),
+  `"offset"`, or `"auto"`: the dispatch scheduler applies the
+  recommendation (below). That needs the target's magnitude in the guide
+  camera's band, **`target_mag`** in the same `extra_params`.
 - **`offset_star`** is one of:
   - `"auto"`, the default: the guider picks the star from its catalog, as
     described below;
@@ -85,6 +87,89 @@ the guide star**, in arcsec on the sky (no cos dec), so `offset_star` is
 `{"east": -east, "north": -north}`. Either column non-zero turns it on.
 Legacy needed both to be non-zero, so a pure north or east offset was
 silently ignored.
+
+## When to offset guide
+
+`robofast_core/guider/recommend.py` predicts the error of each method from
+photon statistics and recommends one, with the reason. Its inputs are:
+
+- the target's magnitude;
+- the sky (mag/arcsec^2);
+- the seeing (FWHM);
+- the instrument's `GuideModel`: aperture, fiber diameter, guide camera
+  plate scale, read noise, dark, throughput (QE included), guide
+  exposure, the loop's `kp`, and the zero point of the guide band.
+
+**Annulus.** The spill of a Gaussian star of rms `s` centred on a fiber of
+radius `r` is `exp(-r^2/2s^2)` of its light. Its centroid error per axis
+is `annulus_factor x sqrt(s^2 + r^2) / SNR`.
+
+**Offset.** The guide star's centroid error is `com_factor x s / SNR`.
+The offset's systematic error is added in quadrature:
+
+```
+separation x scale_error,  separation x pa_error,  refraction_residual,  flexure
+```
+
+**Both.** A floor of `centroid_floor` pixels is added in quadrature. A
+loop of gain `kp` turns the centroid error into a tracking error of
+`sqrt(2 kp/(2 - kp))` times it, rms in both axes. A centroider does not
+find a star whose SNR is below `min_snr`. For `auto` the star is unknown,
+so its `star_g` and `separation` are assumed; a given star's `g` replaces
+the assumed one.
+
+**The choice.**
+
+1. Annulus, if its error is within `max_error` and no worse than
+   `prefer_annulus` times the offset's. Annulus guiding needs no second
+   star and has no systematic error.
+2. Otherwise offset, if it is within `max_error`.
+3. Otherwise the lesser evil, and the reason says "neither".
+
+**Calibrated in the simulator** (`tests/core/test_guide_recommend.py`):
+
+- The guider's own centroiders were run on simulated frames: a star on
+  the fiber hole for annulus, a star in the clear for offset, with photon,
+  sky and read noise. The windowed centre of mass follows `s / SNR`
+  (`com_factor` 1). The annulus fit, which knows the seeing width, beats
+  the ring estimate by about 3 (`annulus_factor` 0.3). Both fail to find
+  the star near SNR 5 (`min_snr`).
+- The test then runs the **closed guide loop** on simulated frames over a
+  magnitude grid, for both methods. The predicted tracking error agrees
+  with the true error of the target against the fiber to within a factor
+  of 2. The model's "not found" is exactly where the guider cannot acquire
+  or hold the star. The choice matches the method the simulated loop does
+  better with.
+
+**The thresholds are per instrument**, in the dispatch config, under
+`instruments.<name>.guiding`:
+
+- MINERVA's KiwiSpec: `sites/minerva/dispatch.example.json`;
+- TRES: `sites/flwo60/dispatch.example.json`.
+
+The thresholds are `max_error` (KiwiSpec 0.3", TRES 0.25"), `min_snr` (5)
+and `prefer_annulus` (1.5). The hardware values are marked there as
+assumed until measured. With them, annulus guiding fails below about
+V 13.5 on MINERVA (the FAU sees ~2 % of the light) and G 15.5 on TRES.
+
+**For `guide: "auto"`** the dispatch scheduler applies the recommendation
+when a visit starts:
+
+- the sky is the model's dark sky, brightened by the Moon's illuminated
+  fraction while it is up (`sky_full_moon`);
+- the seeing is the model's `seeing`.
+
+The decision record's `guide` entry carries the choice and the
+recommendation (both predictions and the reason). Without a model or a
+`target_mag`, `auto` guides on the target, and the record says why. Live
+seeing is not used yet.
+
+From the command line:
+
+```
+python -m robofast_core.guider.recommend --config sites/flwo60/dispatch.example.json --instrument tres --grid 10:18:1
+python -m robofast_core.guider.recommend --config sites/minerva/dispatch.example.json --mag 13 --sky 19 --seeing 2.5 --json
+```
 
 ## Choosing the guide star (`"auto"`)
 
