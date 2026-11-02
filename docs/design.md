@@ -1121,7 +1121,8 @@ Each step is a CI-tested deliverable.
 14. Guider (built, simulators only; `docs/guider.md`): a generic guide
     service next to the camera, with SX AO, PI E-518 and mount-offset
     backends and their simulators, measured calibrations, offloading, fiber
-    acquisition, offset guiding (`docs/offset_guiding.md`), and the
+    acquisition, offset guiding (`docs/offset_guiding.md`; MINERVA's sheet
+    offsets checked against the star catalog on import), and the
     sequencer hook. Next: the ZWO backend on a real
     FAU camera, then T2's AO unit commissioned (attended, with JDE's
     approval), then the TRES front end (an Andor Zyla backend).
