@@ -14,7 +14,7 @@ modes exist and what each means, so "robotic at MINERVA, attended at the
 | `robotic` | by its own policy | runs the plan | commanded | accepted | not needed | the `safety` entry's |
 | `attended` | only with an operator on duty | runs the plan | commanded | accepted | needed; expiry closes | the `safety` entry's |
 | `engineering` | only with an operator on duty | **manual control only** | commanded | **refused** | needed; expiry closes | off |
-| `shadow` | **never** | logs what the plan would do | **watched, never commanded** | accepted | not needed | off |
+| `shadow` | **never** | logs what the plan would do | **watched**; closed only on an active safety risk | accepted | not needed | off |
 
 * **robotic** -- unattended observing: the supervisor opens when the
   weather has been safe for the reopen hold and the sequencer holds a lease.
@@ -41,11 +41,45 @@ modes exist and what each means, so "robotic at MINERVA, attended at the
   automatic `ClearFaults`, no final close when the supervisor stops. The
   hardware heartbeat keeps being pinged (a ping moves nothing; stopping it
   would make the hardware close). An enclosure found open in shadow is a
-  critical alarm: robofast will not close it (whoever opened it must, or
-  switch modes). The weather bridge's own `--shadow` flag (the bridge
+  critical alarm, and robofast leaves it to whoever opened it -- **unless
+  there is an active safety risk** (below), which it closes at once. The weather bridge's own `--shadow` flag (the bridge
   alone, serving nothing; docs/weather_bridge.md) is a different thing: to
   shadow with all of robofast, serve the bridge and put the enclosure in
   this mode.
+
+### Shadow intervenes on an active safety risk
+
+JDE (2026-11-02): "if there's an active safety risk, it should intervene
+immediately." In shadow, when the enclosure is open (by anyone: the legacy
+system, a person at the controller) and a condition that would close it in
+the robotic mode is **active**, the supervisor closes it at once, exactly
+as the robotic mode would (`park_before_close` included), raises a
+critical alarm (`mode shadow intervened: closing the enclosure ... on
+weather unsafe (...)`) and logs a `shadow_intervened` event; once it reads
+closed it goes back to watching (`watching` with `after`). It never opens.
+An active condition is:
+
+* the weather verdict unsafe: the safety monitor's last successful
+  `IsSafe` read said false (a read failure afterwards keeps it);
+* an enclosure fault read from the fault channel (`safety.fault_action`).
+
+Not knowing is not an active risk: no weather read yet, a weather feed
+whose reads fail or whose data are stale, an unreadable fault channel, an
+expired operator duty or the reopen hold do **not** make shadow close, so a
+supervisor restarted in shadow does not close what another system has
+open just because it has not read anything yet.
+
+**Only enforced conditions count.** The verdict is the weather bridge's
+`IsSafe`, which only the sources and limits it *enforces* move: a sensor
+still under validation, run log-only (e.g. a source with `enforce_rain:
+false`, as every MINERVA rain sensor is today; docs/weather_bridge.md),
+shows on the console and in the bridge's `would_close`, but leaves `IsSafe`
+alone and so never makes shadow close.
+Promote it to enforced once it has earned that.
+
+The knob is the mode's `intervene` (true for the built-in `shadow`; a site
+may set `"modes": {"shadow": {"intervene": false}}` to watch only). A mode
+that commands its enclosure closes on these conditions anyway.
 
 ## The policy knobs
 
@@ -60,6 +94,7 @@ Every mode is a `ModePolicy`:
 | `attended_only` | bool | no lease unless an operator is on duty |
 | `duty_expiry` | `close`, `alarm` | an expired duty closes after `duty_grace` (`close`), or only raises the critical alarm (`alarm`) |
 | `duty_ttl`, `duty_grace` | seconds or null | null: the `safety` entry's |
+| `intervene` | bool | a `watch` mode closes an open enclosure on an active safety risk (above); default true for `shadow`, false otherwise |
 | `fault_auto_clear` | bool or null | the supervisor's automatic fault clearing (docs/aqawan.md); null: the `safety` entry's; true needs `safety.fault_action` |
 | `description` | text | shown on the console |
 

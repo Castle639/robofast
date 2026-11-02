@@ -102,7 +102,15 @@ which no mode lowers) and automatic fault clearing. A mode whose
 ``enclosure`` is ``watch`` (``shadow``) commands nothing: the enclosure loop
 reads the shutter and records what it would do (``shadow_would`` events,
 ``would_open`` in the status); a shutter found open then is a critical
-alarm, not a close.
+alarm, not a close -- unless the mode's ``intervene`` is set (``shadow``'s is) and
+an enforced close condition is active (:meth:`SafetySupervisor.active_risk`:
+the safety monitor's verdict unsafe, or an enclosure fault read from the
+fault channel): then it closes at once, as the robotic mode would
+(``park_before_close`` included), with a critical alarm and a
+``shadow_intervened`` event, and goes back to watching once closed. Not
+knowing (no weather read yet, a stale feed, an unreadable fault channel)
+is not an active risk: a restarted supervisor does not close what another
+system has open.
 
 A switch never opens by itself: a mode that may open grants a lease only
 through :meth:`request_open`, with every check above. A switch to a mode
@@ -452,6 +460,10 @@ class SafetySupervisor:
         self._would_open: bool | None = None
         #: A watched enclosure found not closed (critical; module doc).
         self._watch_alarm: str | None = None
+        #: A watch mode is closing the enclosure on an active risk (why).
+        self._intervening: str | None = None
+        #: The safety monitor's last successful verdict, if unsafe.
+        self._unsafe_verdict: str | None = None
         self._dome = dome.grant(name, privileged=True)
         self._sm = safety_monitor.grant(name)
         self._oc = observing_conditions.grant(name) if observing_conditions else None
@@ -637,7 +649,7 @@ class SafetySupervisor:
                 self._revoke_lease(f"mode {mode} (by {operator}: {reason})")
             elif not self.attended(now, keep=True):
                 self._revoke_lease(f"mode {mode} needs an operator on duty (by {operator})")
-        self._watch_alarm, self._finish_close = None, False
+        self._watch_alarm, self._finish_close, self._intervening = None, False, None
         if new.enclosure == "watch" and (
             self.outstanding() is not None or self.shutter != Shutter.CLOSED
         ):
@@ -665,6 +677,7 @@ class SafetySupervisor:
             "saved_error": self._mode_store.error,
             "would_open": None if p.open else self.open_allowed(now, ignore_mode=True),
             "finishing_close": self._finish_close,
+            "intervening": self._intervening,
             "unwatched": self.unwatched_status(),
         }
 
@@ -1030,7 +1043,9 @@ class SafetySupervisor:
         except DeviceError as exc:
             return False, f"weather read failed: {exc}", False
         if is_safe is not True:
-            return False, f"SafetyMonitor.IsSafe={is_safe!r}", True
+            self._unsafe_verdict = f"SafetyMonitor.IsSafe={is_safe!r}"
+            return False, self._unsafe_verdict, True
+        self._unsafe_verdict = None
         if age is not None and not (0 <= float(age) <= self.config.stale_after):
             return False, f"weather data stale ({float(age):.1f} s old)", True
         return True, "safe", True
@@ -1271,17 +1286,53 @@ class SafetySupervisor:
             )
             log.info("%s: mode %s: would %s", self.name, self.mode, "open" if would else "close")
 
+    def active_risk(self) -> str | None:
+        """An enforced close condition active now, which a ``watch`` mode
+        with ``intervene`` acts on (module doc): the safety monitor's
+        last successful verdict unsafe (a read failure keeps it), or a fault
+        read from the enclosure's fault channel. None: none known."""
+        if self._unsafe_verdict is not None:
+            return f"weather unsafe ({self._unsafe_verdict})"
+        if self._fault is not None and isinstance(self._fault_kind, tuple):
+            return f"enclosure fault ({self._fault})"
+        return None
+
     async def _watch(self) -> None:
-        """A ``watch`` mode: read the shutter, command nothing (module doc)."""
-        self._opening_since = self._closing_since = None
+        """A ``watch`` mode: read the shutter, command nothing -- except
+        close on an active risk when the mode's ``intervene`` is set (module doc)."""
+        self._opening_since = None
         status = await self._shutter_status()
+        risk = self.active_risk() if self.policy.intervene else None
+        if risk is not None and status != Shutter.CLOSED:
+            if self._intervening is None:
+                self._intervening = risk
+                shutter = "unreadable" if status is None else Shutter(status).name
+                self._alarm(
+                    f"mode {self.mode} intervened: closing the enclosure (shutter {shutter})"
+                    f" on {risk}",
+                    "critical",
+                )
+                self.timeline.event(
+                    self.name, "shadow_intervened", mode=self.mode, risk=risk, shutter=shutter
+                )
+            self._watch_alarm = None
+            await self._ensure_closed()
+            return
+        if self._intervening is not None:
+            if status == Shutter.CLOSED:
+                await self._ensure_closed()  # its bookkeeping: enclosure_closed
+                self.timeline.event(self.name, "watching", mode=self.mode, after=self._intervening)
+            self._intervening = None
+        self._closing_since = None
         if status is None or status == Shutter.CLOSED:
             self._watch_alarm = None
             return
         if self._watch_alarm is None:
             self._watch_alarm = (
                 f"enclosure {Shutter(status).name} in mode {self.mode}, which commands nothing:"
-                " robofast will not close it (whoever opened it must, or switch modes)"
+                " robofast will not close it"
+                + (" unless a close condition becomes active" if self.policy.intervene else "")
+                + " (whoever opened it must, or switch modes)"
             )
             self._alarm(self._watch_alarm, "critical")
 

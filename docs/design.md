@@ -848,8 +848,13 @@ floor and robofast warns loudly wherever the enclosure shows (the log at
 start, on every switch and periodically, the switch notice, the status,
 the console's enclosure panel and alarm list, the morning report). MEarth
 South opts in; the 60-inch does not. The enclosure's `shadow` mode is the
-documented way to shadow a legacy system with all of robofast (the weather
-bridge's `--shadow` stays the bridge's own flag).
+documented way to shadow a legacy system with all of robofast; it commands
+nothing that moves except one thing: an enclosure found open while an
+enforced close condition is active (unsafe weather verdict, an enclosure
+fault) is closed at once, with a critical alarm (the mode's `intervene`,
+JDE 2026-11-02: "if there's an active safety risk, it should intervene
+immediately"); the weather bridge's `--shadow` stays the bridge's own
+flag.
 
 **(c) Sequences and plug-ins: site code without forking core (steps 2
 and 4, done).** Two mechanisms, for two kinds of difference:

@@ -362,8 +362,15 @@ async def test_service_offset_guiding_and_fits_values(tmp_path):
             assert now["setpoint"] == pytest.approx(
                 [FIBER[0] + now["pixels"][0], FIBER[1] + now["pixels"][1]], abs=1e-3
             )
-            # The refraction correction is small but there.
-            assert 0 < math.hypot(*now["refraction"]) < 0.1
+            # The refraction correction is there, and is the one for the
+            # target's altitude now (it depends on the hour the test runs:
+            # under 0.1 arcsec high up, near 0.9 arcsec at 5 deg altitude).
+            site = og.OffsetSite(31.7, -110.9, 2300.0)
+            want = og.refraction_shift(
+                now["east"], now["north"], now["alt"], now["parallactic"], site
+            )
+            assert now["refraction"] == pytest.approx(want, abs=2e-3)
+            assert 0 < math.hypot(*now["refraction"]) < 1.0
             await asyncio.sleep(0.5)
             st = (await http.get("/status")).json()
             assert st["state"] == "guiding", st["reason"]
