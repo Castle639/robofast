@@ -43,6 +43,7 @@ ARCSEC_PER_RAD = 206264.806
 COVERED = {
     "README.md",
     "aqawan1.json",
+    "remote",
     "autofocus.example.json",
     "calibration.example.json",
     "console.example.json",
@@ -59,7 +60,6 @@ COVERED = {
     "throughput.example.json",
     "too.example.json",
     "weather.yaml",
-    "remote",
 }
 
 
@@ -80,10 +80,11 @@ def test_no_addresses_or_credentials():
     """Only loopback placeholders; no LAN addresses, hostnames of site
     devices, or credentials (the weather pages' public URLs excepted)."""
     for path in (p for p in SITE.rglob("*") if p.is_file()):
+        name = path.relative_to(SITE)
         text = path.read_text()
         for ip in re.findall(r"\b\d{1,3}(?:\.\d{1,3}){3}\b", text):
-            assert ip == "127.0.0.1", f"{path.name}: {ip}"
-        assert not re.search(r"(?i)\b(password|passwd|community)\s*[:=]", text), path.name
+            assert ip == "127.0.0.1", f"{name}: {ip}"
+        assert not re.search(r"(?i)\b(password|passwd|community)\s*[:=]", text), name
 
 
 # -- each file through its loader ---------------------------------------------------------

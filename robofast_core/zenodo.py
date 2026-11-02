@@ -288,7 +288,13 @@ def fetch_file(name: str, filename: str, root: str | Path | None = None) -> Path
     to do about it) when the record is not pinned yet or the download
     fails."""
     from robofast_core import zenodo_assets
+    from robofast_core.catalog import NONCOMMERCIAL_ENV, noncommercial_allowed
 
+    if name in zenodo_assets.NONCOMMERCIAL_RECORDS and not noncommercial_allowed():
+        raise AssetUnavailable(
+            f"{filename}: Zenodo record {name!r} is licensed for non-commercial use only,"
+            f" and ${NONCOMMERCIAL_ENV} forbids non-commercial data here (docs/sky.md, Licences)"
+        )
     dest = record_dir(name, root)
     if not zenodo_assets.available(name):
         local = dest / filename
@@ -314,9 +320,13 @@ def fetch_every_record(root: str | Path | None = None) -> list[Path]:
     :func:`data_dir`): the one-call pre-fill for an offline host and for
     CI's download cache. Returns the paths."""
     from robofast_core import zenodo_assets
+    from robofast_core.catalog import noncommercial_allowed
 
     paths: list[Path] = []
     for name in sorted(zenodo_assets.RECORDS):
+        if name in zenodo_assets.NONCOMMERCIAL_RECORDS and not noncommercial_allowed():
+            log.warning("%s: non-commercial licence, skipped (docs/sky.md, Licences)", name)
+            continue
         got = fetch_assets(zenodo_assets.assets(name), record_dir(name, root))
         paths += [got[k] for k in sorted(got)]
     return paths

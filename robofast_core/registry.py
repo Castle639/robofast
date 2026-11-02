@@ -109,6 +109,13 @@ class ValueRegistry:
 
     def __init__(self) -> None:
         self._values: dict[str, Value] = {}
+        self._listeners: list[Callable[[Value], None]] = []
+
+    def subscribe(self, fn: Callable[[Value], None]) -> None:
+        """Call ``fn(value)`` on every :meth:`publish` (e.g. the seeing
+        source collecting the guiders' FWHM, docs/seeing.md). A listener
+        that raises is logged and never stops the publish."""
+        self._listeners.append(fn)
 
     def publish(
         self,
@@ -125,6 +132,11 @@ class ValueRegistry:
             raise ValueError(f"FITS keyword {keyword!r} longer than 8 characters")
         v = Value(name, value, measured or utcnow(), max_age, unit, keyword, comment)
         self._values[name] = v
+        for fn in self._listeners:
+            try:
+                fn(v)
+            except Exception:
+                log.exception("value registry listener %r on %s", fn, name)
         return v
 
     def failed(self, name: str, error: str) -> None:

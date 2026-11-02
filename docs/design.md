@@ -113,6 +113,14 @@ their good ideas instead (section 9).
   tip/tilt (Starlight Xpress AO, PI E-518) or mount offsets, with
   offloading to the mount and fiber acquisition. Every real backend is
   behind the same `allow_hardware` + `--hardware` gate.
+- **PlaneWave CDK700s under PWI** (MINERVA) have robofast's own Alpaca
+  Telescope + Focuser + Rotator server (`robofast_core/devices/pwi_*`,
+  `docs/pwi.md`) over PWI's HTTP API, PWI4 or the legacy PWI2, with
+  simulators of both and ConformU in CI: altitude limits and a limit watch
+  enforced in the server, motors enabled only on explicit command,
+  homing only on explicit, opted-in command (one axis at a time on PWI4),
+  moves refused while unhomed without an engineering override, the M3 port as the `SelectPort` Action, and `robofast-pwi-jog`
+  for bounded moves in a first hardware session. Behind the hardware gate.
 - Vendor extras that Alpaca lacks (PWI4 M3 port selection, fans, pointing
   models) use Alpaca `Action()` or a typed side channel per device client.
 - <a id="the-hardware-gate"></a>**The hardware gate.** A server that speaks
@@ -372,7 +380,14 @@ dispatch scheduler chooses annulus or offset guiding from the instrument's
 guiding model (`instruments.<name>.guiding`:
 `robofast_core/guider/recommend.py`, a photon-noise prediction of each
 method's error checked against the guide loop in the simulator), and
-records the recommendation and its reason.
+records the recommendation and its reason. **Seeing** comes from a
+configured, pluggable source (`robofast_core/seeing.py`,
+`docs/seeing.md`; the dispatch plan's `seeing` entry): by default the
+guiders' live FWHM (the median over the last 30 min, stale after 15),
+falling back to the guiding model's value; the same estimate decides a
+configuration's `max_seeing` constraint, and the decision record keeps
+it (JDE 2026-11-02: "schedulers may use seeing as a selection criterion,
+too").
 
 **Saving frames.** With an `images` entry in the enclosure config, every
 frame is saved (`robofast_core/imaging.py`, `docs/data.md`). The image is
@@ -452,7 +467,10 @@ the plate solver's hint and the guider's mount matrix read it.
 
 Where a telescope really points is measured, not assumed (`docs/sky.md`):
 robofast has its own star catalog (Gaia DR3 tiles cached on disk, a
-bright-star list fetched once from Zenodo, the WDS), a near-blind plate solver that every
+bright-star list fetched once from Zenodo, the WDS; or, where Gaia's
+non-commercial licence does not fit, UCAC4 or 2MASS tiles from IRSA with an
+estimated G, chosen by `catalog.source`, and `catalog.allow_noncommercial:
+false` to refuse every non-commercial file), a near-blind plate solver that every
 light frame, acquisition and pointing-model run can use, and TPOINT-style
 pointing-error terms (`robofast_core/pointing.py`) that the sky simulator
 uses as the mount's "true" errors and that a pointing-model fit recovers.
@@ -606,8 +624,9 @@ may be wrong about the 60-inch's focus.
   every configuration not yet finished; an observation in progress
   finishes, then its visit ends. A TOM uses TOM Toolkit's own
   `OCSFacility` with settings only (`docs/tom_facility.md`); not supported
-  yet: time accounting per proposal, non-sidereal targets, seeing and
-  transparency constraints, dither/mosaic expansion, an archive.
+  yet: time accounting per proposal, non-sidereal targets, a
+  transparency constraint, dither/mosaic expansion, an archive
+  (`max_seeing` is honored: `docs/seeing.md`).
 - Configured as the enclosure's plan entry, `{"type": "dispatch", "site":
   ..., "requests": ..., "telescopes": {...limits...}, ...}`
   (`sites/minerva/dispatch.example.json`).
@@ -1094,7 +1113,10 @@ Each step is a CI-tested deliverable.
    listed in `aqawan_pac`'s and `aqawan_sim`'s module docs; the confirmed
    ones and the fault policy are in `docs/aqawan.md`.
 6. Windows bridge on one control PC: ASCOM Remote for the camera and PWI4;
-   measure command latency and full-frame download time.
+   measure command latency and full-frame download time. The mount: the PWI
+   server (built, simulators only; `docs/pwi.md`), PWI2 now and PWI4 after
+   its cutover; next, a first attended small-move session on T1 through a
+   tunnel (`docs/pwi.md`, "First hardware session").
 7. Shadow mode: robofast's supervisor runs read-only alongside the legacy
    system and logs what it *would* have done, for comparison. Off-site
    engineering through an SSH tunnel (built: `docs/remote.md`,
@@ -1190,7 +1212,10 @@ Each step is a CI-tested deliverable.
 
 17. The sky (built; `docs/sky.md`): the Gaia DR3 tile cache and downloaded
     bright stars, a sky simulator with pointing errors, the near-blind
-    plate solver, solved WCS and zero points in every frame. Next: target
+    plate solver, solved WCS and zero points in every frame. Swappable
+    catalog source (`gaia`, `ucac4`, `2mass`; a registry) and a switch
+    that refuses non-commercial data, for commercial users (docs/sky.md,
+    "Licences"). Next: target
     vetting and catalog-based acquisition, the per-port zero points
     measured on real frames, a pointing-model builder.
 

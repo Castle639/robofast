@@ -65,6 +65,8 @@ robofast-tres-frontend-server = "robofast_core.devices.tres_frontend_server:main
 robofast-pdu-server = "robofast_core.devices.pdu_server:main"
 robofast-pulizzi-server = "robofast_core.devices.pulizzi_server:main"
 robofast-adc-server = "robofast_core.devices.adc_server:main"
+robofast-pwi-server = "robofast_core.devices.pwi_server:main"
+robofast-pwi-jog = "robofast_core.devices.pwi_jog:main"
 
 # Entry-point group `robofast.plugins`: a site package's plug-ins (plan types,
 # observation kinds, instrument types, weather sources), each a function that
