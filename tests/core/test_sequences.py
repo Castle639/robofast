@@ -560,7 +560,7 @@ def test_which_sequences_a_request_may_name():
     assert set(check_request_sequences(lim("set"), seqs)) == {"set"}
     with pytest.raises(ValueError, match=r"telescopes\.t1\.sequences: 'nope' is not in"):
         check_request_sequences(lim("nope"), seqs)
-    with pytest.raises(ValueError, match="'thar': no request can name it: .*not made from"):
+    with pytest.raises(ValueError, match=r"'thar': no request can name it: .*not made from"):
         check_request_sequences(lim("thar"), seqs)
 
 
@@ -707,7 +707,7 @@ def test_a_static_plans_sequence_params_are_checked_at_start():
     ok = {"name": "s", "kind": "sequence", "sequence": "set", "sequence_params": {"count": 2}}
     check_plan_sequences(StaticPlan([ok], ["t1"]), seqs)
     bad = {**ok, "sequence_params": {"count": 900}}
-    with pytest.raises(ValueError, match="sequence_params: .*max_on"):
+    with pytest.raises(ValueError, match=r"sequence_params: .*max_on"):
         check_plan_sequences(StaticPlan([bad], ["t1"]), seqs)
     fixed = {**ok, "sequence": "thar"}
     with pytest.raises(ValueError, match="not made from a template"):

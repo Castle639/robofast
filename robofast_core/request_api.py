@@ -387,9 +387,8 @@ class Enclosure:
             have = sorted({s for t in tels for s in self.planner.limits[t].sequences})
             if not have and not any(self.planner.limits[t].lamps for t in tels):
                 advice = f"; {self.help['no_lamps']}" if "no_lamps" in self.help else ""
-                return [
-                    f"{what.rsplit('.instrument_configs', 1)[0]}.type: {ctype!r}: {NO_LAMPS}{advice}"
-                ]
+                where = what.rsplit(".instrument_configs", 1)[0]
+                return [f"{where}.type: {ctype!r}: {NO_LAMPS}{advice}"]
             return [f"{at}: no sequence {ic.sequence!r} on {tels} (they have {have or 'none'})"]
         seq = self.sequences[ic.sequence]
         why = requestable(seq, ctype)
