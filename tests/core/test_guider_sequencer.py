@@ -163,3 +163,50 @@ def test_sequencer_service_builds_a_guider_client():
     assert t1.guider is None
     assert isinstance(t2.guider, GuiderRemote)
     assert t2.guider.scope == "t2" and t2.guider.acquire_timeout == 60
+
+
+async def test_an_offset_guided_observation_hands_the_guider_its_offset(make_rig):
+    offset = {"star": {"east": 20.0, "north": -5.0}, "target": {"ra": 150.0, "dec": 20.0}}
+    plan = StaticPlan(
+        [{"name": "x", "exptime": 0.1, "count": 1, "guide": True, "guide_offset": offset}],
+        ["t1"],
+    )
+    rig = make_rig(plan=plan)
+    g = rig.sequencer.units["t1"].guider = FakeGuider(rig.timeline)
+    await _run(rig)
+    start = next(d for what, d in g.calls if what == "start")
+    assert start["offset_guide"] == offset
+    import pytest
+
+    from robofast_core.plan import Observation
+
+    with pytest.raises(ValueError, match="guide_offset without guide"):
+        Observation(name="y", guide_offset=offset)
+
+
+def test_configuration_offset_guiding_round_trips():
+    import pytest
+
+    base = {
+        "id": "c1",
+        "target": {"type": "ICRS", "name": "HD 1", "ra": 150.0, "dec": 20.0},
+        "instrument_configs": [{"exposure_time": 30, "exposure_count": 2}],
+    }
+    gc = {"mode": "ON", "extra_params": {"guide": "offset", "offset_star": {"east": 3, "north": 4}}}
+    c = Configuration.from_dict({**base, "guiding_config": gc}, "c")
+    assert c.guide_on == "offset" and c.offset_star == {"east": 3, "north": 4}
+    assert c.to_dict()["guiding_config"] == gc
+    c = Configuration.from_dict(
+        {**base, "guiding_config": {"mode": "ON", "extra_params": {"guide": "offset"}}}, "c"
+    )
+    assert c.offset_star is None  # the guider picks it from the catalog
+    for extra, why in (
+        ({"guide": "sideways"}, "expected one of"),
+        ({"offset_star": "auto"}, "only with guide 'offset'"),
+        ({"guide": "offset", "offset_star": {"x": 1}}, "offset_star: offset star"),
+        ({"guide": "offset", "bogus": 1}, "unknown"),
+    ):
+        with pytest.raises(ValueError, match=why):
+            Configuration.from_dict(
+                {**base, "guiding_config": {"mode": "ON", "extra_params": extra}}, "c"
+            )

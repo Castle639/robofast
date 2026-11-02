@@ -526,12 +526,13 @@ def _row(cell: Callable[[str], str], spec: ListSpec, n: int) -> dict[str, Any]:
         fau = _number(cell("fauexptime"), "fauexptime (s)")
         if fau <= 0:
             raise _Refused(f"fauexptime (s) {cell('fauexptime')}: must be > 0 or blank")
-    for col in ("acquisition_offset_north", "acquisition_offset_east"):
-        if cell(col) and _number(cell(col), col) != 0.0:
-            raise _Refused(
-                f"{col} {cell(col)} arcsec: robofast cannot offset the acquisition yet, "
-                "so it would guide on the wrong star"
-            )
+    # Offset guiding: legacy's offsets are the target minus the guide star
+    # (arcsec north, east on the sky); robofast's offset_star is the guide
+    # star relative to the target.
+    off_n, off_e = (
+        _number(cell(col), col, -3600.0, 3600.0) if cell(col) else 0.0
+        for col in ("acquisition_offset_north", "acquisition_offset_east")
+    )
     iodine = _flag(cell("iodine"), "iodine")
     if iodine is False:
         raise _Refused(
@@ -571,6 +572,11 @@ def _row(cell: Callable[[str], str], spec: ListSpec, n: int) -> dict[str, Any]:
     }
     if fau is not None:
         config["acquisition_config"] = {"exposure_time": fau}
+    if off_n or off_e:
+        config["guiding_config"]["extra_params"] = {
+            "guide": "offset",
+            "offset_star": {"east": 0.0 - off_e, "north": 0.0 - off_n},
+        }
     return {
         "id": gid,
         "name": name,

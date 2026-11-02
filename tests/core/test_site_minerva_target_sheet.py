@@ -43,9 +43,9 @@ def spec(name: str) -> ms.ListSpec:
 
 def test_targets_tab_fields():
     sl = ms.convert(table("targets"), spec("targets"), "targets.csv")
-    assert [g["name"] for g in sl.groups] == ["SYN-ALPHA", "SYN BETA"]
+    assert [g["name"] for g in sl.groups] == ["SYN-ALPHA", "SYN BETA", "SYN-ZETA"]
     assert (sl.inactive, sl.blank) == (1, 1)  # the inactive row is not checked
-    a, b = sl.groups
+    a, b, _ = sl.groups
     assert a["id"] == "RV-SYN-ALPHA" and b["id"] == "RV-SYN_BETA"
     assert a["proposal"] == "minerva-rv" and a["ipp_value"] == 5.0
     r = a["requests"][0]
@@ -81,11 +81,10 @@ def test_targets_tab_fields():
 def test_bad_rows_are_refused_with_row_and_reason():
     sl = ms.convert(table("targets"), spec("targets"), "targets.csv")
     refused = "\n".join(sl.refused)
-    assert len(sl.refused) == 8, refused
+    assert len(sl.refused) == 7, refused
     for row, why in [
         (6, "pmra is blank"),
         (7, "iodine 0: legacy ignored this column"),
-        (8, "acquisition_offset_north 5 arcsec: robofast cannot offset"),
         (9, "name 'SYN-ALPHA' already on row 2"),
         (10, "radeg 136.0 disagrees with ra 9.0 h x 15 by 3600.0 arcsec"),
         (11, "active 'yes': expected 1 or 0"),
@@ -93,6 +92,24 @@ def test_bad_rows_are_refused_with_row_and_reason():
         (13, "dec (J2000 deg) '95.0' is outside [-90, 90]"),
     ]:
         assert f"targets row {row}: {why}" in refused
+
+
+def test_acquisition_offsets_become_offset_guiding():
+    # Row 8: acquisition_offset_north 5, east 0 -- the target is 5" north of
+    # the star to guide on (legacy's convention), so the guide star is 5"
+    # south of the target. (Legacy applied an offset only when both were
+    # non-zero; robofast takes either.)
+    sl = ms.convert(table("targets"), spec("targets"), "targets.csv")
+    zeta = next(g for g in sl.groups if g["name"] == "SYN-ZETA")
+    c = zeta["requests"][0]["configurations"][0]
+    assert c["guiding_config"] == {
+        "mode": "ON",
+        "extra_params": {"guide": "offset", "offset_star": {"east": 0.0, "north": -5.0}},
+    }
+    alpha = next(g for g in sl.groups if g["name"] == "SYN-ALPHA")
+    assert alpha["requests"][0]["configurations"][0]["guiding_config"] == {"mode": "ON"}
+    [c] = load_request_groups([zeta])[0].requests[0].configurations
+    assert c.guide_on == "offset" and c.offset_star["north"] == -5.0
 
 
 def test_bstars_share_one_visit_a_night():
@@ -386,7 +403,7 @@ def test_live_load_writes_a_snapshot(tmp_path, caplog):
     ]
     meta = json.loads((loaded.path / "meta.json").read_text())
     assert meta["lists"]["targets"]["rows"] == 12 and SHEET not in json.dumps(meta)
-    assert len(loaded.groups()) == 4 and len(loaded.refused()) == 8
+    assert len(loaded.groups()) == 5 and len(loaded.refused()) == 7
     if os.name == "posix":
         assert loaded.path.stat().st_mode & 0o077 == 0
     # The snapshot reads back to the same requests.
@@ -449,7 +466,7 @@ def test_cli_check_and_export_from_csv(tmp_path, capsys):
     assert ms.main(["check", *inst, "--csv", t, "--csv", b]) == 2  # refused rows
     err = capsys.readouterr().err
     assert "refused: targets row 6: pmra is blank" in err
-    assert "targets: 2 requests, 1 inactive, 8 refused" in err
+    assert "targets: 3 requests, 1 inactive, 7 refused" in err
     assert "bstars: 2 requests, 1 inactive, 0 refused" in err
     out = tmp_path / "requests.json"
     assert ms.main(["export", *inst, "--csv", t, "--csv", b, "-o", str(out)]) == 0
@@ -457,10 +474,11 @@ def test_cli_check_and_export_from_csv(tmp_path, capsys):
     assert [g["id"] for g in doc["groups"]] == [
         "RV-SYN-ALPHA",
         "RV-SYN_BETA",
+        "RV-SYN-ZETA",
         "BSTAR-SYN-B1",
         "BSTAR-SYN-B2",
     ]
-    assert len(load_request_groups(str(out))) == 4
+    assert len(load_request_groups(str(out))) == 5
     assert ms.main(["export", *inst, "--csv", t, "--strict"]) == 2
     assert ms.main(["check", *inst, "--csv", b]) == 0
     assert ms.main(["check", *inst, "--csv", f"nope={DATA / 'bstars.csv'}"]) == 2

@@ -129,7 +129,7 @@ inactive and not checked (legacy skipped them). Blank rows are skipped.
 | `maxobs` (`targets`) | visits a night; blank or unreadable: 2. (The scheduler's test `observed > maxobs` let one more through) | `extra_params.cadence.max_per_night`, as written; blank: 2. Not a whole number >= 1: **refused** (legacy silently used 2) |
 | `seplimit (sec)` | minimum time between visits; blank: 3 h | `cadence.min_interval` (start to start); blank: 10800 s |
 | `fauexptime (sec)` | the acquisition camera's exposure time | `acquisition_config.exposure_time` (accepted by the request model; the guider sets its own exposure today). Blank: absent |
-| `acquisition_offset_north`, `_east (arcsec)` | offset guiding: the target is this far from the star the guider locks on (applied only when **both** are non-zero) | robofast has no acquisition offset yet, so a non-zero offset is **refused**: it would guide on the wrong star. Blank or 0: none |
+| `acquisition_offset_north`, `_east (arcsec)` | offset guiding: the target is this far from the star the guider locks on (target minus guide star; applied only when **both** are non-zero, and its star selection was broken: docs/offset_guiding.md, "Legacy") | offset guiding (docs/offset_guiding.md): `guiding_config.extra_params` `guide: "offset"`, `offset_star: {"east": -east, "north": -north}`, when either is non-zero. Blank or 0: none |
 | `iodine` (`targets`; the red list) | **not read**: `mkdict` sets `i2` true for every target | 1 or blank: iodine in (as legacy). 0: **refused**, since legacy observed such a row through the cell anyway and robofast will not guess which was meant (set 1, or ask for a template, a `SPECTRUM` with iodine false, separately) |
 | `active` | 1: observe; anything else: skip | 1: convert; 0 or blank: inactive; anything else (`yes`, `TRUE`, 2): **refused** |
 | `comment` | FITS header | in `observation_note` |
@@ -181,7 +181,6 @@ it changes.
   `iodine` column is probably the red spectrograph's own setting, not
   KiwiSpec's cell: rows with `iodine` 0 would be refused until that is
   settled.
-- Acquisition offsets (offset guiding), see above.
 - Legacy's B-star boost through the night, and its weighting of three
   visits a night by hour angle (`calc_weight_multi`): the dispatch score
   has its own terms (design.md 3.7).

@@ -457,6 +457,24 @@ def test_a_cadence_limit_must_be_hard_or_soft():
     assert d.requests["x-r"].cadence.to_dict() == {"min_interval": 0.0, "max_per_night": 1}
 
 
+async def test_an_offset_guided_request_carries_its_guide_star():
+    g = group("faint", ha=-1)
+    c = g["requests"][0]["configurations"][0]
+    c["target"].update(proper_motion_ra=12.0, proper_motion_dec=-3.0, epoch=2016.0)
+    c["guiding_config"] = {
+        "mode": "ON",
+        "extra_params": {"guide": "offset", "offset_star": {"ra": 1.0, "dec": 2.0}},
+    }
+    d = make([g, group("plain")], limits={"t1": tlimits()})
+    obs = d._make_observation(d._new_visit(d.requests["faint-r"], NIGHT, 0.0))
+    assert obs.guide and obs.guide_offset["star"] == {"ra": 1.0, "dec": 2.0}
+    t = obs.guide_offset["target"]
+    assert (t["pmra"], t["pmdec"], t["epoch"]) == (12.0, -3.0, 2016.0)
+    assert obs.guide_offset["site"]["latitude"] == MINERVA.latitude
+    plain = d._make_observation(d._new_visit(d.requests["plain-r"], NIGHT, 0.0))
+    assert plain.guide_offset is None
+
+
 async def test_one_request_on_one_telescope_at_a_time():
     d = make([group("a", count=2, ics=[ic(1), ic(2)])])
     obs = await d.next_observation("t1")

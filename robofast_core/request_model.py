@@ -561,8 +561,20 @@ class Configuration:
     #: AUTO cascade), ``companions`` (``[{"ra", "dec", "g"}]`` deg, beyond the
     #: catalog) and ``tolerance`` (pixels). Empty: AUTO.
     acquisition: dict[str, Any] = field(default_factory=dict)
+    #: ``guiding_config.extra_params.guide`` (docs/offset_guiding.md): what
+    #: the guider guides on -- ``"annulus"`` (the target itself; on a fiber,
+    #: its light spilling round the hole; the default), ``"offset"`` (a
+    #: guide star nearby, held where the target falls on the fiber).
+    guide_on: str = "annulus"
+    #: ``guiding_config.extra_params.offset_star``: the guide star for
+    #: ``offset`` (and ``auto``, if it chooses offset): ``"auto"`` (the
+    #: guider picks it from the catalog; the default), ``{"east", "north"}``
+    #: (arcsec, the guide star relative to the target) or ``{"ra", "dec",
+    #: "pmra"?, "pmdec"?, "epoch"?, "g"?}`` (deg ICRS, mas/yr).
+    offset_star: Any = None
 
     GUIDE_MODES: ClassVar[tuple[str, ...]] = ("", "ON", "OFF")
+    GUIDE_ON: ClassVar[tuple[str, ...]] = ("annulus", "offset")
 
     @classmethod
     def from_dict(cls, d: Any, what: str) -> Configuration:
@@ -588,6 +600,7 @@ class Configuration:
                 f"{what}.guiding_config.mode: {gmode!r}; expected one of {cls.GUIDE_MODES[1:]}"
             )
         guide = gmode == "ON"
+        guide_on, offset_star = _guide_on(guiding, f"{what}.guiding_config")
         acquisition = _acquisition(d.get("acquisition_config"), f"{what}.acquisition_config")
         ics = d["instrument_configs"]
         if not isinstance(ics, list) or not ics:
@@ -630,6 +643,8 @@ class Configuration:
             guide,
             ctype,
             acquisition,
+            guide_on,
+            offset_star,
         )
 
     @property
@@ -653,6 +668,13 @@ class Configuration:
             "guiding_config": {"mode": "ON" if self.guide or kind.always_guided else "OFF"},
             "status": str(self.status),
         }
+        gx: dict[str, Any] = {}
+        if self.guide_on != "annulus":
+            gx["guide"] = self.guide_on
+        if self.offset_star is not None:
+            gx["offset_star"] = self.offset_star
+        if gx:
+            d["guiding_config"]["extra_params"] = gx
         if self.instrument is None:
             del d["instrument_type"]
         if self.acquisition:
@@ -1261,6 +1283,28 @@ def import_requests(
 
 #: acquisition_config.mode values (docs/acquisition.md); OCS's WCS and OFF too.
 ACQUISITION_MODES = ("AUTO", "BRIGHTEST", "GEOMETRY", "SOLVE", "COORDINATES", "WCS", "OFF")
+
+
+def _guide_on(guiding: dict[str, Any], what: str) -> tuple[str, Any]:
+    """``guiding_config.extra_params``: ``guide`` and ``offset_star``
+    (:attr:`Configuration.guide_on`, :attr:`Configuration.offset_star`)."""
+    from robofast_core.guider.offset import guide_star_from_spec
+
+    extra = _extra(guiding, {"guide", "offset_star"}, what)
+    on = extra.get("guide") or "annulus"
+    if on not in Configuration.GUIDE_ON:
+        raise ValueError(
+            f"{what}.extra_params.guide: {on!r}; expected one of {Configuration.GUIDE_ON}"
+        )
+    star = extra.get("offset_star")
+    if star is not None:
+        if on == "annulus":
+            raise ValueError(f"{what}.extra_params.offset_star: only with guide 'offset'")
+        try:
+            guide_star_from_spec(star)
+        except (ValueError, TypeError, KeyError) as exc:
+            raise ValueError(f"{what}.extra_params.offset_star: {exc}") from None
+    return on, star
 
 
 def _acquisition(d: Any, what: str) -> dict[str, Any]:
