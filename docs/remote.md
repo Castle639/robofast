@@ -113,19 +113,24 @@ sequencer, no Aqawan server.
    (enclosure closed, legacy users of PWI stopped, webcam watching, PDU
    outlet known, abort at hand).
 2. Open the tunnel (above); check the port with `ss -ltn`.
-3. Read the mount's status only, and leave a watch running:
+3. Read the mount's status only, and leave a watch running (T1 on PWI4
+   through the 7141 hop; `t1_pwi2.json` and 7101 for PWI2):
 
-       C=sites/minerva/remote/t1_pwi2.json
+       C=sites/minerva/remote/t1_pwi4.json
        robofast-pwi-jog --config $C --hardware status
        robofast-pwi-jog --config $C --hardware status --watch 2
 
-   Compare with the webcam and the PWI window. In a second terminal, type
-   `robofast-pwi-jog --config $C --hardware stop` and leave it ready.
-4. Small bounded moves, one at a time, each confirmed (`yes`), watched on
-   the webcam: [pwi.md](pwi.md#first-hardware-session) has the exact
-   sequence (`connect`, `enable` and `tracking-off` only if the status says
-   they are needed; then `altaz --dalt 0.2` and back, `altaz --daz 0.2`
-   and back). Ctrl-C during a move sends stop.
+   Compare with the webcam and the PWI window (the status shows PWI's
+   version, alt/az, connection, motors and whether the mount is homed). In
+   a second terminal, type `robofast-pwi-jog --config $C --hardware stop`
+   and leave it ready.
+4. Tiny bounded jogs **before any home**, one at a time, each confirmed
+   (`yes`), watched on the webcam, to see which way each axis goes:
+   `robofast-pwi-jog --config $C --hardware --allow-unhomed altaz --dalt 0.2`
+   and back, then `--daz 0.2` and back (`connect`, `enable` and
+   `tracking-off` first only if the status says so). The exact sequence is
+   in [pwi.md](pwi.md#first-hardware-session). Ctrl-C during a move sends
+   stop.
 5. Only then, optionally, the PWI Alpaca server
    (`robofast-pwi-server --config $C --hardware`), reading status through
    Alpaca first, to check the mapping.
