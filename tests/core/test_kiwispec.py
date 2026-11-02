@@ -61,6 +61,7 @@ async def sim():
 def service_config(sim: KiwiSpecSim, **over) -> KiwiSpecConfig:
     d = {
         "listen": "127.0.0.1:0",
+        "telescopes": ["T1", "T2", "T3", "T4"],
         "spectrograph": {
             "host": "127.0.0.1",
             "port": sim.spec_port,
@@ -721,6 +722,7 @@ def gate_config(sim_like_port: int = 1, **over) -> KiwiSpecConfig:
         {
             "spectrograph": {"host": TEST_NET, "port": sim_like_port},
             "camera": {"host": TEST_NET, "port": sim_like_port},
+            "telescopes": ["T1"],
             **over,
         }
     )
@@ -750,6 +752,7 @@ def test_main_exits_on_a_non_loopback_config(tmp_path):
                 "listen": "127.0.0.1:0",
                 "spectrograph": {"host": TEST_NET},
                 "camera": {"host": TEST_NET},
+                "telescopes": ["T1"],
             }
         )
     )
@@ -762,6 +765,10 @@ def test_unknown_config_keys_are_rejected():
     with pytest.raises(ValueError, match="unknown"):
         KiwiSpecConfig.from_dict(
             {"spectrograph": {"host": "127.0.0.1"}, "camera": {"host": "127.0.0.1"}, "x": 1}
+        )
+    with pytest.raises(ValueError, match=r"missing required key\(s\) telescopes"):
+        KiwiSpecConfig.from_dict(
+            {"spectrograph": {"host": "127.0.0.1"}, "camera": {"host": "127.0.0.1"}}
         )
 
 
@@ -816,7 +823,11 @@ async def test_minerva_is_iodine_only(sim):
 
 
 def test_lamp_frames_are_checked():
-    base = {"spectrograph": {"host": "127.0.0.1"}, "camera": {"host": "127.0.0.1"}}
+    base = {
+        "spectrograph": {"host": "127.0.0.1"},
+        "camera": {"host": "127.0.0.1"},
+        "telescopes": ["T1"],
+    }
     with pytest.raises(ValueError, match="lamp_frames"):
         KiwiSpecConfig.from_dict({**base, "lamp_frames": ["neon"]})
     with pytest.raises(ValueError, match="slit_flat_led"):

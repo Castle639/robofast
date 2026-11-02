@@ -16,6 +16,14 @@ from robofast_core.sky import Site
 from robofast_core.spectra import SpectrumRecorder, barycentric, propagate
 from robofast_core.testing.checks import wait_until
 
+
+def tlimits(**kw):
+    """TelescopeLimits with the test suite's generic values (no defaults in core)."""
+    from robofast_core.dispatch import TelescopeLimits
+
+    return TelescopeLimits(**{"instruments": ["imager"], "min_alt": 21.0, "max_alt": 83.0, **kw})
+
+
 MTHOPKINS = Site(31.680407, -110.878977, 2316.0)
 TARGET = {"name": "HD 10700", "ra_hours": 1.7345, "dec_deg": -15.9375, "pm_ra": -1729.7}
 
@@ -183,7 +191,7 @@ def rv_rig(make_rig, tmp_path, plan, *, seq=None, **kw):
     rig = make_rig(telescopes=2, plan=plan, seq={**SEQ, **(seq or {})}, **kw)
     s = rig.sequencer
     rig.spec = s.spectrograph = FakeSpectrograph(rig.timeline)
-    s.spectra = SpectrumRecorder(tmp_path, "minerva", MTHOPKINS)
+    s.spectra = SpectrumRecorder(tmp_path, "minerva", MTHOPKINS, "kiwispec")
     rig.guiders = []
     for name in ("t1", "t2"):
         g = FakeGuider(rig.timeline, name)
@@ -251,7 +259,7 @@ def test_proper_motion_moves_the_target():
 
 
 def test_sidecars_are_never_overwritten(tmp_path):
-    rec = SpectrumRecorder(tmp_path, "minerva", MTHOPKINS)
+    rec = SpectrumRecorder(tmp_path, "minerva", MTHOPKINS, "kiwispec")
     r = {
         "file": "n20261115.HD10700.0001.fits",
         "kind": "thar",
@@ -445,10 +453,8 @@ def _rv_group(gid, ha=-1.0, *, priority=2.0, telescopes=("t1", "t2"), filter=Non
 
 
 def _limits():
-    from robofast_core.dispatch import TelescopeLimits
-
     both = ["imager", "spectrograph"]
-    return {"t1": TelescopeLimits(instruments=both), "t2": TelescopeLimits(instruments=both)}
+    return {"t1": tlimits(instruments=both), "t2": tlimits(instruments=both)}
 
 
 def test_spectrum_configurations_validate_and_round_trip():

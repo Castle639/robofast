@@ -187,9 +187,11 @@ label, and the Sun, altitude and Moon limits do not apply.
   scheduler sends a lamp configuration only to a telescope whose `lamps`
   list that lamp.
 * **MINERVA** lists none (KiwiSpec is iodine only), so the request API
-  still refuses every `ARC` and `LAMP_FLAT` with the same reason as before
-  (`request_model.NO_LAMPS`), now at submission (the enclosure has no
-  lamps) rather than while parsing. A lamp asked for in `extra_params` is
+  refuses every `ARC` and `LAMP_FLAT` at submission: the neutral reason
+  (`request_model.NO_LAMPS`: no telescope here has lamps) followed by the
+  enclosure config's `help.no_lamps`, the site's own advice (MINERVA's:
+  a rapidly rotating B star through the iodine cell). An enclosure without
+  `help.no_lamps` (MEarth South) gets the neutral reason alone. A lamp asked for in `extra_params` is
   refused everywhere, with the right way to ask.
 
 **Sequencer.** The telescope's `lamps` entry in the enclosure config

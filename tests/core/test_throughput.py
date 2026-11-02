@@ -23,10 +23,12 @@ from astropy.io import fits
 
 from robofast_core import throughput as tp
 from robofast_core.photometry import PortPhotometry, SkyConditions
+from robofast_core.testing import TEST_OPTICS
 from robofast_core.testing.throughput_sim import History, Weather, simulate
 
 #: T2's FAU as sky.example.json has it (the efficiency chain; G band).
 FAU = PortPhotometry(
+    **TEST_OPTICS,
     band="G",
     efficiency={"mirrors": 0.73, "optics": 0.9, "qe": 0.6, "beamsplitter": 0.02},
     extinction=0.15,
@@ -310,7 +312,8 @@ def _scene(catalog, thr: float):
     from robofast_core.testing.skysim import SkyCamera, SkyScene
     from robofast_core.testing.starfield import Detector
 
-    phot = PortPhotometry(band="V", efficiency={"mirrors": 0.73, "qe": 0.8, "dust": thr},
+    phot = PortPhotometry(**TEST_OPTICS, band="V",
+                          efficiency={"mirrors": 0.73, "qe": 0.8, "dust": thr},
                           gain=1.3, read_noise=6.0, extinction=0.15)  # fmt: skip
     det = Detector(shape=(1024, 1024), gain=1.3, read_noise=6.0, bias=500.0)
     cam = SkyCamera((1024, 1024), 0.61, detector=det)

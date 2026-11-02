@@ -89,7 +89,8 @@ and optionally:
   (:class:`~robofast_core.devices.kiwispec_service.KiwiSpecRemote`;
   ``docs/kiwispec.md``, ``docs/rv_night.md``): ``{"url": ...,
   "telescopes": {"t1": "T1", ...}, "timeout": s, "abort_timeout": s,
-  "queue_wait": s, "data_root": ..., "instrument": "kiwispec"}``.
+  "queue_wait": s, "data_root": ..., "instrument": ...}`` (``instrument``,
+  the sidecars' instrument name, is required with a data root).
   ``queue_wait`` (default ``sequencer.spectrograph_queue_wait``) is how
   long a request waits in the service's queue while another enclosure
   holds the shared spectrograph (docs/kiwispec.md). ``telescopes`` maps the
@@ -160,7 +161,13 @@ from robofast_core.autofocus import AutofocusSetup
 from robofast_core.autofocus_plan import AutofocusTriggers, TriggerConfig
 from robofast_core.cancel import stop_tasks
 from robofast_core.clock import Clock, clock_from_config
-from robofast_core.config import device_address, load_config, telescopes
+from robofast_core.config import (
+    altitude_limits,
+    device_address,
+    load_config,
+    require_keys,
+    telescopes,
+)
 from robofast_core.imaging import imaging_from_config
 from robofast_core.lease_client import RemoteSupervisor
 from robofast_core.owner import DeviceOwner
@@ -191,6 +198,7 @@ TELESCOPE_KEYS = {
     "sky_flats",
     "lamps",
     "adc",
+    "limits",
 }
 
 
@@ -214,6 +222,7 @@ def build_units(
         unknown = set(entry) - TELESCOPE_KEYS
         if unknown:
             raise ValueError(f"telescope {name!r}: unknown keys {sorted(unknown)}")
+        altitude_limits(name, entry)  # validated here; the console uses them
         owners: dict[str, Any] = {}
         for kind in (
             "telescope",
@@ -489,6 +498,7 @@ def spectrograph_from_config(
         site = config.get("site")
         if not isinstance(site, dict):
             raise ValueError("spectrograph: the barycentric correction needs the config's 'site'")
+        require_keys(entry, ("instrument",), "spectrograph (sidecars are filed by instrument)")
         path = Path(root)
         if base is not None and not path.is_absolute():
             path = base / path
@@ -497,7 +507,7 @@ def spectrograph_from_config(
             path,
             str(images.get("site", config.get("name", "site"))),
             Site(float(site["latitude"]), float(site["longitude"]), float(site["elevation"])),
-            instrument=str(entry.get("instrument", "kiwispec")),
+            instrument=str(entry["instrument"]),
             night_rollover_hour=float(images.get("night_rollover_hour", 12.0)),
             timezone=images.get("timezone"),
         )
@@ -652,7 +662,12 @@ def main(argv: list[str] | None = None) -> None:
     try:
         config = load_config(args.config)
         tl = Timeline(maxlen=config.get("timeline_size", 10000))
-        plan = load_plan(args.plan, list(telescopes(config))) if args.plan else None
+        plan = None
+        if args.plan:
+            try:
+                plan = load_plan(args.plan, list(telescopes(config)))
+            except (OSError, ValueError, TypeError, KeyError) as exc:
+                ap.error(f"{args.plan}: {exc!r}")
         seq, remote = build(config, tl, plan=plan, base=Path(args.config).parent)
     except (OSError, ValueError, TypeError, KeyError) as exc:
         ap.error(f"{args.config}: {exc!r}")

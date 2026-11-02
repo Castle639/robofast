@@ -270,13 +270,14 @@ async def test_cloud_limits_trip_in_legacy_priority_order(make_bridge, cloud, re
 
 
 async def test_sun_limit(make_bridge):
-    # 2026-10-31 01:00:20 UTC (18:00 MST): the Sun is at about -5.7 deg
-    # (apparent; the shipped config refracts as legacy PyEphem did): safe;
+    # 2026-10-31 01:00:20 UTC (18:00 MST): the Sun is at about -5.8 deg
+    # (apparent; the shipped config refracts for the standard atmosphere at
+    # the site's elevation, 0.034 deg less than legacy PyEphem's -5.736): safe;
     # 2026-10-30 22:00 UTC (15:00 MST): well up: unsafe.
     when = datetime(2026, 10, 31, 1, 0, tzinfo=UTC)
     pages, clock = _good(when)
     ev = await _poll(make_bridge(pages, clock))
-    assert ev.sources["sun"].values["altitude"] == pytest.approx(-5.736, abs=0.005)
+    assert ev.sources["sun"].values["altitude"] == pytest.approx(-5.770, abs=0.005)
     assert ev.state == SAFE, ev.reasons
     when = datetime(2026, 10, 30, 22, 0, tzinfo=UTC)
     pages, clock = _good(when)

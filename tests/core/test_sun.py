@@ -11,7 +11,12 @@ from pathlib import Path
 
 import pytest
 
-from robofast_core.sun import LEGACY_PRESSURE_HPA, LEGACY_TEMPERATURE_C, sun_altitude
+from robofast_core.sun import (
+    PYEPHEM_PRESSURE_HPA,
+    PYEPHEM_TEMPERATURE_C,
+    standard_atmosphere,
+    sun_altitude,
+)
 from robofast_core.weather_sources import SourceConfig, SunSource
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -59,8 +64,8 @@ def test_apparent_altitude_matches_legacy_pyephem(when, lat, lon, elev, alt):
         lat,
         lon,
         elev,
-        pressure_hpa=LEGACY_PRESSURE_HPA,
-        temperature_c=LEGACY_TEMPERATURE_C,
+        pressure_hpa=PYEPHEM_PRESSURE_HPA,
+        temperature_c=PYEPHEM_TEMPERATURE_C,
     )
     assert got == pytest.approx(alt, abs=0.003)
 
@@ -99,7 +104,41 @@ def test_sun_source_reports_apparent_and_geometric():
     assert r.values["altitude"] == pytest.approx(6.5014, abs=0.003)
     assert r.values["altitude_geometric"] == pytest.approx(6.373, abs=0.002)
     with pytest.raises(ValueError, match="unknown options"):
-        SunSource(SourceConfig("sun", "sun", options={"presure": 1}), latitude=0, longitude=0)
+        SunSource(
+            SourceConfig("sun", "sun", options={"presure": 1}),
+            latitude=0,
+            longitude=0,
+            elevation=0,
+        )
+
+
+def test_standard_atmosphere():
+    assert standard_atmosphere(0.0) == pytest.approx((1013.25, 15.0))
+    p, t = standard_atmosphere(2316.0)
+    assert p == pytest.approx(764.3, abs=0.2) and t == pytest.approx(-0.05, abs=0.01)
+    with pytest.raises(ValueError, match="troposphere"):
+        standard_atmosphere(20000.0)
+
+
+def test_sun_source_refracts_for_the_site_elevation_by_default():
+    """No pressure or temperature configured: the standard atmosphere at the
+    site's elevation, not PyEphem's sea-level 1010 hPa (0.025 deg less
+    refraction at +6 deg at a 2316 m site)."""
+    t = _t("2026-10-31T00:00:00")
+    src = SunSource(
+        SourceConfig("sun", "sun"), latitude=MINERVA[0], longitude=MINERVA[1], elevation=MINERVA[2]
+    )
+    assert src.refraction["pressure_hpa"] == pytest.approx(764.3, abs=0.2)
+    alt = src.read(t).values["altitude"]
+    legacy = sun_altitude(t, *MINERVA, pressure_hpa=1010.0, temperature_c=15.0)
+    assert legacy - alt == pytest.approx(0.025, abs=0.003)
+    hot = SunSource(
+        SourceConfig("sun", "sun", options={"temperature_c": 30.0}),
+        latitude=MINERVA[0],
+        longitude=MINERVA[1],
+        elevation=MINERVA[2],
+    )
+    assert hot.refraction["temperature_c"] == 30.0 and hot.read(t).values["altitude"] < alt
 
 
 def test_iers_downloads_are_off_after_import():

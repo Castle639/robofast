@@ -96,6 +96,7 @@ from http.server import ThreadingHTTPServer
 from typing import Any, Protocol
 
 from robofast_core.cancel import stop_task
+from robofast_core.config import load_device_config, require_keys
 from robofast_core.devices import adc_math
 from robofast_core.devices.adc_mdrive import (
     STEPS_PER_TURN,
@@ -187,15 +188,20 @@ class InstrumentConfig:
 
 @dataclass
 class ADCConfig:
+    #: Site and instrument values, required (docs/design.md 3.10): the
+    #: telescope's name, its latitude (deg, for the parallactic angle), the
+    #: instruments it feeds (name -> refraction band) and the one whose band
+    #: the refraction model uses.
+    name: str
+    latitude: float
+    instruments: dict[str, dict[str, float]]
+    instrument: str
     port: PortConfig = field(default_factory=PortConfig)
     #: Must be true (and ``--hardware`` given) for a real port.
     allow_hardware: bool = False
-    name: str = "flwo60"
     listen: str = "127.0.0.1:11180"
     #: The Alpaca Telescope to follow, ``host:port/N``; None: no input.
     telescope: str | None = None
-    #: Site latitude (deg), for the parallactic angle.
-    latitude: float = 31.6809
     #: The legacy ``adc_d_swap_congruent`` variant (prism targets exchanged).
     swap_prisms: bool = False
     #: "legacy_table" (the legacy daemon's) or "refraction" (ERFA).
@@ -204,10 +210,6 @@ class ADCConfig:
     #: The ADC's full correction (arcsec) for the ``refraction`` model.
     max_dispersion_arcsec: float = 3.8
     atmosphere: dict[str, float] = field(default_factory=dict)
-    instruments: dict[str, dict[str, float]] = field(
-        default_factory=lambda: {"tres": {}, "fast": {}}
-    )
-    instrument: str = "tres"
     #: Added to the parallactic angle (deg).
     pa_offset: float = 0.0
     #: Tracking cadence (legacy: 2 s) and the move threshold (deg).
@@ -248,6 +250,7 @@ class ADCConfig:
         unknown = set(d) - names
         if unknown:
             raise ValueError(f"unknown config keys: {sorted(unknown)}")
+        require_keys(d, ("name", "latitude", "instruments", "instrument"))
         port = {k: v for k, v in d.pop("port", {}).items() if not k.startswith("_")}
         port_names = {f.name for f in dataclasses.fields(PortConfig)}
         if set(port) - port_names:
@@ -1342,8 +1345,7 @@ def main(argv: list[str] | None = None) -> None:
     logging.basicConfig(
         level=args.log_level, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
     )
-    with open(args.config) as f:
-        config = ADCConfig.from_dict(json.load(f))
+    config = load_device_config(args.config, ADCConfig.from_dict)
     if args.listen:
         config.listen = args.listen
     if args.simulate:

@@ -20,6 +20,12 @@ from robofast_core.dispatch import (
 from robofast_core.plan import Idle, Observation, plan_from_config
 from robofast_core.request_model import RequestGroup, Status, load_request_groups
 
+
+def tlimits(**kw):
+    """TelescopeLimits with the test suite's generic values (no defaults in core)."""
+    return TelescopeLimits(**{"instruments": ["imager"], "min_alt": 21.0, "max_alt": 83.0, **kw})
+
+
 SITES = Path(__file__).resolve().parents[2] / "sites"
 MINERVA = sky.Site(31.680407, -110.878977, 2316.0)
 #: Midnight MST at Mt. Hopkins: the Sun is far down (about -77 deg).
@@ -105,7 +111,7 @@ def alt_now(g: dict, when: datetime = NIGHT) -> float:
 
 
 def make(groups, clock=None, limits=None, **kw) -> DispatchScheduler:
-    limits = limits or {"t1": TelescopeLimits(), "t2": TelescopeLimits()}
+    limits = limits or {"t1": tlimits(), "t2": tlimits()}
     return DispatchScheduler(
         load_request_groups(groups), MINERVA, limits, clock=clock or Clock(), **kw
     )
@@ -192,7 +198,7 @@ def test_altitude_limits_per_telescope():
     assert 21 < alt_now(g) < 30
     d = make(
         [g, group("zenith", ha=0.0, dec=31.7)],
-        limits={"t1": TelescopeLimits(min_alt=21), "t2": TelescopeLimits(min_alt=30)},
+        limits={"t1": tlimits(min_alt=21), "t2": tlimits(min_alt=30)},
     )
     assert by_id(d, "t1")["low-r"].ok
     assert "outside [30, 83]" in _reasons(d, "low-r", "t2")
@@ -223,7 +229,7 @@ def test_constraints_only_tighten():
 def test_hour_angle_limits():
     d = make(
         [group("west", ha=2.5), group("east", ha=-2.5)],
-        limits={"t1": TelescopeLimits(min_ha=-2.0, max_ha=2.0), "t2": TelescopeLimits()},
+        limits={"t1": tlimits(min_ha=-2.0, max_ha=2.0), "t2": tlimits()},
     )
     assert "hour angle" in _reasons(d, "west-r") and "hour angle" in _reasons(d, "east-r")
     assert by_id(d, "t2")["west-r"].ok
@@ -287,8 +293,8 @@ def test_instrument_and_telescope_compatibility():
     d = make(
         [group("spec", instrument="spectrograph"), group("t2only", telescopes=["t2"])],
         limits={
-            "t1": TelescopeLimits(instruments=["imager"]),
-            "t2": TelescopeLimits(instruments=["imager", "spectrograph"]),
+            "t1": tlimits(instruments=["imager"]),
+            "t2": tlimits(instruments=["imager", "spectrograph"]),
         },
     )
     assert "t1 has no spectrograph" in _reasons(d, "spec-r")
@@ -583,7 +589,7 @@ async def test_refused_preemption_is_retried_later():
 async def test_repeated_toos():
     """A higher-class ToO preempts a telescope doing a lower-class one; an
     equal-class ToO waits its turn."""
-    d = make([group("a")], limits={"t1": TelescopeLimits()})
+    d = make([group("a")], limits={"t1": tlimits()})
     p = Preempts()
     d.set_preempt_callback(p)
     await _busy(d, "t1")
@@ -609,7 +615,7 @@ async def test_repeated_toos():
 
 
 async def test_too_outranks_a_visit_in_progress():
-    d = make([group("a", ics=[ic(1), ic(1)])], limits={"t1": TelescopeLimits()})
+    d = make([group("a", ics=[ic(1), ic(1)])], limits={"t1": tlimits()})
     await run_visit(d)  # first half of "a"
     await d.submit_too(group("burst", too=too("next")))
     assert (await d.next_observation("t1")).name.startswith("burst ")
@@ -685,11 +691,25 @@ def test_config_errors(tmp_path):
         plan_from_config({**cfg, "w_bogus": 1}, ["t1", "t2"], base=tmp_path)
     with pytest.raises(ValueError, match="'site'"):
         plan_from_config({"type": "dispatch"}, ["t1"])
+    with pytest.raises(ValueError, match=r"no entry for \['t2'\]"):
+        plan_from_config(
+            {**cfg, "telescopes": {"t1": cfg["telescopes"]["t1"]}}, ["t1", "t2"], base=tmp_path
+        )
+    with pytest.raises(
+        ValueError, match=r"telescopes\.t1: missing required key\(s\) min_alt, max_alt"
+    ):
+        dispatch_from_config(
+            {
+                "site": {"latitude": 0, "longitude": 0},
+                "telescopes": {"t1": {"instruments": []}},
+            },
+            ["t1"],
+        )
     with pytest.raises(ValueError, match="empty altitude"):
         dispatch_from_config(
             {
                 "site": {"latitude": 0, "longitude": 0},
-                "telescopes": {"t1": {"min_alt": 50, "max_alt": 40}},
+                "telescopes": {"t1": {"instruments": ["imager"], "min_alt": 50, "max_alt": 40}},
             },
             ["t1"],
         )
@@ -700,7 +720,11 @@ def test_legacy_csv_in_the_plan_entry(tmp_path):
         "name,ra,dec,exptime,priority,active\nHD 1,1.5,20,300,5,1\n"
     )
     d = dispatch_from_config(
-        {"site": {"latitude": 31.68, "longitude": -110.88}, "legacy_csv": "targets.csv"},
+        {
+            "site": {"latitude": 31.68, "longitude": -110.88},
+            "legacy_csv": "targets.csv",
+            "telescopes": {"t1": {"instruments": ["imager"], "min_alt": 21, "max_alt": 83}},
+        },
         ["t1"],
         base=tmp_path,
     )
@@ -709,7 +733,12 @@ def test_legacy_csv_in_the_plan_entry(tmp_path):
 
 def test_requests_inline():
     d = dispatch_from_config(
-        {"site": {"latitude": 31.68, "longitude": -110.88}, "requests": [group("a")]}, ["t1"]
+        {
+            "site": {"latitude": 31.68, "longitude": -110.88},
+            "requests": [group("a")],
+            "telescopes": {"t1": {"instruments": ["imager"], "min_alt": 21, "max_alt": 83}},
+        },
+        ["t1"],
     )
     assert isinstance(d.groups["a"], RequestGroup)
 
@@ -765,7 +794,7 @@ async def test_two_toos_preempt_two_telescopes():
 
 async def test_a_calstage_position_is_a_hard_constraint_and_reaches_the_observation():
     cal = {"exposure_time": 30, "optical_elements": {"calstage": "sky"}}
-    limits = {"t1": TelescopeLimits(calstage=["out", "sky", "science"]), "t2": TelescopeLimits()}
+    limits = {"t1": tlimits(calstage=["out", "sky", "science"]), "t2": tlimits()}
     d = make([group("a", ics=[cal])], limits=limits)
     assert by_id(d, "t1")["a-r"].ok
     c = by_id(d, "t2")["a-r"]

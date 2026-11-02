@@ -149,7 +149,9 @@ class SpectrumRecorder:
     data_root: Path
     site_name: str
     site: sky.Site
-    instrument: str = "kiwispec"
+    #: The spectrograph's name in the sidecars and the data tree (a site
+    #: value: the ``spectrograph`` entry's ``instrument``).
+    instrument: str
     night_rollover_hour: float = 12.0
     timezone: str | None = None
     #: The sequencer's clock (:mod:`robofast_core.clock`): the night when a

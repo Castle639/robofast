@@ -4,18 +4,22 @@ JDE (2026-10-31): use astropy, so that the bridge's number agrees exactly
 with the same calculation made elsewhere (a scheduler, an analysis script)
 with the same parameters.
 
-**Refraction.** The legacy MINERVA code (``minerva_library/env.py``,
-``site.sunalt``) used ``ephem.Observer`` without setting ``pressure``, so
-PyEphem applied refraction with its defaults: 1010 mbar, 15 degC. To match
-it, :func:`sun_altitude` takes the same pressure and temperature (the MINERVA
-config passes 1010 hPa and 15 degC) and returns the *apparent* altitude of
-the Sun's centre; ``pressure_hpa=0`` gives the geometric altitude. Measured
-against PyEphem 4.2.1: within 0.002 deg from +6 deg up (the MINERVA limit),
-but astropy's refraction model (ERFA ``refco``, ``A tan z + B tan^3 z``) is
-not meant for the horizon: 0.01 deg apart at +4.5 deg, 0.04 at +3.3, 0.15 at
-+1, and below the horizon astropy keeps adding ~0.17 deg where PyEphem
-stops refracting. Nothing near a safety limit lives
-there; the Sun source also reports the geometric altitude for the record.
+**Refraction.** :func:`sun_altitude` returns the *apparent* altitude of the
+Sun's centre for a given pressure and temperature; ``pressure_hpa=0`` gives
+the geometric altitude. The weather bridge's Sun source refracts for the
+site's air: the configured pressure and temperature, else the standard
+atmosphere at the site's elevation (:func:`standard_atmosphere`; about
+764 hPa and 0 degC at 2316 m). Legacy code (PyEphem with a default
+``Observer``) refracted at PyEphem's sea-level defaults, 1010 hPa and 15 degC
+(:data:`PYEPHEM_PRESSURE_HPA`, :data:`PYEPHEM_TEMPERATURE_C`): at a 2300 m
+site that is 0.025 deg more refraction at +6 deg, and at most 0.034 deg
+with astropy's model (true refraction differs by ~0.1 deg at the horizon).
+With PyEphem's numbers astropy agrees with PyEphem 4.2.1 within 0.002 deg
+from +6 deg up, but astropy's refraction model (ERFA ``refco``,
+``A tan z + B tan^3 z``) is not meant for the horizon: 0.01 deg apart at
++4.5 deg, 0.04 at +3.3, 0.15 at +1, and below the horizon astropy keeps
+adding ~0.14-0.17 deg where PyEphem stops refracting. The Sun source also
+reports the geometric altitude for the record.
 
 **Offline.** Importing this module sets ``astropy.utils.iers.conf``
 ``auto_download = False`` (no IERS-A or leap-second downloads: they could
@@ -43,9 +47,21 @@ from erfa import ErfaWarning
 iers.conf.auto_download = False
 iers.conf.auto_max_age = None
 
-#: PyEphem's Observer defaults, which the legacy code's refraction used.
-LEGACY_PRESSURE_HPA = 1010.0
-LEGACY_TEMPERATURE_C = 15.0
+#: PyEphem's Observer defaults, which legacy code's refraction used (for
+#: agreement tests; never a default here).
+PYEPHEM_PRESSURE_HPA = 1010.0
+PYEPHEM_TEMPERATURE_C = 15.0
+
+
+def standard_atmosphere(elevation: float) -> tuple[float, float]:
+    """``(pressure_hpa, temperature_c)`` of the International Standard
+    Atmosphere at ``elevation`` metres (troposphere: 1013.25 hPa and 15 degC
+    at sea level, lapse rate 6.5 K/km)."""
+    if not -500.0 <= elevation <= 11000.0:
+        raise ValueError(f"elevation {elevation} m is outside the troposphere model")
+    t0 = 288.15
+    t = t0 - 0.0065 * elevation
+    return 1013.25 * (t / t0) ** 5.25588, t - 273.15
 
 
 @lru_cache(maxsize=16)
@@ -60,7 +76,7 @@ def sun_altitude(
     elevation: float = 0.0,
     *,
     pressure_hpa: float = 0.0,
-    temperature_c: float = LEGACY_TEMPERATURE_C,
+    temperature_c: float = 15.0,
     relative_humidity: float = 0.0,
     wavelength_um: float = 0.55,
 ) -> float:

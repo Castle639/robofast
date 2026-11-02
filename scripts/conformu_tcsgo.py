@@ -22,7 +22,10 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(1, str(Path(__file__).resolve().parents[1]))
 from conformu_aqawan import start
+
+from robofast_core.devices.tcsgo_sim import SIM_SERVER_SITE
 
 ROOT = Path(__file__).resolve().parents[1]
 SETTINGS = {
@@ -89,6 +92,7 @@ def main() -> None:
         json.dumps(
             {
                 "name": "conformu",
+                **SIM_SERVER_SITE,
                 "listen": "127.0.0.1:0",
                 "tcs": {"host": host, "port": int(port), "min_interval": 0.01, "ack_window": 0.05},
                 "dome": True,

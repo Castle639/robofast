@@ -300,6 +300,10 @@ def _split(target: str) -> tuple[list[str], bool] | None:
 # -- one enclosure, as seen from here ---------------------------------------------------
 
 
+#: Keys of an enclosure config's ``help`` (site advice added to refusals).
+HELP_KEYS = frozenset({"no_lamps"})
+
+
 class Enclosure:
     """An enclosure's dispatch scheduler, seen through its files: the
     request file and state file (read) and the drop box (written)."""
@@ -316,6 +320,15 @@ class Enclosure:
     ) -> None:
         self.name = name
         self.telescopes = list(telescopes(config))
+        #: The site's advice added to refusals (``help`` in the enclosure
+        #: config): ``no_lamps``, what to do instead of a lamp calibration.
+        self.help = dict(config.get("help") or {})
+        bad = set(self.help) - HELP_KEYS
+        if bad or not all(isinstance(v, str) for v in self.help.values()):
+            raise ValueError(
+                f"enclosure {name}: help: {{key: text}} with keys {sorted(HELP_KEYS)}"
+                + (f"; unknown {sorted(bad)}" if bad else "")
+            )
         plan = dict(plan)
         plan.pop("_note", None)
         if plan.pop("type", None) != "dispatch":
@@ -789,7 +802,8 @@ class RequestApi:
                 lamps = {ic.lamp for ic in c.instrument_configs} - {None}
                 have_lamps = {x for t in tels for x in enc.planner.limits[t].lamps}
                 if lamps and not have_lamps:
-                    out.append(f"{what}.configurations[{j}].type: {c.type!r}: {NO_LAMPS}")
+                    advice = f"; {enc.help['no_lamps']}" if "no_lamps" in enc.help else ""
+                    out.append(f"{what}.configurations[{j}].type: {c.type!r}: {NO_LAMPS}{advice}")
                 for lamp in sorted(lamps):
                     if have_lamps and not any(lamp in enc.planner.limits[t].lamps for t in tels):
                         out.append(
