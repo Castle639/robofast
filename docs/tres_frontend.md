@@ -20,7 +20,7 @@ mountain".
 
 | Mechanism | Hardware and protocol (from the code) | robofast |
 |---|---|---|
-| Calibration stage | PI **L-505** linear stage on a PI **C-663** Mercury Step controller. The front end connects to it as a serial port (the controller's USB, 115200 baud; an older version found it by its USB serial number) and drives it with PI's GCS command set through PI's `pipython`: on connect it switches the servo on and **references to the negative limit** (`FNL`); a move is `MOV 1 <mm>`, waited for with `waitontarget`; travel limits come from the controller (`TMN?`/`TMX?`). Named positions (`out`, `sky`, `science`) are millimetre values in its config. | this server: `filterwheel/0` + `focuser/0` |
+| Calibration stage | PI **L-505** linear stage on a PI **C-663** Mercury Step controller. The front end connects to it as a serial port (the controller's USB, 115200 baud; an older version found it by its USB serial number) and drives it with PI's GCS command set through PI's `pipython`: on connect it switches the servo on and **references to the negative limit** (`FNL`); a move is `MOV 1 <mm>`, waited for with `waitontarget`; travel limits come from the controller (`TMN?`/`TMX?`). Named positions (`out`, `sky`, `science`, `block_sky`, `block_science`) are millimetre values in its config. (The live system reports the stage as a PI M-112.22S1.) | this server: `filterwheel/0` + `focuser/0` |
 | Calibration-stage power | an outlet on the front end's own APC switched PDU (SNMP), which also powers the tip/tilt controller, the guide camera, the front-end computer and the star projector. The front end can power-cycle the stage. | robofast's APC PDU server (`robofast_core/devices/pdu_server.py`) can serve it; not configured here yet |
 | Calibration lamps (ThAr, incandescent) | **not** the front end: the legacy TCS window switches them itself, on a Pulizzi power switch, through a separate program | the lamp Switch server (`robofast_core/devices/pulizzi_server.py`, `docs/pulizzi.md`); `ARC`/`LAMP_FLAT` requests on the 60-inch |
 | Tip/tilt | PI S-340 platform on an E-518 controller (GCS) | the guider service (`docs/guider.md`), which already has an E-518 backend |
@@ -133,10 +133,11 @@ refused: not referenced or servo off), 7 (position out of limits), 10
   position from the telescope's `lamps` entry, before the lamp is switched
   on, so lamp light reaches the fibers only with the stage in place.
 * **Sequences** (docs/sequences.md): the TRES ThAr and flat sets are also
-  config-defined sequences in `sites/flwo60/flwo60.json` (`tres_thar`,
-  `tres_flat`: stage in, lamp on, frames, lamp off, stage out; placeholder
-  values), whose cleanup puts the stage `out` whenever the sequence ends,
-  cancelled or not, with a grant of its own.
+  config-defined sequences in `sites/flwo60/flwo60.json` (the nightly
+  set and the per-target `tres_thar`: stage to `science` or `sky`, lamp on,
+  frames, lamp off, stage out; the observers' values, to confirm), whose
+  cleanup puts the stage `out` whenever the sequence ends, cancelled or
+  not, with a grant of its own.
 
 ## 6. Redis transition shim (optional, off by default)
 
@@ -184,10 +185,13 @@ Until each is checked, `allow_hardware` stays false.
 2. Controller: `*IDN?` (model, firmware), GCS 2.0, axis identifier `1`,
    `#5` supported, `ERR?` cleared on read, error 10 after `HLT`.
 3. The serial device on the front-end computer, USB or RS-232, baud.
-4. The millimetre value of every named position. The 2021 public config
-   says out 0, sky 10, science 20; the 2019 one said science 0, sky 10,
-   out 20. `in`, `block_sky` and `block_science` are unknown. What each
-   does optically (which fiber gets lamp light, which is blocked).
+4. The millimetre value of every named position. **Answered from the live
+   TRES system (2026-11-02), to confirm on the mountain:** science 3.05
+   (lamp light into the science fiber), sky 8.0 (into the sky fiber), out
+   24.99, block_sky 15.65, block_science 0 (`sites/flwo60/tres_frontend.json`;
+   the 2021 public config's out 0, sky 10, science 20 and the 2019 one's
+   are superseded). The stage is a PI M-112.22S1. There is no separate
+   `in` position: lamp frames go to `science` (or `sky`).
 5. The travel (`TMN?`/`TMX?`), and that the reference move to the negative
    limit is safe from every position.
 6. Does the controller stay powered and referenced from night to night, or

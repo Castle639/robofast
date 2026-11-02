@@ -1022,7 +1022,8 @@ SEQUENCE_TEMPLATES: Registry[SequenceTemplate] = Registry("sequence template")
 def _lamp_set(name: str, frame: str, what: str) -> SequenceTemplate:
     """Frames of one lamp: the stage in, the filter, the lamp on (its
     warm-up), the frames, the lamp off, the stage out (and out in the
-    cleanup, whatever happened)."""
+    cleanup, whatever happened), then ``wait_after`` seconds (a pause
+    before the next group of a night's calibrations)."""
     return SequenceTemplate(
         name,
         {
@@ -1035,6 +1036,7 @@ def _lamp_set(name: str, frame: str, what: str) -> SequenceTemplate:
             "filter": None,
             "object": None,
             "instrument": None,
+            "wait_after": None,
         },
         {
             "instrument": "$instrument",
@@ -1052,6 +1054,7 @@ def _lamp_set(name: str, frame: str, what: str) -> SequenceTemplate:
                 },
                 {"lamp": "$lamp", "on": False},
                 {"calstage": "$calstage_after"},
+                {"wait": "$wait_after"},
             ],
             "cleanup": [{"calstage": "$calstage_after"}],
         },
@@ -1061,12 +1064,13 @@ def _lamp_set(name: str, frame: str, what: str) -> SequenceTemplate:
 
 def _dark_set(name: str, frame: str, what: str) -> SequenceTemplate:
     """Frames with no light and no lamp: the filter (a blank, say), then
-    the frames."""
+    the frames, then ``wait_after`` seconds."""
     params: dict[str, Any] = {
         "count": REQUIRED,
         "filter": None,
         "object": None,
         "instrument": None,
+        "wait_after": None,
     }
     expose: dict[str, Any] = {"type": frame, "n": "$count", "object": "$object"}
     if frame != "BIAS":
@@ -1077,7 +1081,7 @@ def _dark_set(name: str, frame: str, what: str) -> SequenceTemplate:
         params,
         {
             "instrument": "$instrument",
-            "steps": [{"filter": "$filter"}, {"expose": expose}],
+            "steps": [{"filter": "$filter"}, {"expose": expose}, {"wait": "$wait_after"}],
         },
         description=what,
     )
