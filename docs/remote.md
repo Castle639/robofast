@@ -16,10 +16,28 @@ address. One `ssh` command on your machine, kept open for the session:
 ssh -N -p <gateway-ssh-port> \
     -L 7100:<aqawan1-pac>:22004 \
     -L 7101:<t1-pc>:44444  -L 7102:<t2-pc>:44444 \
-    -L 7141:<t1-pc>:8220   -L 7142:<t2-pc>:8220 \
     -L 7151:<t1-pc>:<ascom-remote-port> -L 7152:<t2-pc>:<ascom-remote-port> \
     <user>@<gateway>
 ```
+
+### PWI4 through the telescope PC's sshd
+
+PWI4's HTTP server listens on the telescope PC's own loopback
+(127.0.0.1:8220) only, so a forward from the gateway cannot reach it.
+Hop through the gateway to the telescope PC's sshd and forward to *its*
+loopback (one command per telescope; in `~/.ssh/config` a `ProxyJump`
+entry does the same):
+
+```
+ssh -N -J <user>@<gateway>:<gateway-ssh-port> \
+    -L 7141:127.0.0.1:8220 <user>@<t1-pc>
+ssh -N -J <user>@<gateway>:<gateway-ssh-port> \
+    -L 7142:127.0.0.1:8220 <user>@<t2-pc>
+```
+
+The alternative, making PWI4 listen on the LAN with a Windows firewall
+rule that admits only the gateway, puts the telescope's HTTP control on
+the site network; prefer the hop.
 
 `ssh -L` binds 127.0.0.1 by default; keep it that way (never `-g`, never
 `0.0.0.0`). The local ports robofast's remote configs expect:
@@ -28,7 +46,7 @@ ssh -N -p <gateway-ssh-port> \
 |---|---|---|---|
 | 7100 | Aqawan 1 PAC (TCP 22004) | `aqawan1_shadow.json`, `aqawan1_control.json` | see the Aqawan caution |
 | 7101 / 7102 | T1 / T2 PWI2 HTTP (44444) | `t1_pwi2.json`, `t2_pwi2.json` | in use by the legacy system today |
-| 7141 / 7142 | T1 / T2 PWI4 HTTP (8220) | `t1_pwi4.json`, `t2_pwi4.json` | T1: installed, but its HTTP server must first listen on the LAN, firewalled to the gateway only (pwi.md); T2: not installed |
+| 7141 / 7142 | T1 / T2 PWI4 HTTP (8220, the PC's loopback: second hop, above) | `t1_pwi4.json`, `t2_pwi4.json` | T1: PWI4 4.1.6 installed; T2: not installed |
 | 7151 / 7152 | T1 / T2 ASCOM Remote (Alpaca: cameras) | `aqawan1.json` cameras | not installed yet |
 
 Check what is forwarded before starting anything: `ss -ltn | grep ':71'`.
