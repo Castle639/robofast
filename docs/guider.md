@@ -296,11 +296,14 @@ built-in `robofast_core.devices` plug-in. In short:
 **Telemetry**: state and reason; per frame (ring buffer): centroid, error,
 correction, tip/tilt position, flux, FWHM, latency; over the window:
 residual rms (pixels, and arcsec with `plate_scale`), loop rate, latency
-statistics, flux, FWHM, range used, offloads, re-acquisitions.
+statistics, flux, FWHM, range used, offloads, re-acquisitions; with
+`plate_scale`, the seeing (`seeing_arcsec`: a whole star's FWHM, or on a
+fiber the width the annulus centroider learned from a star clear of the
+hole; docs/seeing.md).
 
 **Value registry** (design.md 3.8): `<scope>.guide_state` (GUIDSTAT),
 `guide_rms` (GUIDRMS), `guide_rms_arcsec` (GUIDRMSA), `guide_flux`,
-`guide_fwhm`, `guide_rate`, `guide_latency`, `guide_exptime`, `fiber_x/y`
+`guide_fwhm`, `guide_seeing` (GUIDSEE, arcsec), `guide_rate`, `guide_latency`, `guide_exptime`, `fiber_x/y`
 (XSCIFIB/YSCIFIB, as tres-guider), `tiptilt_a/b` (TTPOSA/B). The service
 keeps its own registry; `GuiderRemote` copies them into the sequencer's
 registry every `poll_interval` while guiding, so they land in the FITS

@@ -343,7 +343,8 @@ class Constraints:
 
     OCS fields: ``max_airmass``, ``min_lunar_distance`` (deg; Python
     ``min_moon_sep``), ``max_lunar_phase`` (illuminated fraction, 0 new to 1
-    full). ``max_seeing`` and ``min_transparency`` are not supported. The
+    full), ``max_seeing`` (FWHM, arcsec: the seeing source's value, docs/seeing.md).
+    ``min_transparency`` is not supported. The
     rest are robofast's, in ``extra_params``: ``min_alt``, ``max_alt``,
     ``max_sun_alt`` (deg) and ``min_ha``, ``max_ha`` (hours; negative: east
     of the meridian).
@@ -357,12 +358,14 @@ class Constraints:
     min_ha: float | None = None
     max_ha: float | None = None
     max_lunar_phase: float | None = None
+    max_seeing: float | None = None
 
     #: Python name: (JSON name, range).
     _OCS: ClassVar[dict[str, tuple[str, tuple[float, float]]]] = {
         "max_airmass": ("max_airmass", (1.0, 100.0)),
         "min_moon_sep": ("min_lunar_distance", (0.0, 180.0)),
         "max_lunar_phase": ("max_lunar_phase", (0.0, 1.0)),
+        "max_seeing": ("max_seeing", (0.1, 30.0)),
     }
     _EXTRA: ClassVar[dict[str, tuple[float, float]]] = {
         "min_alt": (-90.0, 90.0),
@@ -375,9 +378,9 @@ class Constraints:
     @classmethod
     def from_dict(cls, d: Any, what: str) -> Constraints:
         keys = {js for js, _ in cls._OCS.values()}
-        keys |= {"max_seeing", "min_transparency", "extra_params"}
+        keys |= {"min_transparency", "extra_params"}
         d = _check_keys(d or {}, keys, set(), what)
-        _unsupported(d, {"max_seeing": (None,), "min_transparency": (None,)}, what)
+        _unsupported(d, {"min_transparency": (None,)}, what)
         extra = _extra(d, set(cls._EXTRA), what)
         kw = {
             py: _number(d[js], f"{what}.{js}", *rng)
