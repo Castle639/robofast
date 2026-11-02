@@ -4,7 +4,8 @@ Sheet (or a CSV export of each tab), as request groups.
 Legacy MINERVA (``minerva-control``, ``minerva_library/targetlist.py``)
 keeps its target lists in a Google Sheet: the RV targets on tab
 ``targets``, the B stars observed through the iodine cell on tab
-``B stars``, and, in a sheet of its own, a red-side list. Its
+``B stars``, and, in a sheet of its own, a red-side list (retired: not in
+the example config; a list in the config brings it back). Its
 ``downloadList`` exported each tab to CSV with a service account, and
 ``rdlist``/``mkdict`` read the CSV. This module reads the same tabs, with
 the same service account and a read-only scope, and turns each row into
@@ -14,8 +15,9 @@ mapping):
 * an RV target: a standing ``SPECTRUM`` (iodine in) with
   ``extra_params.cadence`` from ``seplimit`` and ``maxobs``;
 * a B star: a standing ``SPECTRUM`` with ``extra_params.iodine: true`` and
-  a cadence pool, so at most one B star, whichever, is taken a night
-  (legacy's "1 Bstar per night").
+  a cadence pool sharing ``per_night`` (legacy's "1 Bstar per night"); with
+  the list's ``limit: "soft"`` (MINERVA's config) a further B star is
+  still taken when nothing else is observable, as legacy did.
 
 Same stance as the TRES importer
 (:mod:`robofast_core.sites.flwo60.catalogs`): what legacy reads is read
@@ -36,7 +38,8 @@ it logs the one snapshot path the lists came from. Command line::
 
 gspread and google-auth are optional imports (``pip install --group
 sheets``), needed only for a live fetch. The key file and the sheet ids
-belong in the site config, never in a repository.
+belong in the site config, never in a repository: :func:`check_key_file`
+refuses a key that others can read or that lies inside a git work tree.
 """
 
 from __future__ import annotations
@@ -59,19 +62,22 @@ from pathlib import Path
 from typing import Any
 
 from robofast_core.catalogs.model import _ident
-from robofast_core.request_model import RequestGroup, load_request_groups
+from robofast_core.request_model import Cadence, RequestGroup, load_request_groups
 
 log = logging.getLogger(__name__)
 
 __all__ = [
+    "GOOGLE_KEY_ENV",
     "KEY_ENV",
     "SCOPES",
+    "KeyFileRefused",
     "ListSpec",
     "Loaded",
     "SheetConfig",
     "SheetError",
     "SheetList",
     "SheetUnavailable",
+    "check_key_file",
     "convert",
     "fetch",
     "load",
@@ -82,6 +88,8 @@ __all__ = [
 
 #: Environment variable that overrides the config's ``key_file``.
 KEY_ENV = "ROBOFAST_MINERVA_SHEETS_KEY"
+#: Google's own variable: the key when neither of the above names one.
+GOOGLE_KEY_ENV = "GOOGLE_APPLICATION_CREDENTIALS"
 #: Read only: robofast never writes to the Sheet.
 SCOPES = ("https://www.googleapis.com/auth/spreadsheets.readonly",)
 SNAPSHOT_FORMAT = "robofast-minerva-sheet/1"
@@ -141,7 +149,7 @@ INFORMATIONAL = frozenset(
         "rpearth",
         "mpearth",
         "k",
-        # the red-side sheet
+        # the red-side sheet (retired; read if a config lists it again)
         "Common Name",
         "Sloan I band",
         "MEarth Image",
@@ -159,6 +167,12 @@ INFORMATIONAL = frozenset(
 class SheetError(ValueError):
     """A tab or config that cannot be read at all (a missing column, a
     duplicated header, a bad config entry)."""
+
+
+class KeyFileRefused(SheetError):
+    """The service-account key file is somewhere it could leak from
+    (:func:`check_key_file`). Not a reason to fall back to a snapshot: the
+    config is wrong and is reported as such."""
 
 
 class SheetUnavailable(RuntimeError):
@@ -190,11 +204,15 @@ class ListSpec:
     pool: str = ""
     #: B stars: how many of the pool a night.
     per_night: int = 1
+    #: The cadence's ``limit`` (request_model.Cadence): ``"hard"`` refuses a
+    #: request past its nightly count, ``"soft"`` only ranks it below every
+    #: other (taken rather than idling).
+    limit: str = "hard"
     enabled: bool = True
 
     KEYS = frozenset(
         {"kind", "tab", "sheet", "proposal", "id_prefix", "instrument", "pool", "per_night"}
-        | {"enabled"}
+        | {"limit", "enabled"}
     )
 
     def __post_init__(self) -> None:
@@ -209,6 +227,10 @@ class ListSpec:
             or self.per_night < 1
         ):
             raise SheetError(f"list {self.name!r}: per_night must be a positive integer")
+        if self.limit not in Cadence.LIMITS:
+            raise SheetError(
+                f"list {self.name!r}: limit {self.limit!r}; expected one of {list(Cadence.LIMITS)}"
+            )
 
     @classmethod
     def from_dict(cls, name: str, d: Any) -> ListSpec:
@@ -229,7 +251,12 @@ class ListSpec:
 DEFAULT_LISTS = {
     "targets": ListSpec("targets", "targets", "targets", proposal="minerva-rv", id_prefix="RV"),
     "bstars": ListSpec(
-        "bstars", "bstars", "B stars", proposal="iodine-calibration", id_prefix="BSTAR"
+        "bstars",
+        "bstars",
+        "B stars",
+        proposal="iodine-calibration",
+        id_prefix="BSTAR",
+        limit="soft",
     ),
 }
 
@@ -281,9 +308,15 @@ class SheetConfig:
         return {k: v for k, v in self.lists.items() if v.enabled}
 
     def key_path(self) -> Path | None:
-        """The service-account key: ``$ROBOFAST_MINERVA_SHEETS_KEY``, else the config's."""
+        """The service-account key: ``$ROBOFAST_MINERVA_SHEETS_KEY``, else the
+        config's ``key_file``, else ``$GOOGLE_APPLICATION_CREDENTIALS``."""
         env = os.environ.get(KEY_ENV, "").strip()
-        return Path(env).expanduser() if env else self.key_file
+        if env:
+            return Path(env).expanduser()
+        if self.key_file is not None:
+            return self.key_file
+        google = os.environ.get(GOOGLE_KEY_ENV, "").strip()
+        return Path(google).expanduser() if google else None
 
     def snapshots(self) -> Path:
         if self.snapshot_dir is not None:
@@ -518,6 +551,8 @@ def _row(cell: Callable[[str], str], spec: ListSpec, n: int) -> dict[str, Any]:
     else:
         maxobs = _whole(cell("maxobs"), "maxobs") if cell("maxobs") else DEFAULT_MAXOBS
         cadence = {"min_interval": seplimit, "max_per_night": maxobs}
+    if spec.limit != "hard":
+        cadence["limit"] = spec.limit
     gid = f"{_ident(spec.id_prefix)}-{_ident(name)}"
     note = [f"MINERVA sheet {spec.name}, row {n}"]
     if vmag is not None:
@@ -568,8 +603,47 @@ def _cell_text(v: Any) -> str:
     return str(v)
 
 
+def _git_work_tree(path: Path) -> Path | None:
+    """The git work tree ``path`` lies in (a parent holding ``.git``), or None."""
+    for parent in path.parents:
+        if (parent / ".git").exists():
+            return parent
+    return None
+
+
+def check_key_file(key_file: Path) -> Path:
+    """Refuse a service-account key that could leak (:class:`KeyFileRefused`):
+    one readable or writable by group or others, or inside a git work tree
+    (where one ``git add -A`` publishes it). A missing key is
+    :class:`SheetUnavailable`. Returns the resolved path. Only the file's
+    metadata is read, never its contents.
+
+    Keep it in ``/etc/robofast/secrets/`` (docs/minerva_sheet.md), mode
+    600, owned by the user robofast runs as (or handed over by systemd's
+    ``LoadCredential=``: ``$CREDENTIALS_DIRECTORY`` in the path is
+    expanded)."""
+    path = Path(os.path.expandvars(str(key_file))).expanduser()
+    if not path.is_file():
+        raise SheetUnavailable(f"service-account key {path} not found")
+    real = path.resolve()
+    tree = _git_work_tree(real)
+    if tree is not None:
+        raise KeyFileRefused(
+            f"service-account key {path} is inside the git work tree {tree}: move it out "
+            "(e.g. to /etc/robofast/secrets/) and make sure it was never committed"
+        )
+    if os.name == "posix" and real.stat().st_mode & 0o077:
+        raise KeyFileRefused(
+            f"service-account key {path} is accessible to group or others "
+            f"(mode {real.stat().st_mode & 0o777:o}): chmod 600 it"
+        )
+    return real
+
+
 def _client(key_file: Path) -> Any:
-    """A gspread client authorised with the service-account key, read only."""
+    """A gspread client authorised with the service-account key, read only
+    (the key passes :func:`check_key_file` first)."""
+    key_file = check_key_file(key_file)
     try:
         import gspread
         from google.oauth2.service_account import Credentials
@@ -578,10 +652,6 @@ def _client(key_file: Path) -> Any:
             f"a live fetch needs gspread and google-auth ({exc.name} is missing): "
             "pip install --group sheets"
         ) from None
-    if not key_file.is_file():
-        raise SheetUnavailable(f"service-account key {key_file} not found")
-    if os.name == "posix" and key_file.stat().st_mode & 0o077:
-        log.warning("service-account key %s is readable by others; chmod 600 it", key_file)
     creds = Credentials.from_service_account_file(str(key_file), scopes=list(SCOPES))
     return gspread.authorize(creds)
 
@@ -611,7 +681,9 @@ def fetch(config: SheetConfig, *, client: Any = None) -> dict[str, list[list[str
         if client is None:
             key = config.key_path()
             if key is None:
-                raise SheetUnavailable(f"no service-account key: set key_file or ${KEY_ENV}")
+                raise SheetUnavailable(
+                    f"no service-account key: set key_file, ${KEY_ENV} or ${GOOGLE_KEY_ENV}"
+                )
             client = _client(key)
         books: dict[str, Any] = {}
         tables = {}

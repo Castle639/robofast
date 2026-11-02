@@ -4,10 +4,13 @@
     "  python -m robofast_core.sites.minerva.target_sheet fetch --config target_sheet.json",
     "  python -m robofast_core.sites.minerva.target_sheet export --config target_sheet.json -o minerva-requests.json",
     "Copy this file to the control host and fill in the placeholders there; never commit the real values.",
-    "key_file: MINERVA's Google service-account key (JSON), mode 600, outside any repository. $ROBOFAST_MINERVA_SHEETS_KEY overrides it.",
+    "key_file: MINERVA's Google service-account key (JSON) in /etc/robofast/secrets/, mode 600, owned by the service user;",
+    "a key readable by group or others, or inside a git work tree, is refused. $ROBOFAST_MINERVA_SHEETS_KEY overrides it;",
+    "without either, $GOOGLE_APPLICATION_CREDENTIALS is used.",
     "sheet: each list's spreadsheet key (the long id in the Sheet's URL; legacy minerva-control has it in",
-    "minerva_library/targetlist.py downloadList). The red-side list is a sheet of its own; it is disabled",
-    "here until it is confirmed to be wanted and an instrument_type exists for it.",
+    "minerva_library/targetlist.py downloadList).",
+    "bstars: limit soft -- after per_night B stars a further one is still taken when nothing else is observable.",
+    "The red-side list is retired (docs/minerva_sheet.md); a list entry of its own brings it back.",
     "instrument: the spectrograph's instrument_type in dispatch.example.json (required).",
     "snapshot_dir: omitted, snapshots go to $ROBOFAST_DATA_DIR/minerva_sheet (robofast_core.zenodo.data_dir); keep: how many."
   ],
@@ -30,16 +33,8 @@
       "proposal": "iodine-calibration",
       "id_prefix": "BSTAR",
       "pool": "bstars",
-      "per_night": 1
-    },
-    "red": {
-      "sheet": "<spreadsheet key of the red-side target list>",
-      "tab": "targets",
-      "kind": "targets",
-      "proposal": "minerva-red",
-      "id_prefix": "RED",
-      "instrument": "red_spectrograph",
-      "enabled": false
+      "per_night": 1,
+      "limit": "soft"
     }
   }
 }

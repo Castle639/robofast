@@ -15,7 +15,8 @@ next observation, and it decides from scratch, RTS2/POCS-style:
      the request's windows; a ToO has not passed its deadline;
    * cadence (standing requests): at least ``min_interval`` since the last
      completed visit started, and fewer than ``max_per_night`` visits since
-     local noon (of the request, or of all requests sharing its ``pool``);
+     local noon (of the request, or of all requests sharing its ``pool``),
+     unless the cadence's ``limit`` is ``"soft"`` (step 3);
    * the Sun is below ``max_sun_alt`` (twilight), for anything with light
      frames;
    * for each light configuration, at the start, middle and end of its part
@@ -53,7 +54,12 @@ next observation, and it decides from scratch, RTS2/POCS-style:
 
 3. **Ranking**: by priority class first (a ToO's ``priority_class``, 0 for
    normal requests), then by score; ties by request id, so a decision is
-   reproducible.
+   reproducible. A request that has reached a *soft* ``max_per_night``
+   (cadence ``"limit": "soft"``) is still observable but *demoted*: it ranks
+   below every request that is not, whatever its class or score, so it is
+   chosen only when the telescope would otherwise idle (legacy MINERVA
+   divided a B star's weight by 10^6 once one was observed, "unless we have
+   nothing better to do").
 
 The visit is then executed: one :class:`~robofast_core.plan.Observation`
 per instrument config, configurations in order. Between the observations of
@@ -315,12 +321,15 @@ class Candidate:
     reasons: list[str] = field(default_factory=list)
     #: The score's terms.
     terms: dict[str, float] = field(default_factory=dict)
+    #: Why it is demoted (it reached a soft ``max_per_night``); "" if not.
+    demoted: str = ""
 
 
-def _rank(c: Candidate) -> tuple[int, float, str]:
-    """Sort key, best first: highest class, then highest score, then id."""
+def _rank(c: Candidate) -> tuple[bool, int, float, str]:
+    """Sort key, best first: not demoted, then highest class, then highest
+    score, then id."""
     assert c.request.group is not None
-    return (-c.request.group.priority_class, -c.score, c.request.id)
+    return (bool(c.demoted), -c.request.group.priority_class, -c.score, c.request.id)
 
 
 @dataclass
@@ -525,11 +534,12 @@ class DispatchScheduler:
         self._too.pop(req.id, None)
         self.decisions.append((now, telescope, req.id, best.score))
         log.info(
-            "%s: %s (score %.3f: %s)",
+            "%s: %s (score %.3f: %s)%s",
             telescope,
             req.id,
             best.score,
             ", ".join(f"{k}={v:.3f}" for k, v in best.terms.items()),
+            f" -- demoted ({best.demoted}), nothing else observable" if best.demoted else "",
         )
         obs = self._observation(visit)
         self._feed(telescope, visit, obs, now, sky_now)
@@ -543,6 +553,7 @@ class DispatchScheduler:
             priority_class=req.group.priority_class,
             score=best.score,
             terms=best.terms,
+            **({"demoted": best.demoted} if best.demoted else {}),
             **self._summary(best, cands),
         )
         self._wake_feed(obs)
@@ -920,6 +931,20 @@ class DispatchScheduler:
             if r.cadence is not None and r.cadence.pool == pool
         )
 
+    def _night_limit(self, req: Request, now: datetime, limit: str) -> str | None:
+        """Why ``req`` has reached its ``max_per_night`` (of its own visits,
+        or its pool's) if its cadence's limit is ``limit``; None if not."""
+        cad = req.cadence
+        if cad is None or cad.max_per_night is None or cad.limit != limit:
+            return None
+        n = cad.max_per_night
+        if cad.pool is not None:
+            if self.pool_visits_tonight(cad.pool, now) >= n:
+                return f"cadence: {n} visits of pool {cad.pool!r} tonight already"
+        elif self.visits_tonight(req.id, now) >= n:
+            return f"cadence: {n} visits tonight already"
+        return None
+
     # -- evaluation --------------------------------------------------------------
 
     def evaluate(
@@ -951,6 +976,7 @@ class DispatchScheduler:
                 continue
             if cand.reasons:
                 continue
+            cand.demoted = self._night_limit(req, now, "soft") or ""
             plans.append((cand, parts))
             for c, t0, t1 in parts:
                 if c.light:
@@ -1138,13 +1164,9 @@ class DispatchScheduler:
             last = max(self.visits.get(req.id, ()), default=None)
             if last is not None and (now - last).total_seconds() < req.cadence.min_interval:
                 reasons.append("cadence: too soon after the last visit")
-            n = req.cadence.max_per_night
-            pool = req.cadence.pool
-            if n is not None and pool is not None:
-                if self.pool_visits_tonight(pool, now) >= n:
-                    reasons.append(f"cadence: {n} visits of pool {pool!r} tonight already")
-            elif n is not None and self.visits_tonight(req.id, now) >= n:
-                reasons.append(f"cadence: {n} visits tonight already")
+            reached = self._night_limit(req, now, "hard")
+            if reached:
+                reasons.append(reached)
         if any(c.light for c in configs):
             sun_limit = min(
                 [self.config.max_sun_alt]
@@ -1289,7 +1311,9 @@ class DispatchScheduler:
         )
         return {
             "runners_up": [
-                {"request": c.request.id, "score": c.score, "terms": c.terms} for c in ok[:n]
+                {"request": c.request.id, "score": c.score, "terms": c.terms}
+                | ({"demoted": c.demoted} if c.demoted else {})
+                for c in ok[:n]
             ],
             "rejected": [
                 {

@@ -3,7 +3,8 @@
 MINERVA's RV targets and its B stars live in a Google Sheet, the "MINERVA
 target list": tab `targets` (the RV stars) and tab `B stars` (rapidly
 rotating B stars observed through the iodine cell, docs/kiwispec.md
-section 4). A red-side list is in a sheet of its own. Legacy
+section 4). Legacy also had a red-side list in a sheet of its own; it is
+retired (see "Not done"). Legacy
 `minerva-control` (`minerva_library/targetlist.py`) exported each tab to
 CSV with a Google service account (`downloadList`) and read the CSV
 (`rdlist`, `mkdict`) for its scheduler (`scheduler.py`) and its nightly
@@ -43,20 +44,46 @@ filled in there:
 
 | Key | Meaning |
 |---|---|
-| `key_file` | the service-account key (JSON), e.g. `/etc/robofast/secrets/minerva_sheets.json`, mode 600 (a warning otherwise). `$ROBOFAST_MINERVA_SHEETS_KEY` overrides it |
+| `key_file` | the service-account key (JSON), e.g. `/etc/robofast/secrets/minerva_sheets.json` (see "The key file" below). `$ROBOFAST_MINERVA_SHEETS_KEY` overrides it; with neither, `$GOOGLE_APPLICATION_CREDENTIALS` is used |
 | `lists.<name>.sheet` | the spreadsheet key (the id in the Sheet's URL). **Site config only**, never in a repository; the example has placeholders, and `fetch` refuses them |
 | `lists.<name>.tab` | the worksheet: `targets`, `B stars` |
 | `lists.<name>.kind` | `targets` (RV stars) or `bstars` |
 | `lists.<name>.instrument` | the spectrograph's `instrument_type` in the site's dispatch config (`spectrograph` for MINERVA). Required: a site value, no default (design.md 3.10) |
 | `lists.<name>.proposal`, `id_prefix` | the requests' `proposal` and id prefix (`RV-`, `BSTAR-`) |
 | `lists.<name>.pool`, `per_night` | B stars: the cadence pool and how many of it a night (default the list's name, 1) |
-| `lists.<name>.enabled` | `false` skips the list (the red-side list, until it is confirmed wanted) |
+| `lists.<name>.limit` | the cadence's nightly limit: `hard` (default: refused once reached) or `soft` (still taken, but only when nothing else is observable). MINERVA's B stars: `soft` |
+| `lists.<name>.enabled` | `false` skips the list |
 | `snapshot_dir`, `keep` | where snapshots go (default `$ROBOFAST_DATA_DIR/minerva_sheet`, see `robofast_core.zenodo.data_dir`) and how many are kept (30) |
 
 The live fetch needs `gspread` and `google-auth`: `pip install --group
 sheets` (from the repository) or `pip install ".[sheets]"`. They are optional imports; nothing else in robofast needs them.
 Cells are read unformatted (the stored numbers, not the Sheet's display
 rounding of them), so coordinates keep their full precision.
+
+### The key file
+
+The service-account key is a credential: anyone holding it reads the
+collaboration's Sheet. Keep it out of every repository, in
+`/etc/robofast/secrets/`, mode `0600`, owned by the user that runs the
+reader:
+
+```
+sudo install -m 600 -o <service user> minerva_sheets.json /etc/robofast/secrets/
+```
+
+Under systemd, the deployment's way (`docs/deploy.md`, "Secrets") is
+better: the file stays `root:root 0600` in `/etc/robofast/secrets/`, the
+unit has `LoadCredential=minerva_sheets.json:/etc/robofast/secrets/minerva_sheets.json`,
+and the config says `"key_file": "$CREDENTIALS_DIRECTORY/minerva_sheets.json"`
+(environment variables in the path are expanded).
+
+Before a live fetch the reader checks the file's metadata (never its
+contents) and **refuses** a key that group or others can read or write, or
+that lies inside a git work tree (a parent directory holds `.git`), with
+an error naming the fix. A refused key is a configuration error, not a
+reason to fall back to a snapshot. A missing key is: the lists then come
+from the newest snapshot. `.gitignore` also ignores `*service-account*.json`
+and `secrets/` as a backstop.
 
 ## Snapshots and the fallback
 
@@ -126,14 +153,18 @@ site's limits (legacy had none).
 - **RV targets** (`kind: targets`): cadence `min_interval` = `seplimit`,
   `max_per_night` = `maxobs`.
 - **B stars** (`kind: bstars`): cadence `min_interval` = `seplimit`,
-  `max_per_night` 1 and `pool: "bstars"`. A pool shares the nightly count
-  among its requests (`docs/request_language.md`), so at most one B star,
-  whichever, is taken a night. Legacy's rule was softer: after the night's
-  B star it divided the other B stars' weights by 10^6 ("unless we have
-  nothing better to do"), and before it raised them as the night ran out
-  (`mkschedule` put one at the start of the night). robofast does neither:
-  a B star competes on its `ipp_value` like any request, and a second one
-  is never taken. Raise `per_night` for more.
+  `max_per_night` = `per_night` (1), `pool: "bstars"` and, in MINERVA's
+  config, `limit: "soft"`. A pool shares the nightly count among its
+  requests (`docs/request_language.md`): the first B star of the night
+  competes on its `ipp_value` like any request; once one is taken, the
+  others stay observable but are *demoted* below every other request, so
+  a second B star is taken only when nothing else can be observed (better
+  than an idle telescope). This is legacy's rule: after the night's B star
+  `scheduler.calculate_weights` divided the B stars' weights by 10^6
+  ("unless we have nothing better to do"). `limit: "hard"` refuses further
+  B stars outright; raise `per_night` for more. Legacy also raised the B
+  stars' weight as the night ran out (x 0.784 exp(8726 s / time left)) and
+  `mkschedule` put one at the start of the night; robofast does not.
 
 The output loads in the dispatch plan as a `requests` file
 (`sites/minerva/dispatch.example.json`); run `export` from a timer and
@@ -142,13 +173,16 @@ it changes.
 
 ## Not done
 
-- The red-side list: the reader handles it (`kind: targets`, its own
-  sheet), but it is disabled in the example until it is confirmed wanted,
-  and robofast has no instrument for it. Its `iodine` column is probably
-  the red spectrograph's own setting, not KiwiSpec's cell: rows with
-  `iodine` 0 are refused until that is settled.
+- The red-side list is **retired** (JDE, 2026-11): no longer maintained,
+  so it is not in the example config. It might return if the Starlight
+  Xpress AO drastically improves throughput; to revive it, add a list
+  (`kind: targets`, its own `sheet`, an `instrument` for the red side) to
+  the site config. The reader is generic and still knows its columns. Its
+  `iodine` column is probably the red spectrograph's own setting, not
+  KiwiSpec's cell: rows with `iodine` 0 would be refused until that is
+  settled.
 - Acquisition offsets (offset guiding), see above.
-- Legacy's B-star weighting through the night, and its weighting of three
+- Legacy's B-star boost through the night, and its weighting of three
   visits a night by hour angle (`calc_weight_multi`): the dispatch score
   has its own terms (design.md 3.7).
 - Writing to the Sheet: never; the scope is read only.

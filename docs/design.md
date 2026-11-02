@@ -449,7 +449,9 @@ may be wrong about the 60-inch's focus.
   cadence (`extra_params.cadence`: `min_interval`, `max_per_night`) is
   *standing*: it returns to PENDING after each visit, as MINERVA's RV
   targets do; a cadence `pool` shares `max_per_night` among requests (one
-  B star a night, whichever). Requests load from JSON files, validated with errors that
+  B star a night, whichever), and a cadence `limit` says whether reaching
+  it is `hard` (excluded) or `soft` (demoted below every other request, so
+  taken only rather than idle: MINERVA's B stars, as legacy did). Requests load from JSON files, validated with errors that
   name the entry; a site plug-in's request importers convert legacy lists
   (a dispatch plan's `imports`: MINERVA's target spreadsheet export is
   `minerva.legacy_csv`), `robofast_core.sites.minerva.target_sheet` reads
