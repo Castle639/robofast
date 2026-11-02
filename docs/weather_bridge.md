@@ -187,14 +187,20 @@ calculation made elsewhere with the same parameters (JDE 2026-10-31). The
 Sun source reports `altitude` (apparent, refracted) and
 `altitude_geometric`.
 
-**Refraction: on, matching legacy.** Legacy `site.sunalt` used an
+**Refraction: on, for the site's air.** The Sun source's `pressure_hpa`
+and `temperature_c` default to the International Standard Atmosphere at the
+site's `elevation` (required when a Sun source is enabled): 764 hPa and
+-0.1 degC at MINERVA's 2316 m. `pressure_hpa: 0` gives the geometric
+altitude; setting both overrides the model. Legacy `site.sunalt` used an
 `ephem.Observer` without setting `pressure`, so PyEphem refracted with its
-defaults, 1010 mbar and 15 degC; the MINERVA config passes the same
-(`pressure_hpa: 1010`, `temperature_c: 15`; `pressure_hpa: 0` gives the
-geometric altitude). Against PyEphem 4.2.1 astropy agrees within 0.002 deg
-from +6 deg up (the limit); its refraction model is not meant for the
-horizon (0.04 deg apart at +3.3 deg, 0.15 at +1, and below the horizon
-astropy keeps adding ~0.17 deg where PyEphem stops refracting).
+sea-level defaults, 1010 mbar and 15 degC; robofast did the same until
+2026-11-01. The change lowers the apparent Sun by 0.025 deg at +6 deg (the
+MINERVA limit; about 6 s of time) and by at most 0.034 deg anywhere with
+astropy's model (true refraction differs by ~0.1 deg at the horizon). With
+PyEphem's numbers astropy agrees with PyEphem 4.2.1 within 0.002 deg from
++6 deg up; its refraction model is not meant for the horizon (0.04 deg
+apart at +3.3 deg, 0.15 at +1, and below the horizon astropy keeps adding
+~0.14-0.17 deg where PyEphem stops refracting).
 
 **Offline.** Importing `robofast_core.sun` sets
 `astropy.utils.iers.conf.auto_download = False` and `auto_max_age = None`:

@@ -75,6 +75,23 @@ SIDEREAL = 1.00273790935  # sidereal hours per solar hour
 FLWO_LATITUDE = 31.6809  # deg N; the 60-inch, approximate (public)
 FLWO_LONGITUDE = -110.8781  # deg E
 
+#: The site and telescope values a TCSGO server config needs to drive this
+#: simulator at its defaults (tests and the ConformU script use them; a real
+#: site's values live in its sites/<site>/tcsgo.json).
+SIM_SERVER_SITE = {
+    "latitude": FLWO_LATITUDE,
+    "longitude": FLWO_LONGITUDE,
+    "elevation": 2344.0,
+    "min_alt": 20.0,
+    "park_command": "park",
+    "park_alt": 90.0,
+    "park_az": 0.0,
+    "guide_rate": 5.0,
+    "aperture_diameter": 1.524,
+    "focus_min": -5000.0,
+    "focus_max": 5000.0,
+}
+
 
 def lst_hours(longitude_deg: float, unix: float | None = None) -> float:
     """Local mean sidereal time (hours), to about 0.1 s: plenty for a simulator."""

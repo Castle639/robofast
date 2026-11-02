@@ -85,7 +85,7 @@ async def test_a_time_scaled_night_has_one_night_name_everywhere(make_rig, tmp_p
     rig.cam.clock = clock  # the (simulated) camera's own clock agrees
     seq.spectrograph = FakeSpectrograph(rig.timeline)
     seq.spectra = SpectrumRecorder(
-        tmp_path / "data", "testsite", MTHOPKINS, timezone="America/Phoenix", clock=clock
+        tmp_path / "data", "testsite", MTHOPKINS, "kiwispec", timezone="America/Phoenix", clock=clock
     )
     seq.units["t1"].guider = FakeGuider(rig.timeline, "t1")
     # An autofocus result reaches the plan record through the triggers.

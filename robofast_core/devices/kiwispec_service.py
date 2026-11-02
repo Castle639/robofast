@@ -71,7 +71,8 @@ Running
 
     python -m robofast_core.devices.kiwispec_service --config kiwispec.json [--hardware]
 
-with a JSON config (every key optional except the two hosts)::
+with a JSON config (every key optional except the two hosts and
+``telescopes``)::
 
     {"name": "kiwispec", "listen": "127.0.0.1:8130",
      "spectrograph": {"host": "127.0.0.1", "port": 44445},
@@ -105,6 +106,7 @@ from http import HTTPStatus
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
+from robofast_core.config import load_device_config, require_keys
 from robofast_core.cancel import isolated, stop_task
 from robofast_core.clock import clock_from_config
 from robofast_core.devices.kiwispec_client import (
@@ -234,12 +236,13 @@ class CameraEndpoint:
 class KiwiSpecConfig:
     spectrograph: SpecEndpoint
     camera: CameraEndpoint
+    #: Telescopes that can feed the fiber (legacy tele_list): a site value,
+    #: required.
+    telescopes: list[str]
     name: str = "kiwispec"
     listen: str = "127.0.0.1:8130"
     #: Must be true (and ``--hardware`` given) for a non-loopback PC.
     allow_hardware: bool = False
-    #: Telescopes that can feed the fiber (legacy tele_list).
-    telescopes: list[str] = field(default_factory=lambda: ["T1", "T2", "T3", "T4"])
     #: The iodine stage's named positions (mm), as a CROSS-CHECK only. The
     #: live ``spectrograph_server.ini`` on the spectrograph PC is
     #: authoritative (docs/kiwispec.md, "The iodine stage's positions"): the
@@ -310,6 +313,7 @@ class KiwiSpecConfig:
         unknown = set(d) - known
         if unknown:
             raise ValueError(f"unknown kiwispec config keys: {sorted(unknown)}")
+        require_keys(d, ("spectrograph", "camera", "telescopes"))
         d["spectrograph"] = SpecEndpoint(**d["spectrograph"])
         d["camera"] = CameraEndpoint(**d["camera"])
         if "ccd_format" in d:
@@ -1414,8 +1418,7 @@ def main(argv: list[str] | None = None) -> None:
     logging.basicConfig(
         level=args.log_level, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
     )
-    with open(args.config) as f:
-        config = KiwiSpecConfig.from_dict(json.load(f))
+    config = load_device_config(args.config, KiwiSpecConfig.from_dict)
     if args.listen:
         config.listen = args.listen
 

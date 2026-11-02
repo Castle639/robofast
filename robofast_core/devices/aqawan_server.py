@@ -95,8 +95,9 @@ Running
 
     python -m robofast_core.devices.aqawan_server --config aqawan.json [--hardware]
 
-with a JSON config (``deploy/aqawan.example.json``; every key except ``pac``
-is optional)::
+with a JSON config (``deploy/aqawan.example.json``; ``name`` and
+``open_order`` are required, ``pac`` is needed for anything but a loopback
+PAC on the default port, the rest are optional)::
 
     {"name": "aqawan1", "listen": "127.0.0.1:11113",
      "pac": {"host": "127.0.0.1", "port": 22004},
@@ -125,6 +126,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
+from robofast_core.config import load_device_config, require_keys
 from robofast_core.cancel import stop_task
 from robofast_core.devices.aqawan_pac import (
     SHUTTER_STATES,
@@ -178,13 +180,14 @@ class PACConfig:
 
 @dataclass
 class AqawanConfig:
+    #: Site values, required (no defaults): the enclosure's name, and its
+    #: shutters in opening order (legacy aqawan1 used [2, 1], aqawan2 [1, 2]).
+    name: str
+    open_order: tuple[int, int]
     pac: PACConfig = field(default_factory=PACConfig)
     #: Must be true (and ``--hardware`` given) for a non-loopback PAC.
     allow_hardware: bool = False
-    name: str = "aqawan"
     listen: str = "127.0.0.1:11113"
-    #: Shutters in opening order; legacy aqawan1 used [2, 1], aqawan2 [1, 2].
-    open_order: tuple[int, int] = (1, 2)
     close_command: str = "CLOSE_SEQUENTIAL"
     lights_off_before_open: bool = True
     #: Per shutter, while it reports OPENING (legacy: 180 s, aqawan.py:195).
@@ -217,6 +220,7 @@ class AqawanConfig:
         unknown = set(d) - names
         if unknown:
             raise ValueError(f"unknown config keys: {sorted(unknown)}")
+        require_keys(d, ("name", "open_order"))
         pac = d.pop("pac", {})
         pac_names = {f.name for f in dataclasses.fields(PACConfig)}
         if set(pac) - pac_names:
@@ -1077,8 +1081,7 @@ def main(argv: list[str] | None = None) -> None:
     logging.basicConfig(
         level=args.log_level, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
     )
-    with open(args.config) as f:
-        config = AqawanConfig.from_dict(json.load(f))
+    config = load_device_config(args.config, AqawanConfig.from_dict)
     if args.listen:
         config.listen = args.listen
     try:

@@ -1141,7 +1141,7 @@ class Console:
         """Resolve a target name (the dispatch plan's targets; offline) and
         refuse a slew outside the telescope's altitude limits."""
         from robofast_core import sky
-        from robofast_core.console.skyview import DEFAULT_LIMITS, _site
+        from robofast_core.console.skyview import _site, limits_for
 
         view = None
         if enc.requests is not None:
@@ -1165,9 +1165,15 @@ class Console:
         site = _site(enc, view)
         if site is None:
             raise ApiError(409, "refused: no site configured to check the altitude limits")
-        lo, hi = DEFAULT_LIMITS
-        if view is not None and tel in view.limits:
-            lo, hi = view.limits[tel].min_alt, view.limits[tel].max_alt
+        lim = limits_for(enc, view, tel)
+        if lim is None:
+            raise ApiError(
+                409,
+                f"refused: no altitude limits configured for {tel} (give it "
+                f"'limits': {{'min_alt': ..., 'max_alt': ...}} in the enclosure config, "
+                f"or list it in a dispatch plan)",
+            )
+        lo, hi = lim
         alt = float(
             sky.altitudes(site, [cmd["ra_hours"]], [cmd["dec_deg"]], [[datetime.now(UTC)]])[0, 0]
         )

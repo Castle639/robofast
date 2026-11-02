@@ -17,6 +17,7 @@ from robofast_core.fits_writer import FrameInfo, FrameStore, Optics
 from robofast_core.framesolve import FrameSolver
 from robofast_core.imagebytes import ImageArray
 from robofast_core.photometry import PortPhotometry, SkyConditions, sky_brightness, snr
+from robofast_core.testing import TEST_OPTICS
 from robofast_core.pointing import PointingModel
 from robofast_core.registry import ValueRegistry
 from robofast_core.testing.fakes import FakeTelescope
@@ -59,7 +60,7 @@ def test_lst_matches_astropy():
 
 def test_stars_land_on_their_pixels(catalog):
     c = cam(pa=30.0)
-    sc = SkyScene(catalog, c, PortPhotometry(), conditions=SkyConditions(), seeing=1.5)
+    sc = SkyScene(catalog, c, PortPhotometry(**TEST_OPTICS), conditions=SkyConditions(), seeing=1.5)
     frame = sc.render(*HD185144, WHEN, 10.0, noise=False)
     t = frame.truth
     assert t["ra"] == pytest.approx(HD185144[0]) and len(t["stars"]) > 20
@@ -89,7 +90,7 @@ def test_rotation_and_parity(catalog):
 
 def test_pointing_error_moves_the_field(catalog):
     model = PointingModel({"IH": 120.0, "ID": -90.0, "NP": 30.0})
-    sc = SkyScene(catalog, cam(), PortPhotometry(), pointing=model, conditions=SkyConditions())
+    sc = SkyScene(catalog, cam(), PortPhotometry(**TEST_OPTICS), pointing=model, conditions=SkyConditions())
     tra, tdec = sc.true_pointing(*HD185144, WHEN)
     off = separation(*HD185144, tra, tdec) * 3600
     assert 60 < off < 300
@@ -101,7 +102,7 @@ def test_pointing_error_moves_the_field(catalog):
 
 def test_altaz_pointing_error(catalog):
     model = PointingModel({"IA": 200.0, "IE": 60.0}, mount="altaz")
-    sc = SkyScene(catalog, cam(), PortPhotometry(), pointing=model, conditions=SkyConditions())
+    sc = SkyScene(catalog, cam(), PortPhotometry(**TEST_OPTICS), pointing=model, conditions=SkyConditions())
     tra, tdec = sc.true_pointing(*HD185144, WHEN)
     assert 30 < separation(*HD185144, tra, tdec) * 3600 < 300
     back = sc.true_pointing(*sc.command_for(*HD185144, WHEN), WHEN)
@@ -118,13 +119,13 @@ def test_sky_brightness():
 
 
 def test_photometry_chain():
-    imager = PortPhotometry(band="V", efficiency={"mirrors": 0.8, "qe": 0.8})
-    fau = PortPhotometry(band="V", efficiency={"mirrors": 0.8, "qe": 0.8, "beamsplitter": 0.02})
+    imager = PortPhotometry(**TEST_OPTICS, band="V", efficiency={"mirrors": 0.8, "qe": 0.8})
+    fau = PortPhotometry(**TEST_OPTICS, band="V", efficiency={"mirrors": 0.8, "qe": 0.8, "beamsplitter": 0.02})
     # The 2 % beamsplitter costs 2.5 log10(50) = 4.25 mag.
     assert imager.zp - fau.zp == pytest.approx(4.247, abs=1e-3)
     fiber = fau.with_fraction("beamsplitter", 0.98)
     assert fiber.zp - fau.zp == pytest.approx(2.5 * math.log10(49), abs=1e-6)
-    measured = PortPhotometry(zero_point=20.1)
+    measured = PortPhotometry(**TEST_OPTICS, zero_point=20.1)
     assert measured.zp == 20.1
     assert imager.rate(imager.zp) == pytest.approx(10 ** (-0.4 * imager.extinction))
     s = snr(imager, 12.0, 10.0, sky_per_pixel=5.0, npix=50)
@@ -138,7 +139,7 @@ def test_sky_focus_scene_follows_the_mount(catalog):
     mount.Unpark()
     mount.ra, mount.dec = HD185144[0] / 15.0, HD185144[1]
     c = SkyCamera((512, 512), 0.61, detector=Detector(shape=(512, 512)))
-    sky = SkyScene(catalog, c, PortPhotometry(), conditions=SkyConditions())
+    sky = SkyScene(catalog, c, PortPhotometry(**TEST_OPTICS), conditions=SkyConditions())
     scene = SkyFocusScene(sky, mount, lambda: WHEN, effective_exposure=5.0)
     foc = SimFocuser(20000)
     camera = StarfieldCamera(foc, scene)
@@ -155,7 +156,7 @@ def test_guider_world_from_the_sky(catalog):
     from robofast_core.guider.sim import SimWorld
 
     c = SkyCamera((1216, 1936), 0.265, detector=Detector(shape=(1216, 1936)))
-    sky = SkyScene(catalog, c, PortPhotometry(), conditions=SkyConditions())
+    sky = SkyScene(catalog, c, PortPhotometry(**TEST_OPTICS), conditions=SkyConditions())
     # sigma Draconis (HD 185144), G 4.4, where the catalog has it.
     sig = catalog.cone(*HD185144, 0.1, epoch=WHEN).take([0])
     main, others = sky_world_stars(sky, sig.ra[0], sig.dec[0], WHEN)
@@ -202,7 +203,7 @@ def _info(tel: str, when: datetime, ra: float, dec: float) -> FrameInfo:
 def test_frame_store_writes_the_solved_wcs_and_zero_point(catalog, tmp_path):
     c = cam(pa=0.0)
     model = PointingModel({"IH": 80.0, "ID": 50.0})
-    sc = SkyScene(catalog, c, PortPhotometry(gain=1.3), pointing=model, conditions=SkyConditions())
+    sc = SkyScene(catalog, c, PortPhotometry(**TEST_OPTICS, gain=1.3), pointing=model, conditions=SkyConditions())
     frame = sc.render(*HD185144, WHEN, 10.0)
     solver = FrameSolver(catalog, {"t1": SolverConfig(0.61, search_radius=0.1)})
     store = FrameStore(tmp_path, "test", solver=solver)
@@ -256,7 +257,7 @@ def test_sky_focus_scene_without_catalog_renders_empty(tmp_path):
     mount = FakeTelescope(slew_time=0.0)
     mount.ra, mount.dec = 1.0, 10.0
     c = SkyCamera((64, 64), 0.61, detector=Detector(shape=(64, 64), bias=500.0))
-    sky = SkyScene(catalog_at(tmp_path), c, PortPhotometry(), conditions=SkyConditions())
+    sky = SkyScene(catalog_at(tmp_path), c, PortPhotometry(**TEST_OPTICS), conditions=SkyConditions())
     scene = SkyFocusScene(sky, mount, lambda: WHEN)
     img = scene.render(20000.0, 1.0, (0, 0, 64, 64), 2)
     assert img.shape == (32, 32) and np.all(img == 500)

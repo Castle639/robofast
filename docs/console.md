@@ -104,7 +104,8 @@ two timelines are complete either way.
 time; the Sun's and Moon's altitude and azimuth (and the Moon's
 illuminated fraction); each telescope's pointing (from the sequencer's
 value registry; none while stale) and limits (the dispatch plan's
-`min_alt`/`max_alt`, else 21 and 83 deg); and every unfinished target of the
+`min_alt`/`max_alt`, else the telescope's `limits` in the enclosure
+config, else none); and every unfinished target of the
 dispatch scheduler's requests, the ones a telescope is on first, then ToOs,
 then by priority, each with altitude, azimuth and airmass now and 1 and 2 h
 later, and its hour angle. Positions are computed with the same code and
@@ -338,7 +339,7 @@ by hand, from the **Manual control** section (operators only):
 | `op` (`POST /console/api/manual`, with `enclosure`, `telescope`) | Body | What happens |
 |---|---|---|
 | `take` (*confirm*, reason) | | the telescope is held for manual control: its observation in progress finishes the exposure, then the plan never gets it again until it is released (the hold wrapper answers the sequencer with a `kind="manual"` observation instead of asking the plan) |
-| `slew` | `ra_hours`, `dec_deg` (J2000), or `target` (a name from the dispatch plan's requests; no name server, so offline-safe) | refused below `min_alt` or above `max_alt` (the plan's limits, else 21 and 83 deg) at the site, computed now; the sequencer's `SlewGuard` vets it too |
+| `slew` | `ra_hours`, `dec_deg` (J2000), or `target` (a name from the dispatch plan's requests; no name server, so offline-safe) | refused below `min_alt` or above `max_alt` (the plan's limits, else the telescope's `limits` in the enclosure config; refused outright when neither gives any) at the site, computed now; the sequencer's `SlewGuard` vets it too |
 | `offset` | `east_arcsec`, `north_arcsec` (up to 3600 each) | from where the mount points now |
 | `focus` | `position`, or `delta` (steps) | through the sequencer's autofocus mover (its limits and backlash); only on a telescope whose focuser the sequencer moves |
 | `expose` | `exptime` (s), `count` (1 to 50), `light` (default true), `object` | saved like every frame (`docs/data.md`), object `manual` unless named |

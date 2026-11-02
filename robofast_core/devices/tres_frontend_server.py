@@ -80,6 +80,7 @@ from dataclasses import dataclass, field
 from http.server import ThreadingHTTPServer
 from typing import Any
 
+from robofast_core.config import load_device_config, require_keys
 from robofast_core.cancel import stop_task
 from robofast_core.devices.aqawan_server import (
     ACTION_NOT_IMPLEMENTED,
@@ -114,16 +115,6 @@ ACTIONS = ("Status", "Reference")
 SIM_KEYS = frozenset({"position", "referenced", "servo", "velocity", "travel"})
 INTERFACE = {"filterwheel": 3, "focuser": 4}
 
-#: Placeholder positions (mm): ``out``, ``sky`` and ``science`` are the
-#: 2021 public tres-guider values, unconfirmed; the rest are unknown.
-DEFAULT_POSITIONS: dict[str, float | None] = {
-    "out": 0.0,
-    "sky": 10.0,
-    "science": 20.0,
-    "in": None,
-    "block_sky": None,
-    "block_science": None,
-}
 
 
 # -- configuration ----------------------------------------------------------------
@@ -143,16 +134,18 @@ class PortConfig:
 
 @dataclass
 class TRESFrontEndConfig:
+    #: The stage's name, and its named positions in mm, in ``Names`` order
+    #: (null = not yet known: refused). Site values, required (the shipped
+    #: ones are in sites/flwo60/tres_frontend.json).
+    name: str
+    positions: dict[str, float | None]
     port: PortConfig = field(default_factory=PortConfig)
     #: Must be true (and ``--hardware`` given) for a real port or a
     #: non-loopback legacy Redis.
     allow_hardware: bool = False
-    name: str = "tres"
     listen: str = "127.0.0.1:11160"
     #: The controller's axis identifier.
     axis: str = "1"
-    #: Named positions in mm, in ``Names`` order; null = not yet known (refused).
-    positions: dict[str, float | None] = field(default_factory=lambda: dict(DEFAULT_POSITIONS))
     #: How close (mm) counts as "at" a named position (legacy: 0.01).
     tolerance: float = 0.01
     #: Serve the absolute-position Focuser as well.
@@ -177,6 +170,7 @@ class TRESFrontEndConfig:
         unknown = set(d) - names
         if unknown:
             raise ValueError(f"unknown config keys: {sorted(unknown)}")
+        require_keys(d, ("name", "positions"))
         port = {k: v for k, v in d.pop("port", {}).items() if not k.startswith("_")}
         port_names = {f.name for f in dataclasses.fields(PortConfig)}
         if set(port) - port_names:
@@ -837,8 +831,7 @@ def main(argv: list[str] | None = None) -> None:
     logging.basicConfig(
         level=args.log_level, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
     )
-    with open(args.config) as f:
-        config = TRESFrontEndConfig.from_dict(json.load(f))
+    config = load_device_config(args.config, TRESFrontEndConfig.from_dict)
     if args.listen:
         config.listen = args.listen
     if args.simulate:

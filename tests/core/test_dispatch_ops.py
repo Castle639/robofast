@@ -9,6 +9,13 @@ from robofast_core.request_model import Status
 from tests.core.test_dispatch import Clock, group, make
 
 
+def tlimits(**kw):
+    """TelescopeLimits with the test suite's generic values (no defaults in core)."""
+    from robofast_core.dispatch import TelescopeLimits
+
+    return TelescopeLimits(**{"instruments": ["imager"], "min_alt": 21.0, "max_alt": 83.0, **kw})
+
+
 def _reasons(d: DispatchScheduler, rid: str, telescope: str) -> list[str]:
     return next(c for c in d.evaluate(telescope) if c.request.id == rid).reasons
 
@@ -32,8 +39,8 @@ async def test_peek_idle_and_night_over():
 
 async def test_ports_and_filters_are_hard_constraints():
     limits = {
-        "t1": TelescopeLimits(ports=["1", "2"], filters=["V", "R"]),
-        "t2": TelescopeLimits(),
+        "t1": tlimits(ports=["1", "2"], filters=["V", "R"]),
+        "t2": tlimits(),
     }
     d = make(
         [

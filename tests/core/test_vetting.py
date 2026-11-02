@@ -18,6 +18,7 @@ import pytest
 from robofast_core.catalog import catalog_at
 from robofast_core.dispatch import dispatch_from_config
 from robofast_core.photometry import PortPhotometry, SkyConditions
+from robofast_core.testing import TEST_OPTICS
 from robofast_core.request_model import RequestGroup
 from robofast_core.vetting import PortGeometry, Vetter, VettingConfig, vet
 from tests.core.skydata import sky_dir
@@ -31,7 +32,7 @@ FAU = PortGeometry(
     max_star_distance=400.0,
     capture_radius=8.0,
     exposure=2.0,
-    photometry=PortPhotometry(zero_point=20.0, gain=1.5, read_noise=4.0, saturation=65535),
+    photometry=PortPhotometry(**TEST_OPTICS, zero_point=20.0, gain=1.5, read_noise=4.0, saturation=65535),
 )
 
 
@@ -154,7 +155,7 @@ def _vetting_cfg(reject=()):
                 "plate_scale": 0.265,
                 "fiber": [948, 626],
                 "exposure": 2.0,
-                "photometry": {"zero_point": 20.0, "gain": 1.5},
+                "photometry": {**TEST_OPTICS, "zero_point": 20.0, "gain": 1.5},
             }
         },
     }
@@ -166,7 +167,7 @@ def _plan(tmp_path, reject=()):
         "requests": [],
         "too_dropbox": str(tmp_path / "drop"),
         "record": str(tmp_path / "record"),
-        "telescopes": {"t1": {"instruments": ["spectrograph"]}},
+        "telescopes": {"t1": {"instruments": ["spectrograph"], "min_alt": 21, "max_alt": 83}},
         "vetting": _vetting_cfg(reject),
     }
 

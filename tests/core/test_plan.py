@@ -121,7 +121,9 @@ async def test_minerva_aqawan1_config_builds_both_services():
     finally:
         await remote.aclose()
     addresses = [config["devices"].values()] + [e.values() for e in config["telescopes"].values()]
-    assert all(a.startswith("127.0.0.1:") for group in addresses for a in group)
+    assert all(
+        a.startswith("127.0.0.1:") for group in addresses for a in group if isinstance(a, str)
+    )
 
 
 def test_yaml_needs_pyyaml_or_says_so(tmp_path):

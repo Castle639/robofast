@@ -44,6 +44,9 @@ def main() -> None:
         json.dumps(
             {
                 "name": "conformu",
+                "latitude": 31.6809,
+                "instruments": {"tres": {}},
+                "instrument": "tres",
                 "listen": "127.0.0.1:0",
                 "port": {"type": "sim", "sim": {"speed": 4000.0}},
                 "trust_counter": True,

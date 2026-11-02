@@ -79,3 +79,49 @@ def test_the_page_has_the_sky():
 
     page = render_page("n")
     assert 'id="sky"' in page and "/console/api/sky" in page and "createElementNS" in page
+
+
+def _enclosure(tmp_path, **tel):
+    from robofast_core.console.aggregate import ConsoleEnclosure
+
+    site = {"latitude": 31.68, "longitude": -110.88, "elevation": 2316.0}
+    t1 = {"telescope": "x:1", "camera": "x:1", **tel}
+    (tmp_path / "e.json").write_text(json.dumps({"name": "e", "site": site, "telescopes": {"t1": t1}}))
+    return ConsoleEnclosure.from_spec("e", "e.json", tmp_path)
+
+
+def _slew(enc, alt_target: float):
+    """A manual slew check to a target on the meridian at ``alt_target``."""
+    from robofast_core.console.server import Console
+
+    site = sky.Site(31.68, -110.88, 2316.0)
+    lst = sky.sky_now(site, datetime.now(UTC)).lst_hours
+    cmd = {"ra_hours": lst % 24, "dec_deg": site.latitude - (90.0 - alt_target)}
+    Console._check_limits(None, enc, "t1", cmd)  # type: ignore[arg-type]
+    return cmd
+
+
+def test_manual_slew_limits_come_from_the_telescope_config(tmp_path):
+    """Without a dispatch plan the limits are the telescope's ``limits``
+    (never another site's numbers)."""
+    from robofast_core.console.server import ApiError
+
+    enc = _enclosure(tmp_path, limits={"min_alt": 30.0, "max_alt": 80.0})
+    doc = sky_for(enc, {}, {})
+    assert (doc["telescopes"]["t1"]["min_alt"], doc["telescopes"]["t1"]["max_alt"]) == (30, 80)
+    assert _slew(enc, 50.0)["alt"] == pytest.approx(50.0, abs=0.5)
+    with pytest.raises(ApiError, match="outside 30.0-80.0"):
+        _slew(enc, 25.0)
+
+
+def test_manual_slew_is_refused_without_configured_limits(tmp_path):
+    from robofast_core.console.server import ApiError
+
+    enc = _enclosure(tmp_path)
+    doc = sky_for(enc, {}, {})
+    assert doc["telescopes"]["t1"]["min_alt"] is None
+    with pytest.raises(ApiError, match="no altitude limits configured for t1") as err:
+        _slew(enc, 50.0)
+    assert err.value.status == 409
+    with pytest.raises(ValueError, match=r"e\.json: telescopes\.t1\.limits"):
+        _enclosure(tmp_path, limits={"min_alt": 30.0})

@@ -49,7 +49,8 @@ Config (JSON; every key optional except as noted)::
      "calibration_dir": "/var/lib/robofast/guider",
      "camera": {"kind": "sim" | "alpaca" | "zwo" | "framegrabber", ...},
      "tiptilt": null | {"kind": "sim" | "sxao" | "sxao-sim" | "pi" | "pi-sim", ...},
-     "mount": null | {"kind": "alpaca" | "sim", "address", "method": "offset" | "pulseguide", ...},
+     "mount": null | {"kind": "alpaca" | "sim", "address", "method": "offset" | "pulseguide",
+               "guide_rate": arcsec/s (required with "pulseguide"), ...},
      "offload": null | {"threshold", "period", "min_pixels", "window", "settle"},
      "backlight": null | {"kiwispec": "http://host:port"} | {"sim": true},
      "guide": {...GuideConfig...},
@@ -313,10 +314,11 @@ def build_parts(cfg: GuiderServiceConfig, *, allowed: bool, clock: Clock) -> Par
         m = dict(cfg.mount)
         mk = m.pop("kind", "alpaca")
         if mk == "sim":
+            m.setdefault("guide_rate", 7.5)  # the simulator's own rate
             driver: Any = SimMount(
                 tau=float(m.get("tau", 0.5)),
                 delay=float(m.get("delay", 0.1)),
-                guide_rate=float(m.get("guide_rate", 7.5)),
+                guide_rate=float(m["guide_rate"]),
                 clock=clock,
             )
             if world is not None:
@@ -329,7 +331,7 @@ def build_parts(cfg: GuiderServiceConfig, *, allowed: bool, clock: Clock) -> Par
             driver,
             method=str(m.get("method", "offset")),
             action=str(m.get("action", "Offset")),
-            guide_rate=float(m.get("guide_rate", 7.5)),
+            guide_rate=None if m.get("guide_rate") is None else float(m["guide_rate"]),
             max_offset=float(m.get("max_offset", 30.0)),
             timeout=float(m.get("timeout", 5.0)),
         )

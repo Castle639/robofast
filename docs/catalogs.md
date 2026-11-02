@@ -15,13 +15,15 @@ imported catalog is (section 4).
 
 ```
 python -m robofast_core.catalogs import prog.mct                   # intermediate form (JSON)
-python -m robofast_core.catalogs import prog.mct --to-requests     # request groups for the 60-inch
+python -m robofast_core.catalogs import prog.mct --to-requests \
+    --telescope tillinghast --instrument tres                      # request groups for the 60-inch
 python -m robofast_core.catalogs check prog.mct box.off            # validate, with warnings
 python -m robofast_core.catalogs export prog.json -o prog.mct      # back to the legacy format
 ```
 
-`--to-requests` takes `--telescope` (default `tillinghast`), `--instrument`
-(default `tres`), `--exposure-time` (default 300 s, a placeholder: TRES
+`--to-requests` needs `--telescope` and `--instrument` (the names in the
+site's dispatch config; for the 60-inch, `tillinghast` and `tres`: robofast
+has no default site), and takes `--exposure-time` (default 300 s, a placeholder: TRES
 catalogs carry no exposure times) and `--exposure-count` (default 1).
 Errors name the file and line (`prog.mct:12: RA hours '12.5' must be a whole
 number ...`), and the exit status is then 2.

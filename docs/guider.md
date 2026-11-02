@@ -260,7 +260,8 @@ run in a worker thread with a timeout.
 
 `MountOffset` sends `Action("Offset", '{"east": E, "north": N}')`
 (arcseconds on the sky; the TCSGO server's guider offset, `docs/tcsgo.md`)
-or `PulseGuide` (direction and milliseconds at a configured guide rate;
+or `PulseGuide` (direction and milliseconds at the mount's guide rate,
+`mount.guide_rate` in arcsec/s, required with `"method": "pulseguide"`;
 east pulses lengthened by 1/cos(dec), the declination given at `start`).
 Offsets beyond `max_offset` per axis are clipped and reported. For T1 the
 mount is the fine device: the same loop at ~1 Hz with long exposures.

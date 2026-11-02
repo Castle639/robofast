@@ -45,6 +45,7 @@ import numpy as np
 
 from robofast_core.catalog import Catalog, CatalogUnavailable, Stars, _tan, _untan, decimal_year
 from robofast_core.photometry import PortPhotometry, SkyConditions, sky_brightness
+from robofast_core.testing import TEST_OPTICS
 from robofast_core.pointing import PointingModel, altaz_to_hadec, hadec_to_altaz
 from robofast_core.testing.focus_sim import FocusScene
 from robofast_core.testing.starfield import Detector, Frame, SimOptics, Star, render
@@ -161,7 +162,7 @@ class SkyScene:
 
     catalog: Catalog | Stars
     camera: SkyCamera = field(default_factory=SkyCamera)
-    photometry: PortPhotometry = field(default_factory=PortPhotometry)
+    photometry: PortPhotometry = field(default_factory=lambda: PortPhotometry(**TEST_OPTICS))
     site: tuple[float, float] = (31.680407, -110.878977)
     pointing: PointingModel = field(default_factory=PointingModel)
     seeing: float = 1.5

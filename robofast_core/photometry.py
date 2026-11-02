@@ -32,6 +32,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
+from robofast_core.config import require_keys
+
 __all__ = [
     "PHOTON_RATE",
     "PortPhotometry",
@@ -62,11 +64,12 @@ PHOTON_RATE = {
 @dataclass(frozen=True)
 class PortPhotometry:
     """One port's photometry (module doc). ``aperture`` mm; ``obstruction``
-    the central obstruction as a fraction of the diameter."""
+    the central obstruction as a fraction of the diameter: telescope values,
+    required (no defaults: docs/design.md 3.10)."""
 
+    aperture: float = field(kw_only=True)
+    obstruction: float = field(kw_only=True)
     band: str = "G"
-    aperture: float = 700.0
-    obstruction: float = 0.47
     #: Named throughput factors; their product is the efficiency.
     efficiency: Mapping[str, float] = field(default_factory=dict)
     #: Measured zero point (mag giving 1 e-/s), with its error and when.
@@ -93,6 +96,7 @@ class PortPhotometry:
         known = set(cls.__dataclass_fields__)
         if set(d) - known:
             raise ValueError(f"photometry: unknown keys {sorted(set(d) - known)}")
+        require_keys(d, ("aperture", "obstruction"), "photometry")
         out = cls(**d)
         if out.zero_point_unit not in ("e-/s", "ADU/s"):
             raise ValueError("photometry: zero_point_unit is e-/s or ADU/s")

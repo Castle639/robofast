@@ -40,7 +40,7 @@ from typing import Any
 import httpx
 
 from robofast_core.cancel import isolated
-from robofast_core.config import device_address, load_config, telescopes
+from robofast_core.config import altitude_limits, device_address, load_config, telescopes
 from robofast_core.console.hold import read_holds
 
 log = logging.getLogger(__name__)
@@ -86,6 +86,24 @@ def alarm_id(enclosure: str, source: str, text: str) -> str:
     return hashlib.sha256(f"{enclosure}|{source}|{text}".encode()).hexdigest()[:16]
 
 
+def _alt_limits(
+    tels: dict[str, dict[str, Any]], plan: Any, cpath: Path
+) -> dict[str, tuple[float, float]]:
+    """Each telescope's manual-slew altitude limits (ConsoleEnclosure.alt_limits)."""
+    ptel: dict[str, Any] = {}
+    if isinstance(plan, dict) and plan.get("type") == "dispatch":
+        ptel = plan.get("telescopes") or {}
+    out = {}
+    for t, entry in tels.items():
+        lim = altitude_limits(t, entry, str(cpath))
+        p = ptel.get(t)
+        if lim is None and isinstance(p, dict) and "min_alt" in p and "max_alt" in p:
+            lim = (float(p["min_alt"]), float(p["max_alt"]))
+        if lim is not None:
+            out[t] = lim
+    return out
+
+
 @dataclass
 class ConsoleEnclosure:
     """One enclosure as the console sees it: where to read each part."""
@@ -124,6 +142,10 @@ class ConsoleEnclosure:
     site: dict[str, Any] | None = None
     #: The throughput monitor's status file (robofast_core.throughput).
     throughput_status: Path | None = None
+    #: Altitude limits (min_alt, max_alt) per telescope for manual slews:
+    #: the telescope's ``limits`` in the enclosure config, else its entry in
+    #: a dispatch plan. A telescope missing here gets no manual slews.
+    alt_limits: dict[str, tuple[float, float]] = field(default_factory=dict)
 
     @classmethod
     def from_spec(
@@ -152,6 +174,7 @@ class ConsoleEnclosure:
         else:
             plan, pbase = dict(config.get("plan") or {}), cbase
         tels = telescopes(config)
+        alt_limits = _alt_limits(tels, plan, cpath)
         guiders = {}
         for t, entry in tels.items():
             g = entry.get("guider")
@@ -235,6 +258,7 @@ class ConsoleEnclosure:
             throughput_status=None
             if spec.get("throughput") is None
             else _resolve(spec["throughput"], base),
+            alt_limits=alt_limits,
         )
 
 

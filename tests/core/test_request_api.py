@@ -53,8 +53,8 @@ def plan_entry(**kw) -> dict:
         "state": "state.json",
         "too_dropbox": "box",
         "telescopes": {
-            "t1": {"instruments": ["imager"]},
-            "t2": {"instruments": ["imager", "spectrograph"]},
+            "t1": {"instruments": ["imager"], "min_alt": 21.0, "max_alt": 83.0},
+            "t2": {"instruments": ["imager", "spectrograph"], "min_alt": 21.0, "max_alt": 83.0},
         },
         "too_poll": 0.02,
         **kw,
@@ -1072,7 +1072,14 @@ async def test_validate_vets_targets_against_the_catalog(api):
     enc.plan["vetting"] = {
         "catalog": {"cache_dir": str(data), "fetch": False},
         "reject": ["not_brightest"],
-        "ports": {"imager": {"shape": [1024, 1024], "plate_scale": 0.61, "exposure": 1.0}},
+        "ports": {
+            "imager": {
+                "shape": [1024, 1024],
+                "plate_scale": 0.61,
+                "exposure": 1.0,
+                "photometry": {"aperture": 700.0, "obstruction": 0.47},
+            }
+        },
     }
     enc._view = None
     g = group("nu2dra", telescopes=["t1"])

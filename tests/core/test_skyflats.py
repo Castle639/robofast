@@ -12,6 +12,8 @@ import numpy as np
 import pytest
 
 from robofast_core.photometry import PortPhotometry, SkyConditions
+
+from robofast_core.testing import TEST_OPTICS
 from robofast_core.plan import Observation, StaticPlan
 from robofast_core.skyflats import FlatConfig, flat_spot, take_flats, twilight_rate
 from robofast_core.testing.skysim import SkyCamera, SkyScene
@@ -29,7 +31,7 @@ class Twilight:
         cam = SkyCamera((64, 64), 1.0, detector=Detector(shape=(64, 64), gain=1.5, bias=1000))
         from robofast_core.catalog import Stars
 
-        self.sky = SkyScene(Stars.empty(), cam, PortPhotometry(zero_point=24.0, gain=1.5), seed=2)
+        self.sky = SkyScene(Stars.empty(), cam, PortPhotometry(**TEST_OPTICS, zero_point=24.0, gain=1.5), seed=2)
         self.alt0, self.rate, self.overhead, self.t = alt0, rate, overhead, 0.0
         self.log: list[tuple[str, float, float]] = []
 
@@ -150,7 +152,7 @@ async def test_the_sequencer_takes_flats_through_the_filter_wheel(make_rig, tmp_
     sky.catalog = Stars.empty()
     sky.conditions = SkyConditions(sun_alt=-6.9, target_alt=75.0)
     sky.sky_mag = None  # the twilight model, not a fixed sky
-    sky.photometry = PortPhotometry(zero_point=24.0, gain=1.5)
+    sky.photometry = PortPhotometry(**TEST_OPTICS, zero_point=24.0, gain=1.5)
     cam = StarfieldCamera(SimFocuser(position=20000), SkyFocusScene(sky, mount, lambda: when))
     unit.camera = DeviceOwner("t1.camera", lambda: cam, rig.timeline, default_timeout=5)
     from robofast_core.testing.fakes import FakeFilterWheel

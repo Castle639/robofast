@@ -17,6 +17,7 @@ from robofast_core.catalog import Stars, catalog_at, separation
 from robofast_core.guider.acquire import AcqConfig, Acquirer, neighbours_from_catalog
 from robofast_core.guider.base import ROI, Frame
 from robofast_core.photometry import PortPhotometry, SkyConditions
+from robofast_core.testing import TEST_OPTICS
 from robofast_core.testing.skysim import SkyCamera, SkyScene
 from robofast_core.testing.starfield import Detector
 from tests.core.skydata import sky_dir
@@ -25,7 +26,7 @@ WHEN = datetime(2026, 7, 1, 6, 0, tzinfo=UTC)
 FIBER = (948.0, 626.0)
 SCALE = 0.265
 #: The FAU behind a 2 % beamsplitter (its zero point ~4.25 mag above the imager's).
-FAU_PHOT = PortPhotometry(zero_point=20.0, gain=1.5, read_noise=4.0, saturation=65535)
+FAU_PHOT = PortPhotometry(**TEST_OPTICS, zero_point=20.0, gain=1.5, read_noise=4.0, saturation=65535)
 
 
 def fau(catalog, pa=30.0, flip=False):

@@ -42,6 +42,13 @@ from robofast_core.timeline import Timeline
 from tests.core.test_dispatch import group
 from tests.core.test_request_api import make_api  # noqa: F401 (fixture)
 
+
+def tlimits(**kw):
+    """TelescopeLimits with the test suite's generic values (no defaults in core)."""
+    from robofast_core.dispatch import TelescopeLimits
+
+    return TelescopeLimits(**{"instruments": ["imager"], "min_alt": 21.0, "max_alt": 83.0, **kw})
+
 SITE = ROOT / "sites" / "flwo60"
 LAMPS = [
     {"outlet": 2, "name": "ThAr1", "lamp": True, "max_on": 600},
@@ -449,7 +456,7 @@ async def test_dispatch_sends_a_lamp_frame_only_where_the_lamp_is():
 
     from tests.core.test_dispatch import NIGHT, Clock, make
 
-    limits = {"t1": TelescopeLimits(), "t2": TelescopeLimits(lamps=["ThAr1", "Incand"])}
+    limits = {"t1": tlimits(), "t2": tlimits(lamps=["ThAr1", "Incand"])}
     d = make([arc_group()], clock=Clock(NIGHT), limits=limits)
     cands = {c.request.id: c for c in d.evaluate("t1")}
     assert any("has no lamp 'ThAr1'" in r for r in cands["arc-r"].reasons)
@@ -460,15 +467,20 @@ async def test_dispatch_sends_a_lamp_frame_only_where_the_lamp_is():
     assert isinstance(obs, Observation), obs
     assert obs.kind == "arc" and obs.lamp == "ThAr1" and not obs.light
     assert obs.count == 2 and obs.ra_hours is None and not obs.guide
-    assert TelescopeLimits.from_dict({"lamps": ["ThAr1"]}, "t").lamps == ["ThAr1"]
+    assert TelescopeLimits.from_dict(
+        {"instruments": ["tres"], "min_alt": 20, "max_alt": 90, "lamps": ["ThAr1"]}, "t"
+    ).lamps == ["ThAr1"]
 
 
 async def test_the_request_api_refuses_lamps_where_there_are_none(make_api):  # noqa: F811
     api = await make_api()
     r = await api.post("tom", "/requestgroups/", arc_group())
     assert r.status_code == 400, r.text
-    assert NO_LAMPS in r.text  # MINERVA's reason, as before
+    assert NO_LAMPS in r.text and "iodine" not in r.text  # neutral: no site's advice
     enc = api.app.enclosures["aqawan1"]
+    enc.help["no_lamps"] = "observe a B star through the iodine cell instead"
+    r = await api.post("tom", "/requestgroups/", arc_group("arc1"))
+    assert r.status_code == 400 and f"{NO_LAMPS}; observe a B star" in r.text
     enc.planner.limits["t2"].lamps = ["Incand"]
     r = await api.post("tom", "/requestgroups/", arc_group("arc2"))
     assert r.status_code == 400 and "no lamp 'ThAr1'" in r.text and NO_LAMPS not in r.text
