@@ -11,7 +11,6 @@ from __future__ import annotations
 import asyncio
 import json
 import socket
-import threading
 import time
 from pathlib import Path
 
@@ -42,6 +41,7 @@ from robofast_core.devices.pwi_jog import main as jog_main
 from robofast_core.devices.pwi_server import PWIConfig, PWIServer, target_altaz
 from robofast_core.devices.pwi_sim import SIM_LATITUDE, SIM_LONGITUDE, PWISim, pwi2_status
 from robofast_core.testing.checks import wait_until
+from robofast_core.testing.tunnel import FakeTunnel
 
 ROOT = Path(__file__).resolve().parents[2]
 BACKENDS = ("pwi4", "pwi2")
@@ -114,53 +114,48 @@ async def until(fn, timeout: float = 5.0, what: str = "") -> None:
 # -- the gate -------------------------------------------------------------------------------
 
 
-class _Tunnel:
-    """A loopback HTTP listener that is *not* a registered simulator, standing
-    in for ``ssh -L``: it answers a PWI4 status, but robofast must never ask."""
-
-    def __init__(self) -> None:
-        self.sock = socket.socket()
-        self.sock.bind(("127.0.0.1", 0))
-        self.sock.listen()
-        self.port = self.sock.getsockname()[1]
-        self.accepted = 0
-        self._stop = threading.Event()
-        self.sock.settimeout(0.1)
-        self._t = threading.Thread(target=self._run, daemon=True)
-        self._t.start()
-
-    def _run(self) -> None:
-        while not self._stop.is_set():
-            try:
-                conn, _ = self.sock.accept()
-            except OSError:
-                continue
-            self.accepted += 1
-            conn.close()
-
-    def close(self) -> None:
-        self._stop.set()
-        self._t.join(2)
-        self.sock.close()
-
-
 @pytest.mark.parametrize("backend", BACKENDS)
 def test_tunnel_on_loopback_is_refused_without_the_gate(backend):
-    tunnel = _Tunnel()
+    tunnel = FakeTunnel()
     try:
         for allow, hw in ((False, False), (True, False), (False, True)):
             cfg = config(tunnel.port, backend, allow_hardware=allow)
             with pytest.raises(hwgate.HardwareNotAllowed, match="not a simulator"):
                 PWIServer(cfg, hardware=hw)
         time.sleep(0.2)
-        assert tunnel.accepted == 0  # not even a connection
+        assert not tunnel.touched  # not even a connection
         # The gate open (config AND --hardware): allowed, still nothing sent
         # until a client asks.
         server = PWIServer(config(tunnel.port, backend, allow_hardware=True), hardware=True)
         server.stop()
-        assert tunnel.accepted == 0
+        assert not tunnel.touched
     finally:
         tunnel.close()
+
+
+@pytest.mark.parametrize("backend", BACKENDS)
+async def test_tunnel_taking_the_port_later_is_never_sent_anything(make, backend):
+    """The simulator goes away and something else (a tunnel) listens on its
+    port: the server refuses before sending a byte."""
+    sim, server = make(backend)
+    tel = await device(server)
+    await tel.get("Altitude", timeout=T)
+    port = sim.port
+    sim.stop()
+    tunnel = socket.socket()
+    tunnel.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    tunnel.bind(("127.0.0.1", port))
+    tunnel.listen()
+    tunnel.settimeout(0.5)
+    try:
+        await asyncio.sleep(0.2)  # past the status cache
+        with pytest.raises(Exception, match="not a simulator"):
+            await tel.get("Altitude", timeout=T)
+        with pytest.raises(TimeoutError):
+            tunnel.accept()  # never connected to
+    finally:
+        tunnel.close()
+        await tel.aclose()
 
 
 def test_not_loopback_is_refused_without_the_gate():
@@ -172,15 +167,19 @@ def test_not_loopback_is_refused_without_the_gate():
 @pytest.mark.parametrize("name", ["t1_pwi2", "t2_pwi2", "t1_pwi4", "t2_pwi4"])
 def test_remote_configs_need_hardware_flag(name):
     path = ROOT / "sites" / "minerva" / "remote" / f"{name}.json"
-    cfg = PWIConfig.from_dict(json.loads(path.read_text()))
+    d = json.loads(path.read_text())
+    cfg = PWIConfig.from_dict(d)
     assert cfg.allow_hardware and cfg.pwi.host == "127.0.0.1"
     assert cfg.min_alt == 21.0 and cfg.max_alt == 83.0 and cfg.max_jog_deg <= 1.0
-    with pytest.raises(hwgate.HardwareNotAllowed):
-        PWIServer(cfg)  # no --hardware: a tunnel port is never a simulator
+    with FakeTunnel() as tunnel:  # the tunnel, on a free port
+        d["pwi"]["port"] = tunnel.port
+        with pytest.raises(hwgate.HardwareNotAllowed):
+            PWIServer(PWIConfig.from_dict(d))  # no --hardware
+        assert not tunnel.touched
 
 
 def test_jog_refuses_tunnel_without_hardware(tmp_path, capsys):
-    tunnel = _Tunnel()
+    tunnel = FakeTunnel()
     try:
         cfg = json.loads((ROOT / "sites/minerva/remote/t1_pwi2.json").read_text())
         cfg["pwi"]["port"] = tunnel.port
@@ -189,7 +188,7 @@ def test_jog_refuses_tunnel_without_hardware(tmp_path, capsys):
         with pytest.raises(SystemExit) as e:
             jog_main(["--config", str(p), "--log", str(tmp_path / "j.log"), "stop"])
         assert e.value.code == 2
-        assert tunnel.accepted == 0
+        assert not tunnel.touched
         assert "not a simulator" in (tmp_path / "j.log").read_text()
     finally:
         tunnel.close()
@@ -347,6 +346,8 @@ async def test_limit_watch_stops_a_mount_going_low(make, backend):
     with sim.model.lock:
         sim.model.goto_altaz(5.0, 90.0)
     await until(lambda: _async(server.mount.watch_stops >= 1), timeout=8, what="watch stop")
+    # The count goes up just before the stop is sent.
+    await until(lambda: _async(not sim.model.state()["slewing"]), timeout=3, what="stopped")
     st = sim.model.state()
     assert not st["slewing"] and 17.0 < st["alt"] < 19.0
 

@@ -782,9 +782,12 @@ class PWIServer(ThreadingHTTPServer):
 
     def __init__(self, config: PWIConfig, *, hardware: bool = False) -> None:
         allow = hwgate.gate_open(config.allow_hardware, hardware, what="PWI hardware")
+        what = f"{config.backend} PWI"
         self.pwi_ip = hwgate.check_endpoint(
-            config.pwi.host, config.pwi_port, allow_hardware=allow, what=f"{config.backend} PWI"
+            config.pwi.host, config.pwi_port, allow_hardware=allow, what=what, allow_absent=True
         )
+        # Re-verified before every request to PWI (a no-op with the gate open).
+        self._guard = hwgate.SimulatorGuard(self.pwi_ip, config.pwi_port, hardware=allow, what=what)
         if allow:
             log.warning("HARDWARE MODE: %s at %s:%d", config.backend, self.pwi_ip, config.pwi_port)
         host, _, port = config.listen.rpartition(":")
@@ -814,6 +817,7 @@ class PWIServer(ThreadingHTTPServer):
             self.config.pwi_port,
             timeout=p.timeout,
             connect_timeout=p.connect_timeout,
+            guard=self._guard,
         )
         return PWIMount(client, self.config)
 

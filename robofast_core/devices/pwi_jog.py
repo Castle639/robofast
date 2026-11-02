@@ -290,15 +290,16 @@ def _log_path(cfg: PWIConfig, override: str | None) -> Path:
 
 async def run(args: argparse.Namespace, cfg: PWIConfig) -> int:
     allow = hwgate.gate_open(cfg.allow_hardware, args.hardware, what="PWI hardware")
-    ip = hwgate.check_endpoint(
-        cfg.pwi.host, cfg.pwi_port, allow_hardware=allow, what=f"{cfg.backend} PWI"
-    )
+    what = f"{cfg.backend} PWI"
+    ip = hwgate.check_endpoint(cfg.pwi.host, cfg.pwi_port, allow_hardware=allow, what=what)
+    guard = hwgate.SimulatorGuard(ip, cfg.pwi_port, hardware=allow, what=what)
     client = make_client(
         cfg.backend,
         ip,
         cfg.pwi_port,
         timeout=cfg.pwi.timeout,
         connect_timeout=cfg.pwi.connect_timeout,
+        guard=guard,
     )
     log.info(
         "robofast-pwi-jog %s on %s %s:%d (hardware gate %s)",

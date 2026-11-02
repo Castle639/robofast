@@ -31,7 +31,11 @@ This client
   status for both backends (``None`` where a backend does not report a
   value; never a made-up number).
 * The address must pass :func:`robofast_core.hwgate.check_endpoint` (the
-  server and the jog tool do that); the constructor takes the IP literal.
+  server and the jog tool do that); the constructor takes the IP literal
+  and, without the hardware gate, a :class:`~robofast_core.hwgate.SimulatorGuard`
+  that re-verifies the simulator before every request
+  (:class:`PWIGateRefused` otherwise), so a tunnel that takes the port
+  after the simulator has gone is never sent anything.
 """
 
 from __future__ import annotations
@@ -46,6 +50,7 @@ from urllib.parse import urlencode
 
 import httpx
 
+from robofast_core import hwgate
 from robofast_core.owner import DeviceError, DeviceTimeout
 
 log = logging.getLogger(__name__)
@@ -69,6 +74,10 @@ class PWICommandError(PWIError):
 
 class PWIProtocolError(PWIError):
     """A reply that is not a PWI status."""
+
+
+class PWIGateRefused(PWIError):
+    """The endpoint is no longer a verified simulator (the hardware gate)."""
 
 
 # -- the typed status ------------------------------------------------------------------
@@ -368,7 +377,18 @@ class PWIClient:
 
     backend = ""
 
-    def __init__(self, host: str, port: int, *, timeout: float = 5.0, connect_timeout: float = 2.0):
+    def __init__(
+        self,
+        host: str,
+        port: int,
+        *,
+        timeout: float = 5.0,
+        connect_timeout: float = 2.0,
+        guard: hwgate.SimulatorGuard | None = None,
+    ):
+        #: Re-verifies the simulator before every request (None: gate open,
+        #: or a caller that verified it some other way).
+        self.guard = guard
         self.host = host
         self.port = int(port)
         self.timeout = timeout
@@ -386,6 +406,11 @@ class PWIClient:
         await self._http.aclose()
 
     async def _get(self, url: str, timeout: float | None) -> str:
+        if self.guard is not None:
+            try:
+                self.guard.check()
+            except hwgate.HardwareNotAllowed as exc:
+                raise PWIGateRefused(str(exc)) from None
         self.sent.append(url[len(self.base) :])
         log.debug("PWI %s", url)
         try:
