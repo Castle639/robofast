@@ -428,7 +428,7 @@ class PDUServer(ThreadingHTTPServer):
         raise AlpacaException(ACTION_NOT_IMPLEMENTED, f"no action {action!r}")
 
 
-def main(argv: list[str] | None = None) -> None:
+def _main(argv: list[str] | None = None) -> None:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--config", required=True)
     mode = ap.add_mutually_exclusive_group()
@@ -483,6 +483,13 @@ def main(argv: list[str] | None = None) -> None:
         sim_loop.call_soon_threadsafe(sim_loop.stop)
 
 
-if __name__ == "__main__":
+def main(argv: list[str] | None = None) -> None:
+    """The console script (and ``python -m``): :func:`_main`, with a Ctrl-C
+    that comes before the stop handlers are installed (while the config
+    loads or the port opens) an exit, not a traceback."""
     with contextlib.suppress(KeyboardInterrupt):
-        main()
+        _main(argv)
+
+
+if __name__ == "__main__":
+    main()
