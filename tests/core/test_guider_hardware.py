@@ -25,7 +25,7 @@ def test_core_registers_its_backends():
 def test_an_unknown_kind_lists_the_registered_ones():
     with pytest.raises(ValueError, match=r"camera\.kind: guide camera kind 'nope' is not one of"):
         parts(camera={"kind": "nope"})
-    with pytest.raises(ValueError, match="tiptilt.*'kind' is required"):
+    with pytest.raises(ValueError, match=r"tiptilt.*'kind' is required"):
         parts(tiptilt={"port": "x"})
 
 
