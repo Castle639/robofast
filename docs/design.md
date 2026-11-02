@@ -797,14 +797,15 @@ steps 2 and 4).** Two mechanisms, for two kinds of difference:
   ordering of existing operations (calibration stage, lamp on/off, wait,
   expose, ...) is a step list in config, run as an observation kind: e.g.
   the TRES ThAr and flat sets, MINERVA's iodine B-star calibration.
-- *Plug-ins* (step 2): what a site needs that is new code (plan types,
-  observation kinds, instrument handlers such as KiwiSpec, TRES and the
-  imager, weather sources, guider hardware, recovery rungs) registers in a
-  registry keyed by name, and an installed package can add entries through
-  the `robofast.plugins` entry-point group. An observation kind is one
-  handler object that owns its validation, its request mapping and its
-  execution, instead of an if-chain across `plan.KINDS`, the sequencer,
-  the request model and dispatch. The registries that exist already
+- *Plug-ins* (step 2; docs/plugins.md): what a site needs that is new
+  code (plan types, observation kinds, instrument handlers such as
+  KiwiSpec, TRES and the imager, weather sources, guider hardware, recovery
+  rungs) registers in a registry keyed by name, and an installed package
+  can add entries through the `robofast.plugins` entry-point group. An
+  observation kind is one handler object (`robofast_core/kinds.py`) that
+  owns its validation, its request mapping and its execution, instead of
+  the former if-chain across the plan's kind list, the sequencer, the
+  request model and dispatch. The registries that existed already
   (weather `SOURCE_TYPES`, notifier `SINK_TYPES`) move onto the same
   mechanism; Alpaca `Action` names move into config.
 
@@ -820,7 +821,18 @@ The plan, approved by JDE 2026-11-01:
    kinds, instrument handlers, guider hardware, recovery rungs, weather
    sources), KiwiSpec decoupled from the sequencer, Action names in config,
    the legacy importers (MINERVA CSV, TRES catalogs, tres-guider
-   calibration) moved under `robofast_core/sites/<site>/`.
+   calibration) moved under `robofast_core/sites/<site>/`. **2a done**
+   (docs/plugins.md): the plug-in loader (`robofast_core.plugins`: entry
+   points and a config's `plugins`), plan types, observation kinds (one
+   handler per kind: `robofast_core/kinds.py`), instrument types
+   (`robofast_core/instruments.py`: imager, camera_spectrograph, KiwiSpec;
+   each dispatch config declares its instruments' types, `/instruments`
+   and request intake follow them), KiwiSpec decoupled from the sequencer
+   (neutral `SpectrographBusy`/`SpectrographError`, `spectrograph.type`),
+   weather sources (MINERVA's adapters loaded from its weather config) and
+   notifier sinks.
+   2b next: guider hardware, ADC switch ids, Action names, the legacy
+   importers, the console's spectrograph panel.
 3. Enclosure operating modes, (b) above.
 4. Config-defined sequences, (c) above.
 
@@ -829,12 +841,13 @@ plus (after step 2) any plug-ins it needs in its own package.
 
 Site code that is not configuration (a new weather source type for the
 bridge, `robofast_core.weather_sources.SOURCE_TYPES`; a new plan type,
-`robofast_core.plan.KINDS`) will plug in through the Python entry-point
-group `robofast.plugins`: a site package declares entries there in its own
-`pyproject.toml`, and robofast loads them at start-up, so a site never has
-to patch the core. The group name is reserved now; nothing reads it yet,
-and the mechanism (what an entry returns, how a name clash is refused) is
-designed when the first site needs it.
+`robofast_core.plan.PLAN_TYPES`; an observation kind or an instrument type)
+plugs in through the Python entry-point group `robofast.plugins`: a site
+package declares an entry there in its own `pyproject.toml`, pointing at a
+function that registers its entries, and robofast runs it the first time a
+registry is used, so a site never has to patch the core. Code that is not
+installed is listed in the config that needs it (`plugins`). A name
+registered twice is refused, naming both origins (docs/plugins.md).
 
 robofast is packaged from `pyproject.toml` (`pip install .`): only
 `robofast_core` is installed, with a `robofast-*` console command for each
@@ -1070,8 +1083,11 @@ Each step is a CI-tested deliverable.
     measured on real frames, a pointing-model builder.
 
 18. Site configuration, modes and site code (section 3.10): step 1
-    (site values out of core, the guard test) done; registries and
-    plug-ins, operating modes and config-defined sequences next.
+    (site values out of core, the guard test) and step 2a (the plug-in
+    loader; plan, observation-kind, instrument and weather-source
+    registries; KiwiSpec out of the sequencer) done; the rest of step 2
+    (guider hardware, Action names, legacy importers), operating modes and
+    config-defined sequences next.
 
 ## 9. Borrowed ideas
 

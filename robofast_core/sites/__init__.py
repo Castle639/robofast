@@ -1,9 +1,8 @@
-"""Site adapters: parsers for each site's weather pages.
+"""Site code: each site's adapters, as plug-ins (docs/plugins.md).
 
-Importing this package registers every adapter's source types in
-:data:`robofast_core.weather_sources.SOURCE_TYPES`.
+Nothing here is loaded by core. A site's config lists the modules it needs
+in its ``plugins`` (``sites/minerva/weather.yaml``:
+``plugins: ["robofast_core.sites.minerva"]``, MINERVA's weather pages), or
+an installed site package registers them through the ``robofast.plugins``
+entry points (:mod:`robofast_core.plugins`).
 """
-
-from robofast_core.sites import minerva
-
-minerva.register()

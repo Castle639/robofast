@@ -6,12 +6,15 @@
     "calstage: the TRES front end's named positions (tres_frontend.json); lamps: the lamp outlets of the",
     "Pulizzi switch (pulizzi.json). Listing lamps is what allows ARC and LAMP_FLAT requests on this",
     "telescope (docs/pulizzi.md); MINERVA lists none, so they are refused there.",
+    "instruments: 'tres' is a camera_spectrograph (robofast_core/instruments.py): read out by the telescope's",
+    "camera, with EXPOSE, DARK, BIAS and the lamp calibrations; /instruments lists it as a spectrograph.",
     "state is relative to this file here; use an absolute path in production."
   ],
   "type": "dispatch",
   "site": {"latitude": 31.6809, "longitude": -110.8781, "elevation": 2344.0},
   "requests": "requests.example.json",
   "state": "dispatch-state.json",
+  "instruments": {"tres": {"type": "camera_spectrograph"}},
   "telescopes": {
     "tillinghast": {"instruments": ["tres"], "min_alt": 20, "max_alt": 90,
                     "calstage": ["out", "sky", "science", "in", "block_sky", "block_science"],

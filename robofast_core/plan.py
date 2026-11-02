@@ -53,24 +53,15 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Protocol
 
+from robofast_core.instruments import calibration_kinds
+from robofast_core.kinds import OBSERVATION_KINDS
+from robofast_core.plugins import Registry, load_config_plugins
+
 #: How an observation ended, as passed to :meth:`PlanProvider.report`.
 #: "complete": every frame taken. "interrupted": stopped by the enclosure
 #: closing or the sequencer stopping (not its fault; worth retrying).
 #: "failed": a device error or a refused slew.
 OUTCOMES = ("complete", "interrupted", "failed")
-#: What an observation does on its target (:attr:`Observation.kind`).
-KINDS = (
-    "expose",
-    "autofocus",
-    "spectrum",
-    "spectrograph_calibration",
-    "manual",
-    "pointing_model",
-    "rotator_calibration",
-    "sky_flat",
-    "arc",
-    "lamp_flat",
-)
 
 
 @dataclass
@@ -158,55 +149,21 @@ class Observation:
     lamp: str | None = None
 
     def __post_init__(self) -> None:
-        if self.kind not in KINDS:
-            raise ValueError(f"observation {self.name!r}: kind {self.kind!r} not in {KINDS}")
-        if self.kind == "manual" and not self.light:
-            raise ValueError(f"observation {self.name!r}: manual control needs the lease")
-        if (
-            self.kind in ("autofocus", "pointing_model", "rotator_calibration", "sky_flat")
-            and not self.light
-        ):
-            raise ValueError(f"observation {self.name!r}: a {self.kind} needs light")
-        if self.pointing is not None and self.kind != "pointing_model":
-            raise ValueError(f"observation {self.name!r}: 'pointing' is for kind 'pointing_model'")
-        if self.flats is not None and self.kind != "sky_flat":
-            raise ValueError(f"observation {self.name!r}: 'flats' is for kind 'sky_flat'")
-        if self.rotator is not None and self.kind != "rotator_calibration":
+        kind = OBSERVATION_KINDS.get(self.kind)
+        if kind is None:
             raise ValueError(
-                f"observation {self.name!r}: 'rotator' is for kind 'rotator_calibration'"
+                f"observation {self.name!r}: kind {self.kind!r} not in"
+                f" {tuple(OBSERVATION_KINDS.names())}"
             )
-        if self.kind == "spectrum":
-            if not self.light:
-                raise ValueError(f"observation {self.name!r}: a spectrum needs light")
-            self.guide = True
-            spec = dict(self.spectrum or {})
-            spec.setdefault("id", self.name)
-            spec["feed"] = list(spec.get("feed") or [])
-            self.spectrum = spec
-        elif self.spectrum is not None:
-            raise ValueError(f"observation {self.name!r}: 'spectrum' is for kind 'spectrum'")
-        if self.kind in ("arc", "lamp_flat"):
-            if self.light:
-                raise ValueError(
-                    f"observation {self.name!r}: a {self.kind} takes no sky light (light: false)"
-                )
-            if not self.lamp:
-                raise ValueError(f"observation {self.name!r}: a {self.kind} names its lamp")
-            if self.guide:
-                raise ValueError(f"observation {self.name!r}: a {self.kind} is not guided")
-        elif self.lamp is not None:
-            raise ValueError(f"observation {self.name!r}: 'lamp' is for kinds 'arc', 'lamp_flat'")
-        if self.kind == "spectrograph_calibration":
-            if self.light:
-                raise ValueError(
-                    f"observation {self.name!r}: spectrograph calibrations take no light"
-                    " (light: false)"
-                )
-            if not self.calibration:
-                raise ValueError(f"observation {self.name!r}: no calibration frames")
-        elif self.calibration is not None:
+        kind.validate(self)
+        for f in _KIND_FIELDS:
+            if getattr(self, f) is None or f in kind.fields:
+                continue
+            owners = [k.name for k in OBSERVATION_KINDS.values() if f in k.fields]
+            kinds = ", ".join(repr(k) for k in owners)
             raise ValueError(
-                f"observation {self.name!r}: 'calibration' is for kind 'spectrograph_calibration'"
+                f"observation {self.name!r}: {f!r} is for kind{'s' if len(owners) > 1 else ''}"
+                f" {kinds}"
             )
 
     @classmethod
@@ -216,6 +173,12 @@ class Observation:
         if unknown:
             raise ValueError(f"observation {d.get('name')!r}: unknown keys {sorted(unknown)}")
         return cls(**d)
+
+
+#: Observation fields that belong to one kind or a few (each kind's
+#: :attr:`~robofast_core.kinds.ObservationKind.fields`); another kind
+#: refuses them. ``autofocus`` is advisory and accepted on any kind.
+_KIND_FIELDS = ("pointing", "flats", "rotator", "spectrum", "lamp", "calibration")
 
 
 @dataclass
@@ -319,10 +282,12 @@ class CalibrationPlan(_Queues):
     calibrations, then nothing.
 
     ``darks`` is a list of ``[exptime, count]``. ``spectrograph`` is a list
-    of spectrograph calibration frames, ``{"kind": "thar"|"slitflat"|
-    "fiberflat"|"bias"|"dark", "exptime": s, "n": N}`` (the spectrograph
-    service refuses kinds it cannot take: MINERVA's KiwiSpec takes only
-    biases and darks here, docs/kiwispec.md section 4), taken as one
+    of spectrograph calibration frames, ``{"kind": ..., "exptime": s, "n":
+    N}``, each kind one a registered spectrograph type takes (its
+    :attr:`~robofast_core.instruments.InstrumentType.calibration_kinds`;
+    the spectrograph service refuses kinds it cannot take: MINERVA's
+    KiwiSpec takes only biases and darks here, docs/kiwispec.md section 4),
+    taken as one
     ``spectrograph_calibration`` observation by ``spectrograph_telescope``
     (default: the first telescope; the telescope itself does nothing).
     Every frame is dark (``light=False``), so the sequencer takes them in its
@@ -350,9 +315,13 @@ class CalibrationPlan(_Queues):
             tel = spectrograph_telescope or next(iter(telescopes), None)
             if tel not in queues:
                 raise ValueError(f"calibration plan: unknown spectrograph_telescope {tel!r}")
+            kinds = calibration_kinds()
             for f in spec:
-                if f.get("kind") not in ("thar", "slitflat", "fiberflat", "bias", "dark"):
-                    raise ValueError(f"calibration plan: spectrograph frame {f!r}: bad kind")
+                if f.get("kind") not in kinds:
+                    raise ValueError(
+                        f"calibration plan: spectrograph frame {f!r}: bad kind"
+                        f" (the spectrograph types take {list(kinds)})"
+                    )
             queues[tel].insert(
                 0,
                 Observation(
@@ -400,13 +369,69 @@ def as_plan(plan: PlanProvider | Callable[..., Observation | None]) -> PlanProvi
     return CallablePlan(plan)  # type: ignore[arg-type]
 
 
+#: ``factory(config, telescopes, *, base, clock) -> PlanProvider``: builds
+#: a plan of one type from its config entry (less ``type``, ``plugins``
+#: and ``_note``).
+PlanFactory = Callable[..., PlanProvider]
+#: Every plan type, by name (docs/plugins.md).
+PLAN_TYPES: Registry[PlanFactory] = Registry("plan type")
+
+
+def _static(
+    config: dict[str, Any],
+    telescopes: Sequence[str],
+    *,
+    base: Path | None = None,
+    clock: Callable[[], datetime] | None = None,
+) -> PlanProvider:
+    if "file" in config:
+        path = Path(config.pop("file"))
+        if base is not None and not path.is_absolute():
+            path = base / path
+        targets = json.loads(path.read_text())
+    else:
+        targets = config.pop("targets")
+    if config:
+        raise ValueError(f"static plan: unknown keys {sorted(config)}")
+    return StaticPlan(targets, telescopes)
+
+
+def _calibration(
+    config: dict[str, Any],
+    telescopes: Sequence[str],
+    *,
+    base: Path | None = None,
+    clock: Callable[[], datetime] | None = None,
+) -> PlanProvider:
+    return CalibrationPlan(telescopes, **config)
+
+
+def _dispatch(
+    config: dict[str, Any],
+    telescopes: Sequence[str],
+    *,
+    base: Path | None = None,
+    clock: Callable[[], datetime] | None = None,
+) -> PlanProvider:
+    from robofast_core.dispatch import dispatch_from_config  # imports astropy
+
+    return dispatch_from_config(config, telescopes, base=base, clock=clock)
+
+
+PLAN_TYPES.register("static", _static)
+PLAN_TYPES.register("calibration", _calibration)
+PLAN_TYPES.register("dispatch", _dispatch)
+
+
 def plan_from_config(
     config: dict[str, Any],
     telescopes: Sequence[str],
     base: Path | None = None,
     clock: Callable[[], datetime] | None = None,
 ) -> PlanProvider:
-    """Build a plan from a config entry.
+    """Build a plan from a config entry: ``type`` names a plan type of
+    :data:`PLAN_TYPES` (``plugins``, a list of plug-in modules, are loaded
+    first: docs/plugins.md). The built-in types:
 
     * ``{"type": "static", "targets": [...]}``, or ``"file": "targets.json"``
       (a JSON list of targets, relative to ``base``). A target is an
@@ -418,22 +443,8 @@ def plan_from_config(
     """
     config = dict(config)
     config.pop("_note", None)
+    load_config_plugins(config, "plan.plugins")
+    config.pop("plugins", None)
     kind = config.pop("type", None)
-    if kind == "static":
-        if "file" in config:
-            path = Path(config.pop("file"))
-            if base is not None and not path.is_absolute():
-                path = base / path
-            targets = json.loads(path.read_text())
-        else:
-            targets = config.pop("targets")
-        if config:
-            raise ValueError(f"static plan: unknown keys {sorted(config)}")
-        return StaticPlan(targets, telescopes)
-    if kind == "calibration":
-        return CalibrationPlan(telescopes, **config)
-    if kind == "dispatch":
-        from robofast_core.dispatch import dispatch_from_config  # imports astropy
-
-        return dispatch_from_config(config, telescopes, base=base, clock=clock)
-    raise ValueError(f"plan type {kind!r}: expected 'static', 'calibration' or 'dispatch'")
+    factory = PLAN_TYPES.lookup(kind, "plan.type")
+    return factory(config, telescopes, base=base, clock=clock)

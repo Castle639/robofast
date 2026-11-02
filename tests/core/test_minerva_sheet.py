@@ -115,6 +115,7 @@ def test_bstars_share_one_visit_a_night():
         groups,
         ms_site(),
         {"t1": TelescopeLimits(instruments=["spectrograph"], min_alt=21, max_alt=83)},
+        instruments={"spectrograph": {"type": "kiwispec"}},
     )
     assert all(r.cadence.pool == "bstars" for r in d.requests.values())
 

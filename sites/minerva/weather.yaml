@@ -22,6 +22,11 @@
 # "would close", IsSafe unaffected) until validated (enforce_rain; the 998
 # sentinel: JDE 2026-10-31).
 
+# The site's own source types (minerva.ridge, minerva.sky_temps): a plug-in
+# shipped with robofast, loaded because it is listed here (docs/plugins.md).
+plugins:
+  - robofast_core.sites.minerva
+
 site:
   name: minerva
   # legacy config/site_mtHopkins.ini

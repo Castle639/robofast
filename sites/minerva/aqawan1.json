@@ -60,8 +60,8 @@
       "t2": {"plate_scale": 0.679, "position_angle": 0.0, "flip": false, "aperture": 700.0, "focal_length": 4560.0}
     }
   },
-  "spectrograph": {"url": "http://127.0.0.1:8130", "telescopes": {"t1": "T1", "t2": "T2"},
-                   "instrument": "kiwispec"},
+  "spectrograph": {"type": "kiwispec", "url": "http://127.0.0.1:8130",
+                   "telescopes": {"t1": "T1", "t2": "T2"}, "instrument": "kiwispec"},
   "help": {
     "no_lamps": "MINERVA's KiwiSpec has no ThAr or flat lamp and no way to switch to one (it is iodine only): observe a rapidly rotating B star through the iodine cell instead (SPECTRUM with extra_params.iodine true; docs/kiwispec.md)"
   },

@@ -243,8 +243,8 @@ def test_types_dark_bias_spectrum_and_autofocus():
     assert RequestGroup.from_dict(g.to_dict()).to_dict() == g.to_dict()
     assert "extra_params" not in g.to_dict()["requests"][0]["configurations"][0]
     c["type"] = "SPECTRUM"
-    with pytest.raises(ValueError, match="instrument_type is 'spectrograph'"):
-        RequestGroup.from_dict(d)
+    # Which instrument takes a SPECTRUM is the site's (its dispatch config's
+    # instrument types): the request API and the scheduler check it.
     c["instrument_type"] = "spectrograph"
     with pytest.raises(ValueError, match="no filter or port"):
         RequestGroup.from_dict(d)
@@ -253,7 +253,7 @@ def test_types_dark_bias_spectrum_and_autofocus():
     ]
     g = RequestGroup.from_dict(d)
     cfg = g.requests[0].configurations[0]
-    assert cfg.guide and cfg.instrument_configs[0].iodine is True
+    assert cfg.guide and cfg.instrument_configs[0].params == {"iodine": True, "target_counts": 1e6}
     assert g.to_dict()["requests"][0]["configurations"][0]["guiding_config"] == {"mode": "ON"}
     c["guiding_config"] = {"mode": "OFF"}
     with pytest.raises(ValueError, match="always guided"):
@@ -399,11 +399,15 @@ def test_iodine_calibration_examples():
     for g in bstars:
         [r] = g.requests
         [c] = r.configurations
-        assert c.type == "SPECTRUM" and all(ic.iodine is True for ic in c.instrument_configs)
+        assert c.type == "SPECTRUM" and all(
+            ic.params.get("iodine") is True for ic in c.instrument_configs
+        )
         assert r.cadence is not None and r.cadence.max_per_night == 1
         assert r.cadence.pool == "bstars"  # one of them a night, whichever
     for g in templates:
         [r] = g.requests
         [c] = r.configurations
-        assert c.type == "SPECTRUM" and all(ic.iodine is False for ic in c.instrument_configs)
+        assert c.type == "SPECTRUM" and all(
+            ic.params.get("iodine") is False for ic in c.instrument_configs
+        )
         assert r.cadence is None

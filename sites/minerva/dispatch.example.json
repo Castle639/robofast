@@ -8,6 +8,8 @@
     "telescope_N.ini HORIZON (21). No hour-angle limits: legacy had none (min_ha/max_ha default to -12/+12 h).",
     "filters: imager_t1.ini and imager_t2.ini [FILTERS] (legacy names; the Alpaca wheel's Names must match).",
     "ports are not listed: no telescope has a port_action yet (instruments.json has the M3 port numbers).",
+    "instruments: each instrument name's type (robofast_core/instruments.py): 'spectrograph' is KiwiSpec",
+    "(SPECTRUM requests, with extra_params iodine and target_counts); 'imager' is its own type.",
     "state and too_dropbox are relative to this file here; use absolute paths (e.g. under",
     "/var/lib/robofast) in production. A ToO is a JSON request group with a 'too' entry dropped",
     "into too_dropbox (see too.example.json)."
@@ -17,6 +19,7 @@
   "requests": "requests.example.json",
   "state": "dispatch-state.json",
   "too_dropbox": "too-dropbox",
+  "instruments": {"spectrograph": {"type": "kiwispec"}},
   "telescopes": {
     "t1": {"instruments": ["spectrograph", "imager"], "min_alt": 21, "max_alt": 83,
            "filters": ["air", "V", "R", "gp", "rp", "zp", "ip"]},

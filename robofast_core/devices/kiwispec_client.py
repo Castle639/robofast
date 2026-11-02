@@ -42,6 +42,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from robofast_core.cancel import stop_task
+from robofast_core.instruments import SpectrographBusy, SpectrographError
 
 log = logging.getLogger(__name__)
 
@@ -57,8 +58,10 @@ HEADER_CHUNK = 800
 STAGE_MIN_MM, STAGE_MAX_MM = 0.0, 150.0
 
 
-class KiwiSpecError(Exception):
-    """The spectrograph PC (or the transport to it) reported an error."""
+class KiwiSpecError(SpectrographError):
+    """The spectrograph PC (or the transport to it) reported an error. A
+    :class:`~robofast_core.instruments.SpectrographError`, so the sequencer
+    handles it without knowing KiwiSpec."""
 
 
 class KiwiSpecTimeout(KiwiSpecError):
@@ -82,7 +85,7 @@ class KiwiSpecRefused(KiwiSpecError):
     """Refused before anything was sent (not allowlisted, bad argument)."""
 
 
-class KiwiSpecBusy(KiwiSpecError):
+class KiwiSpecBusy(KiwiSpecError, SpectrographBusy):
     """The spectrograph service is busy with another client's job and the
     request's bounded wait in its queue ran out (docs/kiwispec.md, "Sharing
     the spectrograph"): nothing is wrong with the spectrograph."""

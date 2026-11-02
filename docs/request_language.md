@@ -64,7 +64,7 @@ acted on.
 |---|---|---|---|
 | `id` | string | | optional on submit |
 | `type` | `EXPOSE`, `DARK`, `BIAS`, `AUTO_FOCUS`, `SPECTRUM`, `POINTING_MODEL`, `ROTATOR_CALIBRATION`, `SKY_FLAT`, `ARC`, `LAMP_FLAT` | | DARK/BIAS: every frame shutter closed. `SPECTRUM` is a fiber spectrum fed by every free telescope of the request (docs/rv_night.md). `POINTING_MODEL` (robofast's) is a pointing run: `exposure_count` grid points over the sky, the target only gates when it is schedulable (docs/pointing_model.md). `ROTATOR_CALIBRATION` (robofast's) measures the port's PA and parity on the target's field (docs/rotcal.md). `SKY_FLAT` (robofast's): twilight flats, one instrument config per filter (docs/skyflats.md). `ARC` and `LAMP_FLAT`: spectrograph lamp frames (ThAr, lamp flat), each instrument config naming its lamp in `optical_elements.lamp`; no sky light (never guided, no Sun or altitude limit, the target is a label); only for telescopes whose dispatch limits list the lamp in `lamps` (the FLWO 60-inch, docs/pulizzi.md). Refused for an enclosure without lamps, with the reason and the enclosure config's `help.no_lamps` advice, if any (MINERVA's KiwiSpec is iodine only: docs/kiwispec.md, section 4); a lamp in `extra_params` is refused everywhere |
-| `instrument_type` | e.g. `imager`, `spectrograph` | `instrument` | the telescope must list it. Previously `instrument` |
+| `instrument_type` | e.g. `imager`, `spectrograph` | `instrument` | the telescope must list it, and its type (the dispatch config's `instruments`; docs/plugins.md) take the configuration's `type` and `extra_params`; absent: whichever of the telescope's instruments does. Previously `instrument` |
 | `target` | below | | |
 | `constraints` | below | | |
 | `guiding_config.mode` | `ON`, `OFF` | `guide` | ON: guide on the target. A SPECTRUM is always guided. `optional`, `exposure_time`, ... accepted, not used. Previously `guide` |
@@ -99,8 +99,8 @@ acted on.
 | `optical_elements.lamp` | name | `lamp` | `ARC` and `LAMP_FLAT` only (required there): the calibration lamp, by its name on the telescope's lamp switch (the FLWO 60-inch: `ThAr1`, `ThAr2`, `Incand`, `Incand2`; docs/pulizzi.md); a hard constraint on the telescope's `lamps` limits |
 | `mode` | readout mode code | `mode` | kept |
 | `extra_params.port`* | M3 port name | `port` | |
-| `extra_params.iodine`* | bool | | SPECTRUM only: the iodine cell in (true; science, B stars) or out (false; templates). Absent: the spectrograph service's `default_iodine` (`in`) |
-| `extra_params.target_counts`* | counts | | SPECTRUM only: exposure-meter termination (`exposure_time` the maximum) |
+| `extra_params.iodine`* | bool | `params` | KiwiSpec's (its instrument type declares it; docs/plugins.md), SPECTRUM only: the iodine cell in (true; science, B stars) or out (false; templates). Absent: the spectrograph service's `default_iodine` (`in`) |
+| `extra_params.target_counts`* | counts | `params` | KiwiSpec's, SPECTRUM only: exposure-meter termination (`exposure_time` the maximum) |
 | `extra_params.light`* | bool | `light` | per-frame shutter, where it differs from the type's |
 | `rotator_mode`, `rois` | | | refused unless empty |
 

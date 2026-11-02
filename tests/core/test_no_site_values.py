@@ -71,24 +71,20 @@ EXEMPT_DIRS = ("sites/", "testing/", "devices/")
 #: removed by a later step of the site-configuration plan (docs/design.md
 #: 3.10) and is tagged with it; delete the entry with the code it covers.
 ALLOWLIST: dict[tuple[str, str], tuple[int, str]] = {
-    # -- step 2: instrument handlers (KiwiSpec, TRES, imager) behind a registry.
-    ("sequencer.py", "kiwispec"): (8, "step 2: imports and catches KiwiSpecBusy/KiwiSpecError"),
-    ("sequencer_service.py", "kiwispec"): (3, "step 2: always builds a KiwiSpecRemote"),
-    ("request_model.py", "iodine"): (15, "step 2: extra_params.iodine in the core schema"),
-    ("sequencer.py", "iodine"): (7, "step 2: the KiwiSpec iodine stage in the sequencer"),
-    ("dispatch.py", "iodine"): (2, "step 2: the iodine flag in visit bookkeeping"),
-    ("console/page.py", "iodine"): (1, "step 2: the console's KiwiSpec panel"),
-    ("request_model.py", '"spectrograph"'): (4, "step 2: instrument class keyed on its name"),
-    ("request_api.py", '"spectrograph"'): (1, "step 2: instrument class keyed on its name"),
-    ("imaging.py", "ADC switch id"): (2, "step 2: the ADC server's switch ids in core"),
-    ("sequencer.py", "ADC switch id"): (5, "step 2: the ADC server's switch ids in core"),
-    # -- step 2: guider hardware registry.
-    ("guider/loop.py", "kiwispec"): (1, "step 2: the KiwiSpec backlight in the guide loop"),
-    ("guider/service.py", "kiwispec"): (4, "step 2: the KiwiSpec backlight in the guider"),
-    # -- step 2: legacy importers move under robofast_core/sites/<site>/.
-    ("catalogs/__init__.py", "tres"): (1, "step 2: the TRES catalog format importer"),
-    ("catalogs/__main__.py", "tres"): (7, "step 2: the TRES catalog format importer"),
-    ("guider/calibration.py", "tres"): (2, "step 2: the tres-guider calibration importer"),
+    # -- step 2b: the console's spectrograph panel, described by its handler.
+    ("console/page.py", "iodine"): (1, "step 2b: the console's KiwiSpec panel"),
+    # -- step 2b: the MINERVA legacy CSV importer moves under sites/minerva.
+    ("request_model.py", '"spectrograph"'): (2, "step 2b: from_legacy_csv's default instrument"),
+    # -- step 2b: ADC switch ids from config or the ADC server.
+    ("imaging.py", "ADC switch id"): (2, "step 2b: the ADC server's switch ids in core"),
+    ("sequencer.py", "ADC switch id"): (5, "step 2b: the ADC server's switch ids in core"),
+    # -- step 2b: guider hardware registry.
+    ("guider/loop.py", "kiwispec"): (1, "step 2b: the KiwiSpec backlight in the guide loop"),
+    ("guider/service.py", "kiwispec"): (4, "step 2b: the KiwiSpec backlight in the guider"),
+    # -- step 2b: legacy importers move under robofast_core/sites/<site>/.
+    ("catalogs/__init__.py", "tres"): (1, "step 2b: the TRES catalog format importer"),
+    ("catalogs/__main__.py", "tres"): (7, "step 2b: the TRES catalog format importer"),
+    ("guider/calibration.py", "tres"): (2, "step 2b: the tres-guider calibration importer"),
 }
 
 

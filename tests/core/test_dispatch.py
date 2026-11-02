@@ -296,12 +296,51 @@ def test_instrument_and_telescope_compatibility():
             "t1": tlimits(instruments=["imager"]),
             "t2": tlimits(instruments=["imager", "spectrograph"]),
         },
+        instruments={"spectrograph": {"type": "camera_spectrograph"}},
     )
     assert "t1 has no spectrograph" in _reasons(d, "spec-r")
     assert "not for t1" in _reasons(d, "t2only-r")
     assert by_id(d, "t2")["spec-r"].ok and by_id(d, "t2")["t2only-r"].ok
     with pytest.raises(ValueError, match="unknown telescopes"):
         make([group("x", telescopes=["t9"])])
+
+
+def test_instrument_types_decide_what_an_instrument_takes():
+    """An instrument's type (its dispatch config declaration) says which
+    configuration types and instrument parameters it takes; with no
+    instrument_type, whichever of the telescope's instruments takes it."""
+    spectrum = group("rv", instrument="spectrograph")
+    sc = spectrum["requests"][0]["configurations"][0]
+    sc["type"] = "SPECTRUM"
+    sc["instrument_configs"] = [{"exposure_time": 60, "extra_params": {"iodine": True}}]
+    dark = group("dark", instrument="spectrograph")
+    dark["requests"][0]["configurations"][0]["type"] = "DARK"
+    anyinst = group("any")
+    del anyinst["requests"][0]["configurations"][0]["instrument_type"]
+    limits = {
+        "t1": tlimits(instruments=["imager", "spectrograph"]),
+        "t2": tlimits(instruments=["imager"]),
+    }
+    d = make(
+        [spectrum, dark, anyinst], limits=limits, instruments={"spectrograph": {"type": "kiwispec"}}
+    )
+    assert d.instrument_types["spectrograph"].name == "kiwispec"
+    assert d.instrument_types["imager"].name == "imager"
+    assert by_id(d, "t1")["rv-r"].ok
+    assert "t2 has no spectrograph" in _reasons(d, "rv-r", "t2")
+    # KiwiSpec takes SPECTRUM only (before, any type named any instrument).
+    assert "t1's spectrograph (kiwispec) takes no DARK" in _reasons(d, "dark-r")
+    assert by_id(d, "t1")["any-r"].ok and by_id(d, "t2")["any-r"].ok
+    obs = d._make_observation(d._new_visit(d.requests["rv-r"], NIGHT, 0.0))
+    assert obs.spectrum["params"] == {"iodine": "in"}  # as KiwiSpec takes it
+    # An imager does not take KiwiSpec's parameters.
+    d = make([spectrum], limits=limits, instruments={"spectrograph": {"type": "imager"}})
+    assert "t1's spectrograph (imager) takes no SPECTRUM" in _reasons(d, "rv-r")
+    assert "takes no extra_params ['iodine']" in _reasons(d, "rv-r")
+    with pytest.raises(ValueError, match="instrument 'spectrograph' has no type"):
+        make([], limits=limits)
+    with pytest.raises(ValueError, match="instrument type 'nope' is not one of"):
+        make([], limits=limits, instruments={"spectrograph": {"type": "nope"}})
 
 
 async def test_cadence_and_nightly_max():

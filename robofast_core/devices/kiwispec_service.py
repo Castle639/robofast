@@ -1325,6 +1325,10 @@ class KiwiSpecRemote:
     """The service's API, for the sequencer and tools. :meth:`abort` is the
     cleanup hook: bounded, and it never raises."""
 
+    #: Keys of a frame's result the sequencer copies to the top of each
+    #: spectrum sidecar record (:class:`~robofast_core.sequencer.SpectrographHook`).
+    record_keys: tuple[str, ...] = ("iodine",)
+
     def __init__(
         self,
         url: str,

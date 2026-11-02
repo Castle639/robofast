@@ -19,6 +19,7 @@ from robofast_core.spectra import SpectrumRecorder
 
 from .test_imaging import attach, run_night
 from .test_rv_spectra import (
+    KIWISPEC,
     MTHOPKINS,
     FakeGuider,
     FakeSpectrograph,
@@ -127,7 +128,7 @@ async def test_a_held_telescope_is_not_reserved_to_feed_a_spectrum(tmp_path):
     from .test_dispatch import Clock, make
 
     rec = PlanRecord(tmp_path, longitude=MTHOPKINS.longitude)
-    d = make([_rv_group("rv")], clock=Clock(), limits=_limits(), record=rec)
+    d = make([_rv_group("rv")], clock=Clock(), limits=_limits(), instruments=KIWISPEC, record=rec)
     # The console's hold reaches the scheduler through the plan wrappers.
     hold = OperatorHold(AutofocusTriggers(d), ["t1", "t2"], tmp_path / "control")
     hold.apply({"action": "pause", "telescopes": ["t2"], "operator": "obs", "reason": "FAU"})
@@ -155,7 +156,11 @@ async def test_no_spectra_while_the_spectrograph_is_down_imaging_goes_on(tmp_pat
 
     rec = PlanRecord(tmp_path, longitude=MTHOPKINS.longitude)
     d = make(
-        [_rv_group("rv", priority=5.0), _img_group()], clock=Clock(), limits=_limits(), record=rec
+        [_rv_group("rv", priority=5.0), _img_group()],
+        clock=Clock(),
+        limits=_limits(),
+        instruments=KIWISPEC,
+        record=rec,
     )
     d.set_spectrograph_available(False, "3 faults in a row")
     assert d.spectrograph_down == "3 faults in a row"

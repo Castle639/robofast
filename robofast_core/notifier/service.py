@@ -47,10 +47,20 @@ from robofast_core.console.aggregate import Aggregator
 from robofast_core.notifier.core import Notification, Notifier, Settings, SinkWorker
 from robofast_core.notifier.sinks import SINK_TYPES
 from robofast_core.notifier.sources import AcksFile, AggregatorSource, ConsoleHealth
+from robofast_core.plugins import load_config_plugins
 
 log = logging.getLogger(__name__)
 
-TOP_KEYS = {"_note", "console", "enclosures", "acks", "console_url", "status_timeout", "state"}
+TOP_KEYS = {
+    "_note",
+    "console",
+    "enclosures",
+    "acks",
+    "console_url",
+    "status_timeout",
+    "state",
+    "plugins",
+}
 WORKER_KEYS = {"min_level", "on", "rate", "timeout", "retries", "retry_base", "retry_max"}
 WORKER_KEYS |= {"queue_size", "type", "deliver_timeout"}
 PATH_KEYS = ("credentials_file", "url_file")
@@ -119,6 +129,7 @@ def build(
     bad = set(raw) - TOP_KEYS - settings_keys - {"sinks"}
     if bad:
         raise ValueError(f"{path}: unknown keys {sorted(bad)}")
+    load_config_plugins(raw, f"{path}: plugins")  # a site's sink types (docs/plugins.md)
     from robofast_core.console.server import build_enclosures, load_console_config
 
     acks = raw.get("acks")

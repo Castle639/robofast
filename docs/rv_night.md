@@ -22,15 +22,24 @@ one target observed with the enclosure's spectrograph:
 (The OCS request language, `docs/request_language.md`; `ra` and `dec` in
 degrees.)
 
-* Its `instrument_type` is `spectrograph` (the default for `SPECTRUM`), and
-  the telescopes that may feed it are the request's (`location.telescope`,
-  or several in `extra_params.telescopes`), or every telescope whose limits
-  list the `spectrograph` instrument.
+* Its `instrument_type` names an instrument whose type takes `SPECTRUM`:
+  MINERVA's dispatch config declares its `spectrograph` as a `kiwispec`
+  (`"instruments": {"spectrograph": {"type": "kiwispec"}}`;
+  `robofast_core/instruments.py`, docs/plugins.md). Without an
+  `instrument_type`, whichever of a telescope's instruments takes it. The
+  telescopes that may feed it are the request's (`location.telescope`, or
+  several in `extra_params.telescopes`), or every telescope with such an
+  instrument.
 * It is always guided (`guiding_config.mode` `ON`; `OFF` is refused). Its
-  instrument configs are light, with no `filter` or `port`; robofast's
-  `extra_params.iodine` (true/false; absent: the spectrograph service's
-  default) and `extra_params.target_counts` (exposure-meter termination,
-  `exposure_time` then being the maximum) are only allowed here.
+  instrument configs are light, with no `filter` or `port`. KiwiSpec's own
+  `extra_params` (declared by its instrument type,
+  `robofast_core/devices/kiwispec_instrument.py`): `iodine` (true/false;
+  absent: the spectrograph service's default) and `target_counts`
+  (exposure-meter termination, `exposure_time` then being the maximum),
+  only for `SPECTRUM` and only on an instrument whose type declares them.
+  The scheduler passes them to the observation as `spectrum["params"]`, as
+  the spectrograph takes them (`iodine`: `"in"`/`"out"`), and the
+  sequencer sends them with each frame.
 * The target's `proper_motion_ra` (mu_alpha cos(dec)) and
   `proper_motion_dec` (mas/yr), `epoch` (Julian year, default 2000),
   `parallax` (mas) and `extra_params.radial_velocity` (km/s) are optional.

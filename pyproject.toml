@@ -65,9 +65,11 @@ robofast-pdu-server = "robofast_core.devices.pdu_server:main"
 robofast-pulizzi-server = "robofast_core.devices.pulizzi_server:main"
 robofast-adc-server = "robofast_core.devices.adc_server:main"
 
-# Entry-point group `robofast.plugins`: reserved for site packages to register
-# weather source types and plan types (docs/design.md 3.10). Nothing reads it
-# yet.
+# Entry-point group `robofast.plugins`: a site package's plug-ins (plan types,
+# observation kinds, instrument types, weather sources), each a function that
+# registers its entries; robofast_core.plugins runs them (docs/plugins.md).
+# robofast declares none here: core's own entries register without it, so
+# they also work uninstalled.
 
 [tool.setuptools.packages.find]
 include = ["robofast_core*"]

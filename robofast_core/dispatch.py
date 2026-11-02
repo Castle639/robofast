@@ -179,10 +179,12 @@ from pathlib import Path
 from typing import Any, ClassVar
 
 from robofast_core import sky
+from robofast_core.instruments import InstrumentType, instrument_param, resolve
+from robofast_core.kinds import RequestMapping
 from robofast_core.plan import Idle, Observation
 from robofast_core.plan_record import PlanRecord
+from robofast_core.plugins import load_config_plugins
 from robofast_core.request_model import (
-    LAMP_TYPES,
     Configuration,
     Request,
     RequestGroup,
@@ -368,11 +370,20 @@ class DispatchScheduler:
         allow_iers_download: bool = False,
         record: PlanRecord | None = None,
         vetter: Any = None,
+        instruments: dict[str, Any] | None = None,
     ) -> None:
         if not allow_iers_download:
             sky.offline_iers()
         self.site = site
         self.limits = dict(telescopes)
+        #: Each instrument name the telescopes list -> its type
+        #: (:mod:`robofast_core.instruments`): ``instruments`` declares
+        #: ``{name: {"type": ...}}``; an undeclared name is its own type.
+        self.instrument_types: dict[str, InstrumentType] = resolve(
+            instruments or {},
+            dict.fromkeys(n for lim in self.limits.values() for n in lim.instruments),
+            "dispatch plan: instruments",
+        )
         self.config = config or DispatchConfig()
         self.clock = clock or (lambda: datetime.now(UTC))
         self.state_path = Path(state) if state is not None else None
@@ -1006,6 +1017,44 @@ class DispatchScheduler:
                 return tel
         return None
 
+    def instrument_for(self, limits: TelescopeLimits, c: Configuration) -> str | None:
+        """The instrument of a telescope (its ``limits``) that takes ``c``:
+        the one ``c`` names, or else the first whose type takes ``c``'s type
+        and its instrument parameters; None if there is none."""
+        names = [c.instrument] if c.instrument is not None else limits.instruments
+        for name in names:
+            t = self.instrument_types.get(name)
+            if name in limits.instruments and t is not None and self._takes(t, c):
+                return name
+        return None
+
+    @staticmethod
+    def _takes(t: InstrumentType, c: Configuration) -> bool:
+        return c.type in t.accepts and all(
+            k in t.params for ic in c.instrument_configs for k in ic.params
+        )
+
+    def _instrument_reasons(
+        self, telescope: str, limits: TelescopeLimits, c: Configuration, reasons: list[str]
+    ) -> None:
+        """Why no instrument of ``telescope`` takes ``c`` (nothing if one does)."""
+        if self.instrument_for(limits, c) is not None:
+            return
+        if c.instrument is None:
+            reasons.append(f"{telescope} has no instrument for this {c.type}")
+            return
+        if c.instrument not in limits.instruments:
+            reasons.append(f"{telescope} has no {c.instrument}")
+            return
+        t = self.instrument_types[c.instrument]
+        if c.type not in t.accepts:
+            reasons.append(f"{telescope}'s {c.instrument} ({t.name}) takes no {c.type}")
+        params = sorted({k for ic in c.instrument_configs for k in ic.params} - set(t.params))
+        if params:
+            reasons.append(
+                f"{telescope}'s {c.instrument} ({t.name}) takes no extra_params {params}"
+            )
+
     def _precheck(
         self,
         telescope: str,
@@ -1032,8 +1081,7 @@ class DispatchScheduler:
         if req.telescopes is not None and telescope not in req.telescopes:
             reasons.append(f"not for {telescope}")
         for c in configs:
-            if c.instrument not in limits.instruments:
-                reasons.append(f"{telescope} has no {c.instrument}")
+            self._instrument_reasons(telescope, limits, c, reasons)
             for ic in c.instrument_configs:
                 if ic.port is not None and ic.port not in limits.ports:
                     reasons.append(f"{telescope} cannot select port {ic.port!r}")
@@ -1047,12 +1095,12 @@ class DispatchScheduler:
                     reasons.append(f"{telescope} has no calstage position {ic.calstage!r}")
                 if ic.lamp is not None and ic.lamp not in limits.lamps:
                     reasons.append(f"{telescope} has no lamp {ic.lamp!r}")
-        if any(c.type == "SPECTRUM" for c in configs):
+        if any(c.kind.spectrograph for c in configs):
             if self.spectrograph_down is not None:
                 reasons.append(f"spectrograph down ({self.spectrograph_down})")
             for tel, v in self._current.items():
                 if tel not in (telescope, lead) and v.cfg < len(v.configs):
-                    if v.config.type == "SPECTRUM":
+                    if v.config.kind.spectrograph:
                         reasons.append(f"spectrograph in use by {tel}")
         too = req.group.too
         if too is not None:
@@ -1413,105 +1461,19 @@ class DispatchScheduler:
     def _make_observation(self, visit: _Visit) -> Observation:
         c = visit.config
         ic = c.instrument_configs[visit.ic]
-        suffix = f"+{visit.done}" if visit.done else ""
-        if c.type == "SPECTRUM":
-            return Observation(
-                f"{c.target.name} [{c.id}#{visit.ic}{suffix}]",
-                ra_hours=c.target.ra_hours,
-                dec_deg=c.target.dec_deg,
-                exptime=ic.exptime,
-                count=ic.count - visit.done,
-                allow_partial=c.allow_partial,
-                object=c.target.name,
-                calstage=ic.calstage,
-                kind="spectrum",
-                spectrum={
-                    "id": f"{c.id}#{visit.ic}{suffix}@{visit.started.strftime('%Y%m%dT%H%M%S.%f')}",
-                    "iodine": ic.iodine,
-                    "target_counts": ic.target_counts,
-                    "target": c.target.internal(),
-                    **self._acquisition_entry(visit, c),
-                },
-            )
-        if c.type in LAMP_TYPES:
-            return Observation(
-                f"{ic.lamp} [{c.id}#{visit.ic}{suffix}]",
-                exptime=ic.exptime,
-                count=ic.count - visit.done,
-                light=False,
-                filter=ic.filter,
-                port=ic.port,
-                calstage=ic.calstage,
-                allow_partial=c.allow_partial,
-                object=c.target.name,
-                kind="arc" if c.type == "ARC" else "lamp_flat",
-                lamp=ic.lamp,
-            )
-        if c.type == "SKY_FLAT":
-            return Observation(
-                f"{c.target.name} [{c.id}#{visit.ic}]",
-                exptime=ic.exptime,
-                count=sum(i.count for i in c.instrument_configs),
-                object="skyflat",
-                kind="sky_flat",
-                flats={
-                    "filters": [i.filter for i in c.instrument_configs if i.filter],
-                    "count": max(i.count for i in c.instrument_configs),
-                }
-                if any(i.filter for i in c.instrument_configs)
-                else {"count": max(i.count for i in c.instrument_configs)},
-            )
-        if c.type == "ROTATOR_CALIBRATION":
-            return Observation(
-                f"{c.target.name} [{c.id}#{visit.ic}]",
-                ra_hours=c.target.ra_hours,
-                dec_deg=c.target.dec_deg,
-                exptime=ic.exptime,
-                count=1,
-                filter=ic.filter,
-                port=ic.port,
-                object=c.target.name,
-                kind="rotator_calibration",
-            )
-        if c.type == "POINTING_MODEL":
-            return Observation(
-                f"{c.target.name} [{c.id}#{visit.ic}]",
-                ra_hours=c.target.ra_hours,
-                dec_deg=c.target.dec_deg,
-                exptime=ic.exptime,
-                count=ic.count,
-                filter=ic.filter,
-                port=ic.port,
-                object=c.target.name,
-                kind="pointing_model",
-            )
-        if c.type == "AUTO_FOCUS":
-            return Observation(
-                f"{c.target.name} [{c.id}#{visit.ic}]",
-                ra_hours=c.target.ra_hours,
-                dec_deg=c.target.dec_deg,
-                exptime=ic.exptime,
-                count=1,
-                filter=ic.filter,
-                port=ic.port,
-                object=c.target.name,
-                kind="autofocus",
-                autofocus={"exptime": ic.exptime} if ic.exptime > 0 else None,
-            )
-        return Observation(
-            f"{c.target.name} [{c.id}#{visit.ic}{suffix}]",
-            ra_hours=c.target.ra_hours if ic.light else None,
-            dec_deg=c.target.dec_deg if ic.light else None,
-            exptime=ic.exptime,
-            count=ic.count - visit.done,
-            light=ic.light,
-            filter=ic.filter,
-            port=ic.port,
-            calstage=ic.calstage,
-            allow_partial=c.allow_partial,
-            object=c.target.name,
-            guide=c.guide and ic.light,
+        params = {}
+        for k, v in ic.params.items():
+            p = instrument_param(k)
+            params[k] = v if p is None else p.frame(v)
+        mapping = RequestMapping(
+            c,
+            visit.ic,
+            visit.done,
+            visit.started,
+            acquisition=self._acquisition_entry(visit, c),
+            params=params,
         )
+        return Observation(**c.kind.observation(mapping))
 
     def _observation(self, visit: _Visit) -> Observation:
         obs = self._make_observation(visit)
@@ -1595,6 +1557,7 @@ class DispatchScheduler:
                 "elevation": self.site.elevation,
             },
             "telescopes": {t: asdict(lim) for t, lim in self.limits.items()},
+            "instruments": {n: {"type": t.name} for n, t in self.instrument_types.items()},
             "config": asdict(self.config),
             "groups": [g.to_dict() for g in self.groups.values()],
             "state": self._state(),
@@ -1616,6 +1579,7 @@ class DispatchScheduler:
             },
             config=DispatchConfig(**snap["config"]),
             clock=clock,
+            instruments=snap.get("instruments"),
             **kw,
         )
         sched.restore_state(snap["state"])
@@ -1714,6 +1678,8 @@ def dispatch_from_config(
           "record": {"dir": "/var/lib/robofast/plans",            # optional
                      "night_rollover_hour": 12, "timezone": "America/Phoenix"},
           "telescopes": {"t1": {"instruments": ["spectrograph"], "min_alt": 21}},
+          "instruments": {"spectrograph": {"type": "kiwispec"}},   # names' types
+          "plugins": ["mysite.robofast"],     # optional: plug-ins (docs/plugins.md)
           "vetting": "sky.json",          # optional: target vetting (docs/sky.md)
           ...DispatchConfig fields (max_sun_alt, w_setting, idle_poll, ...)
         }
@@ -1727,9 +1693,14 @@ def dispatch_from_config(
     ``telescopes`` must give every telescope of the enclosure its
     :class:`TelescopeLimits` (``instruments``, ``min_alt`` and ``max_alt``
     at least); a telescope it omits, or one the enclosure lacks, is an error.
+    ``instruments`` gives the type (:mod:`robofast_core.instruments`) of
+    each instrument name the telescopes list; a name it omits is its own
+    type (``"imager"``), and one that is not a type is an error.
     """
     config = dict(config)
     config.pop("_note", None)
+    load_config_plugins(config, "dispatch plan: plugins")
+    config.pop("plugins", None)
     site = config.pop("site", None)
     if not isinstance(site, dict):
         raise ValueError("dispatch plan: 'site' {latitude, longitude, elevation} is required")
@@ -1768,6 +1739,9 @@ def dispatch_from_config(
             vetter = Vetter.from_config(json.loads(vpath.read_text()), base=vpath.parent)
         else:
             vetter = Vetter.from_config(vetting, base=base)
+    instruments = config.pop("instruments", None) or {}
+    if not isinstance(instruments, dict):
+        raise ValueError("dispatch plan: 'instruments' is {name: {'type': ...}}")
     record = config.pop("record", None)
     if isinstance(record, str):
         record = {"dir": record}
@@ -1797,4 +1771,5 @@ def dispatch_from_config(
         clock=clock,
         record=record,
         vetter=vetter,
+        instruments=instruments,
     )
