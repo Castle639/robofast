@@ -195,6 +195,7 @@ dialog; the destructive ones (marked *confirm*) must also send
 | `clear_faults` (*confirm*) | `enclosure` | the enclosure's `ClearFaults` (the supervisor refuses unless it is closed); also releases an emergency close latch, and restarts automatic fault clearing if a recurrence stopped it (`docs/aqawan.md`) |
 | `manual` | `enclosure`, `telescope`, `op`, ... | manual control of one telescope (below; `take` needs *confirm*) |
 | `duty` | `enclosure`, `op`: `on`, `off` or `renew` | an attended-only enclosure: go on duty (you, the token's name, are the operator on duty), go off duty (an open enclosure closes), or renew (the page does this every minute while it is open; audited, not shown in the log). Below |
+| `mode` | `enclosure`, `mode` | switch the enclosure's operating mode (confirmed; docs/modes.md). Below |
 | `emergency_close` (*confirm*) | `enclosure` (omit: all), `direct`, `reason` (optional) | close now, by any path that answers (below). Never rate limited |
 
 Requests and ToOs go through the request API's own code
@@ -408,15 +409,30 @@ The supervisor's `GET /status` carries `duty` (`attended_only`, `on_duty`,
 not open anything: it only allows the supervisor's own policy to grant a
 lease.
 
+## Operating mode
+
+The enclosure panel shows the enclosure's operating mode (docs/modes.md):
+its name, who switched to it and why, whether it is the default because
+the mode file was missing or unreadable, and, in a mode that may not open
+(shadow), whether the supervisor *would* open now. One *mode:* button per
+other mode switches to it (`mode`, with `"mode"`, a reason and
+`"confirm": true`; audited; the supervisor's `POST /mode`, which logs who
+and why). A switch never opens anything: a safer mode closes at once if the
+live lease may not go on under it (the sequencer parks, the supervisor
+closes), a less safe one opens only through the supervisor's own policy.
+A switch is shown as a notice (an alarm at warning level) for an hour.
+Manual control is refused in shadow, which commands nothing.
+
 ## The console cannot open the roof
 
 Opening happens only one way: the safety supervisor opens when the weather
 has been safe for the reopen hold and a live sequencer holds a lease. The
 console can do none of that. It reaches the supervisor through
 `SupervisorClient`, whose whole list is `GET /status`, `GET /timeline`,
-`POST /close`, `POST /faults/clear`, `POST /leases/{token}/clear` and
+`POST /close`, `POST /faults/clear`, `POST /leases/{token}/clear`,
 `POST /duty` (operator duty, which only permits the policy to grant a
-lease); it
+lease) and `POST /mode` (the operating mode, which never opens by itself);
+it
 refuses anything else before sending it (requesting, renewing or recovering a
 lease included). It never sends the lease token to the browser. Its only
 other way to an enclosure is the dome's emergency channel, which can only

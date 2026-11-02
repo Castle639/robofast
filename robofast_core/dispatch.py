@@ -409,6 +409,8 @@ class DispatchScheduler:
         self._progress: dict[str, tuple[int, int]] = {}
         #: The nightly plan record (module doc), or None.
         self.record = record
+        #: The enclosure's operating mode (set_mode; None: not told).
+        self.mode: str | None = None
         #: Normal groups added at run time (:meth:`submit`); kept in the state.
         self._submitted: set[str] = set()
         #: Completed observations by configuration id (for data pointers).
@@ -445,6 +447,16 @@ class DispatchScheduler:
         for tel in held:
             self._members.pop(tel, None)
         self._record(self.clock(), "held", telescopes=sorted(held))
+
+    def set_mode(self, mode: str | None, policy: dict[str, Any] | None = None) -> None:
+        """The enclosure's operating mode, as the sequencer reads it
+        (docs/modes.md): recorded (a ``mode`` entry) and stamped on every
+        later entry of the plan record. The scheduler itself does not
+        change: the sequencer decides what is asked of it."""
+        if mode == self.mode:
+            return
+        self.mode = mode
+        self._record(self.clock(), "mode", observe=(policy or {}).get("observe"))
 
     def set_spectrograph_available(self, available: bool, reason: str = "") -> None:
         """The sequencer's verdict on the spectrograph (module doc): while it
@@ -1293,6 +1305,8 @@ class DispatchScheduler:
         }
 
     def _record(self, when: datetime, kind: str, **fields: Any) -> None:
+        if self.mode is not None:
+            fields.setdefault("mode", self.mode)
         if self.record is not None:
             self.record.write(when, kind, fields, snapshot=self.snapshot)
 

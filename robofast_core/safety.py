@@ -71,6 +71,33 @@ revokes the lease and closes, as for any revocation. Going off duty
 (:meth:`SafetySupervisor.duty_off`) with the enclosure open closes it at
 once. An enclosure with a heartbeat (MINERVA's Aqawan) is unaffected.
 
+Operating modes
+---------------
+The enclosure's mode (:mod:`robofast_core.modes`, docs/modes.md) is held
+here: the supervisor is the one authority every other process reads it
+from (``GET /status``) and the one place it is switched
+(:meth:`SafetySupervisor.set_mode`: the console's ``mode`` action and
+``python -m robofast_core.modes set``, logged with who and why, a
+``mode`` timeline event at warning level and a notice on the console). The
+mode decides whether a lease may be granted at all (``open``), the duty
+checks above (``attended_only``, ``duty_expiry``, ``duty_ttl``,
+``duty_grace``; ``attended_only`` in ``safety`` is the enclosure's floor,
+which no mode lowers) and automatic fault clearing. A mode whose
+``enclosure`` is ``watch`` (``shadow``) commands nothing: the enclosure loop
+reads the shutter and records what it would do (``shadow_would`` events,
+``would_open`` in the status); a shutter found open then is a critical
+alarm, not a close.
+
+A switch never opens by itself: a mode that may open grants a lease only
+through :meth:`request_open`, with every check above. A switch to a mode
+under which the live lease may not go on (it may not open, it observes
+differently -- :func:`robofast_core.modes.lease_survives` -- or its duty
+check fails now) revokes the lease at once: the sequencer stops and parks
+and the enclosure closes, as for any revocation; a switch into a ``watch``
+mode finishes that close before it stops commanding. The mode is saved
+(:class:`~robofast_core.modes.ModeStore`) and reloaded at start; a missing
+or unreadable file means the config's default mode, with an alarm.
+
 Recovering from a sequencer crash
 ---------------------------------
 A sequencer that dies holding a lease leaves it revoked (unrenewed) but never
@@ -106,6 +133,14 @@ from dataclasses import dataclass
 from typing import Any
 
 from robofast_core.cancel import stop_tasks
+from robofast_core.modes import (
+    ModePolicy,
+    ModeSet,
+    ModeStore,
+    lease_survives,
+    modes_from_config,
+    now_iso,
+)
 from robofast_core.owner import DeviceError, DeviceOwner, Grant
 from robofast_core.timeline import Timeline
 
@@ -120,6 +155,9 @@ def enclosure_members(config: SafetyConfig) -> frozenset[str]:
     """:data:`ENCLOSURE_MEMBERS` with the configured clear-faults action."""
     return frozenset({"OpenShutter", "CloseShutter", f"Action:{config.clear_faults_action}"})
 
+
+#: How long a mode switch stays a notice in the status (s).
+MODE_NOTICE_FOR = 3600.0
 
 #: A ``ClearFaults`` note starting with this is the supervisor's automatic
 #: clear (the Aqawan server then also refuses an E-stop or a latch itself).
@@ -208,13 +246,16 @@ class SafetyConfig:
     #: broken shutter is not cycled every reopen hold.
     shutter_unreadable_grace: float = 15.0
     shutter_error_backoff: float = 1800.0
-    #: No lease (so no opening) unless an operator is on duty (module doc).
-    #: ``None``: true exactly when there is no hardware heartbeat device
-    #: (``heartbeat_interval`` unset). Setting it false without a heartbeat
-    #: runs an enclosure unattended with nothing behind the supervisor.
+    #: The enclosure must not run unattended: no lease (so no opening)
+    #: unless an operator is on duty, in every mode (module doc; a floor the
+    #: modes cannot lower). ``None``: true exactly when there is no hardware
+    #: heartbeat device (``heartbeat_interval`` unset). Setting it false
+    #: without a heartbeat runs an enclosure unattended with nothing behind
+    #: the supervisor.
     attended_only: bool | None = None
     #: An operator's duty expires (critical alarm) this long after its last
-    #: renewal, and the supervisor closes ``duty_grace`` after that.
+    #: renewal, and the supervisor closes ``duty_grace`` after that (a mode
+    #: may set its own).
     duty_ttl: float = 300.0
     duty_grace: float = 300.0
 
@@ -335,10 +376,32 @@ class SafetySupervisor:
         telescopes: Sequence[DeviceOwner] = (),
         heartbeat: DeviceOwner | None = None,
         config: SafetyConfig | None = None,
+        modes: ModeSet | None = None,
+        mode_store: ModeStore | None = None,
     ) -> None:
         self.name = name
         self.timeline = timeline
         self.config = config or SafetyConfig()
+        #: The enclosure's modes (module doc); without any, the one that
+        #: matches the behavior before modes (``robotic``, or ``attended``
+        #: on an attended-only enclosure).
+        self.modes = modes or modes_from_config(
+            {},
+            attended_floor=bool(self.config.attended_only),
+            fault_action=bool(self.config.fault_action),
+        )
+        self._mode_store = mode_store or ModeStore(None)
+        self.mode, self._mode_record, why = self._mode_store.load(self.modes)
+        self._mode_since = time.monotonic()
+        self._mode_notice: tuple[float, str] | None = None
+        #: Why the mode is the default, not the saved one (None: it was saved).
+        self._mode_fallback = why
+        #: A switch into a ``watch`` mode finishes closing first.
+        self._finish_close = False
+        #: The last "would open" of a mode that may not open (shadow).
+        self._would_open: bool | None = None
+        #: A watched enclosure found not closed (critical; module doc).
+        self._watch_alarm: str | None = None
         self._dome = dome.grant(name, privileged=True)
         self._sm = safety_monitor.grant(name)
         self._oc = observing_conditions.grant(name) if observing_conditions else None
@@ -398,6 +461,124 @@ class SafetySupervisor:
         self._stopping = False
         self.shutter: int | None = None
         self.alarms: deque[str] = deque(maxlen=100)
+        if why is not None and why.startswith("no mode file"):
+            log.warning("%s: %s: the config's default mode %s", name, why, self.mode)
+            timeline.event(name, "mode", mode=self.mode, why=why, level="warning")
+        elif why is not None:
+            self._alarm(f"{why}: starting in the config's default mode {self.mode!r}")
+        elif not self.modes.configured:
+            log.info("%s: no 'mode' in the config: mode %s (as before modes)", name, self.mode)
+        log.warning("%s: mode %s", name, self.mode)
+
+    # -- the operating mode (module doc) -----------------------------------------
+
+    @property
+    def policy(self) -> ModePolicy:
+        """The active mode's policy."""
+        return self.modes.get(self.mode)
+
+    def _attended_only(self) -> bool:
+        return self.policy.attended_only
+
+    def _duty_ttl(self) -> float:
+        p = self.policy
+        return self.config.duty_ttl if p.duty_ttl is None else p.duty_ttl
+
+    def _duty_grace(self) -> float:
+        p = self.policy
+        return self.config.duty_grace if p.duty_grace is None else p.duty_grace
+
+    def _fault_auto_clear(self) -> bool:
+        p = self.policy
+        if p.enclosure == "watch":
+            return False
+        return self.config.fault_auto_clear if p.fault_auto_clear is None else p.fault_auto_clear
+
+    def _watching(self) -> bool:
+        """The enclosure is only watched (a ``watch`` mode, its close done)."""
+        return self.policy.enclosure == "watch" and not self._finish_close
+
+    def set_mode(self, mode: str, operator: str, reason: str) -> dict[str, Any]:
+        """Switch the mode (module doc); logged with who and why. A switch to
+        a safer mode takes effect at once (the lease is revoked if it may not
+        go on); a switch to a less safe one only through :meth:`request_open`.
+        ValueError for an unknown mode or a missing name or reason."""
+        operator, reason = str(operator).strip(), str(reason).strip()
+        if not operator:
+            raise ValueError("a mode switch needs an operator name")
+        if not reason:
+            raise ValueError("a mode switch needs a reason")
+        new = self.modes.get(mode)
+        old_name, old = self.mode, self.policy
+        if mode == old_name:
+            return {**self.mode_status(), "changed": False}
+        record = {
+            "mode": mode,
+            "since": now_iso(),
+            "by": operator,
+            "reason": reason,
+            "was": old_name,
+        }
+        saved = self._mode_store.save(record)
+        now = time.monotonic()
+        self.mode, self._mode_record, self._mode_since = mode, record, now
+        self._mode_fallback = None
+        self._would_open = None
+        text = f"mode {old_name} -> {mode} by {operator}: {reason}"
+        self._mode_notice = (now, text)
+        self.timeline.event(
+            self.name,
+            "mode",
+            mode=mode,
+            was=old_name,
+            operator=operator,
+            reason=reason,
+            saved=saved,
+            level="warning",
+        )
+        log.warning("%s: %s", self.name, text)
+        if not saved:
+            self._alarm(
+                f"mode {mode} not saved ({self._mode_store.error}): a restart would start"
+                f" in {self.modes.default}"
+            )
+        if self._duty_expired is not None and not new.attended_only:
+            self._duty_expired = None
+        lease = self._lease
+        if lease is not None and lease.live:
+            if not lease_survives(old, new):
+                self._revoke_lease(f"mode {mode} (by {operator}: {reason})")
+            elif not self.attended(now, keep=True):
+                self._revoke_lease(f"mode {mode} needs an operator on duty (by {operator})")
+        self._watch_alarm, self._finish_close = None, False
+        if new.enclosure == "watch" and (
+            self.outstanding() is not None or self.shutter != Shutter.CLOSED
+        ):
+            self._finish_close = True  # the normal close first, then only watch
+        self._wake.set()
+        return {**self.mode_status(now), "changed": True}
+
+    def mode_status(self, now: float | None = None) -> dict[str, Any]:
+        """The active mode, its policy and record, and the modes defined."""
+        now = time.monotonic() if now is None else now
+        notice = self._mode_notice
+        p = self.policy
+        return {
+            "mode": self.mode,
+            "description": p.description,
+            "policy": p.as_json(),
+            "since": self._mode_record.get("since"),
+            "by": self._mode_record.get("by"),
+            "reason": self._mode_record.get("reason"),
+            "for_s": now - self._mode_since,
+            "default": self.modes.default,
+            "fallback": self._mode_fallback,
+            "modes": {n: m.description for n, m in self.modes.modes.items()},
+            "notice": None if notice is None or now - notice[0] > MODE_NOTICE_FOR else notice[1],
+            "saved_error": self._mode_store.error,
+            "would_open": None if p.open else self.open_allowed(now, ignore_mode=True),
+            "finishing_close": self._finish_close,
+        }
 
     # -- public state -----------------------------------------------------
 
@@ -414,13 +595,18 @@ class SafetySupervisor:
         """The current (or last) lease."""
         return self._lease
 
-    def open_allowed(self, now: float | None = None, *, keep: bool = False) -> bool:
+    def open_allowed(
+        self, now: float | None = None, *, keep: bool = False, ignore_mode: bool = False
+    ) -> bool:
         """May the enclosure open (``keep``: stay open; an expired duty's
-        grace counts then)?"""
+        grace counts then)? ``ignore_mode``: would it, if the mode let it
+        (shadow's "would open")."""
         now = time.monotonic() if now is None else now
+        p = self.policy
         return (
             not self._stopping
-            and self.attended(now, keep=keep)
+            and (ignore_mode or (p.open and p.enclosure == "command"))
+            and (ignore_mode or self.attended(now, keep=keep))
             and self._safe
             and self._fault is None
             and (self._shutter_hold_until is None or now >= self._shutter_hold_until)
@@ -436,19 +622,25 @@ class SafetySupervisor:
     def critical(self) -> list[str]:
         """Conditions that need an operator now (the console raises them as
         critical alarms until they are gone)."""
-        return [c for c in (self._estop, self._auto_clear_stopped, self._duty_expired) if c]
+        return [
+            c
+            for c in (self._estop, self._auto_clear_stopped, self._duty_expired, self._watch_alarm)
+            if c
+        ]
 
     # -- operator duty (attended_only) ---------------------------------------
 
     def attended(self, now: float | None = None, *, keep: bool = False) -> bool:
-        """True unless ``attended_only`` and no operator's duty is current
-        (``keep``: or within its grace, for an enclosure already open)."""
-        cfg = self.config
-        if not cfg.attended_only:
+        """True unless the mode is ``attended_only`` and no operator's duty is
+        current (``keep``: or within its grace, for an enclosure already
+        open; with ``duty_expiry`` ``alarm``, an expired duty keeps it open)."""
+        if not self._attended_only():
             return True
         duty = self._duty
+        if keep and duty is not None and self.policy.duty_expiry == "alarm":
+            return True
         now = time.monotonic() if now is None else now
-        limit = cfg.duty_ttl + (cfg.duty_grace if keep else 0.0)
+        limit = self._duty_ttl() + (self._duty_grace() if keep else 0.0)
         return duty is not None and now - duty["renewed"] <= limit
 
     def duty_on(self, operator: str, reason: str = "") -> dict[str, Any]:
@@ -498,7 +690,7 @@ class SafetySupervisor:
             was=None if duty is None else duty["operator"],
         )
         log.warning("%s: %s off duty (%s)", self.name, operator, reason or "no reason given")
-        if self.config.attended_only:
+        if self._attended_only():
             self._revoke_lease(f"operator {operator} went off duty (attended only)")
         self._wake.set()
         return self.duty_status()
@@ -506,43 +698,52 @@ class SafetySupervisor:
     def duty_status(self, now: float | None = None) -> dict[str, Any]:
         now = time.monotonic() if now is None else now
         duty = self._duty
-        cfg = self.config
+        attended_only, ttl, grace = self._attended_only(), self._duty_ttl(), self._duty_grace()
+        closes = attended_only and self.policy.duty_expiry == "close"
         out: dict[str, Any] = {
-            "attended_only": bool(cfg.attended_only),
+            "attended_only": attended_only,
+            "floor": bool(self.config.attended_only),
+            "expiry": self.policy.duty_expiry,
             "on_duty": None if duty is None else duty["operator"],
             "attended": self.attended(now),
-            "ttl": cfg.duty_ttl,
-            "grace": cfg.duty_grace,
+            "ttl": ttl,
+            "grace": grace,
         }
         if duty is not None:
             age = now - duty["renewed"]
             out.update(
                 since_s=now - duty["since"],
                 renewed_ago=age,
-                expires_in=cfg.duty_ttl - age,
-                closes_in=None if not cfg.attended_only else cfg.duty_ttl + cfg.duty_grace - age,
+                expires_in=ttl - age,
+                closes_in=ttl + grace - age if closes else None,
             )
         return out
 
     def _check_duty(self, now: float) -> None:
         """Duty expiry: a critical alarm after ``duty_ttl``; after
-        ``duty_grace`` more, the lease is revoked (so the enclosure closes)."""
-        cfg = self.config
+        ``duty_grace`` more, the lease is revoked (so the enclosure closes),
+        unless the mode's ``duty_expiry`` is ``alarm``."""
         duty = self._duty
-        if not cfg.attended_only or duty is None:
+        if not self._attended_only() or duty is None:
             return
+        ttl, grace = self._duty_ttl(), self._duty_grace()
+        closes = self.policy.duty_expiry == "close"
         age = now - duty["renewed"]
-        if age <= cfg.duty_ttl:
+        if age <= ttl:
             return
         if self._duty_expired is None:
+            then = (
+                f"closing in {grace:g} s unless the console renews it"
+                if closes
+                else f"mode {self.mode} does not close for it (duty_expiry alarm)"
+            )
             self._duty_expired = (
-                f"operator duty ({duty['operator']}) not renewed for {cfg.duty_ttl:g} s:"
-                f" this enclosure is attended only; closing in {cfg.duty_grace:g} s"
-                " unless the console renews it"
+                f"operator duty ({duty['operator']}) not renewed for {ttl:g} s:"
+                f" this enclosure is attended only; {then}"
             )
             self._alarm(self._duty_expired, "critical")
             self.timeline.event(self.name, "duty_expired", operator=duty["operator"])
-        if age > cfg.duty_ttl + cfg.duty_grace:
+        if closes and age > ttl + grace:
             lease = self._lease
             if lease is not None and lease.live:
                 self._alarm(
@@ -561,8 +762,9 @@ class SafetySupervisor:
             "fault": self._fault,
             "critical": self.critical(),
             "duty": self.duty_status(now),
+            "mode": self.mode_status(now),
             "fault_auto_clear": None
-            if not self.config.fault_auto_clear
+            if not self._fault_auto_clear()
             else {
                 "clears": self._auto_clears,
                 "last_ago": None if self._auto_cleared_at is None else now - self._auto_cleared_at,
@@ -823,7 +1025,7 @@ class SafetySupervisor:
                 self._wake.set()
         faulted = data if problem is not None and kind != "unreadable" else None
         self._note_estop(faulted)
-        if cfg.fault_auto_clear:
+        if self._fault_auto_clear():
             await self._auto_clear(faulted)
 
     def _note_estop(self, data: dict[str, Any] | None) -> None:
@@ -949,10 +1151,45 @@ class SafetySupervisor:
                 f" {cfg.orphan_timeout:g} s after revocation; restart its sequencer"
                 " or have an operator clear it"
             )
-        if self._want_open(now):
+        self._note_would_open(now)
+        if self._watching():
+            await self._watch()
+        elif self._want_open(now):
             await self._ensure_open()
         else:
             await self._ensure_closed()
+
+    def _note_would_open(self, now: float) -> None:
+        """A mode that may not open: record when it *would* open or close
+        (``shadow_would`` events), on each change."""
+        if self.policy.open:
+            self._would_open = None
+            return
+        would = self.open_allowed(now, ignore_mode=True)
+        if would != self._would_open:
+            self._would_open = would
+            self.timeline.event(
+                self.name,
+                "shadow_would",
+                mode=self.mode,
+                open=would,
+                reason=self._reason if not would else "safe, held, no fault",
+            )
+            log.info("%s: mode %s: would %s", self.name, self.mode, "open" if would else "close")
+
+    async def _watch(self) -> None:
+        """A ``watch`` mode: read the shutter, command nothing (module doc)."""
+        self._opening_since = self._closing_since = None
+        status = await self._shutter_status()
+        if status is None or status == Shutter.CLOSED:
+            self._watch_alarm = None
+            return
+        if self._watch_alarm is None:
+            self._watch_alarm = (
+                f"enclosure {Shutter(status).name} in mode {self.mode}, which commands nothing:"
+                " robofast will not close it (whoever opened it must, or switch modes)"
+            )
+            self._alarm(self._watch_alarm, "critical")
 
     async def _ensure_closed(self) -> None:
         cfg = self.config
@@ -960,6 +1197,9 @@ class SafetySupervisor:
         status = await self._shutter_status()
         now = time.monotonic()
         if status == Shutter.CLOSED:
+            if self._finish_close and self.outstanding() is None:
+                self._finish_close = False  # closed: from now on only watched
+                self.timeline.event(self.name, "watching", mode=self.mode)
             if self._closing_since is not None:
                 self.timeline.event(self.name, "enclosure_closed", took=now - self._closing_since)
             self._closing_since = None
@@ -1168,10 +1408,15 @@ class SafetySupervisor:
             except asyncio.CancelledError as exc:  # cancelled again: close anyway
                 again = exc
             try:
-                await asyncio.wait_for(
-                    self._dome.call("CloseShutter", timeout=self.config.dome_timeout),
-                    self.config.dome_timeout + 1,
-                )
+                if self._watching():
+                    log.warning(
+                        "%s: mode %s commands nothing: no final close", self.name, self.mode
+                    )
+                else:
+                    await asyncio.wait_for(
+                        self._dome.call("CloseShutter", timeout=self.config.dome_timeout),
+                        self.config.dome_timeout + 1,
+                    )
             except asyncio.CancelledError as exc:
                 log.error("final CloseShutter cancelled")
                 again = exc

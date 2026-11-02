@@ -101,14 +101,23 @@ ACTIONS = (
     "clear_spectrograph",
     "manual",
     "duty",
+    "mode",
 )
-CONFIRM = ("stop", "park", "clear_lease", "clear_faults", "emergency_close", "clear_spectrograph")
+CONFIRM = (
+    "stop",
+    "park",
+    "clear_lease",
+    "clear_faults",
+    "emergency_close",
+    "clear_spectrograph",
+    "mode",
+)
 #: Actions that the per-token action rate limit never blocks (closing is the
 #: safe direction; an observer who has pressed other buttons must still be
 #: able to close).
 UNLIMITED = ("emergency_close",)
 #: Body fields copied into the audit log.
-AUDITED = ("enclosure", "telescope", "id", "reason", "direct", "op")
+AUDITED = ("enclosure", "telescope", "id", "reason", "direct", "op", "mode")
 
 
 @dataclass
@@ -204,7 +213,9 @@ class SupervisorClient:
     """The only way the console reaches a safety supervisor. ``ALLOWED`` is
     the whole list: read, close (revoke), clear a dead lease, clear faults,
     operator duty (which only permits the supervisor's own policy to grant
-    a lease). Nothing here can request a lease, renew one or open anything."""
+    a lease), the operating mode (a switch never opens by itself:
+    docs/modes.md). Nothing here can request a lease, renew one or open
+    anything."""
 
     ALLOWED = (
         ("GET", "status"),
@@ -213,6 +224,7 @@ class SupervisorClient:
         ("POST", "faults/clear"),
         ("POST", "leases/*/clear"),
         ("POST", "duty"),
+        ("POST", "mode"),
     )
 
     def __init__(self, url: str, http: httpx.AsyncClient, timeout: float) -> None:
@@ -246,7 +258,7 @@ class SupervisorClient:
             data = {"error": r.text[:200]}
         if r.status_code >= 400:
             raise ApiError(
-                409 if r.status_code in (404, 409, 410) else 502,
+                409 if r.status_code in (400, 404, 409, 410) else 502,
                 f"supervisor: {data.get('error') if isinstance(data, dict) else data}",
             )
         return data
@@ -867,6 +879,19 @@ class Console:
                     "POST", "duty", {"operator": operator, "op": op, "reason": reason}
                 ),
             }
+        if action == "mode":
+            # The enclosure's operating mode (docs/modes.md): the supervisor
+            # logs who and why; a safer mode closes at once, a less safe one
+            # opens only through the supervisor's own policy.
+            mode = body.get("mode")
+            if not isinstance(mode, str) or not mode:
+                raise ApiError(400, "mode: the mode to switch to")
+            return {
+                "enclosure": enc.name,
+                **await sup.call(
+                    "POST", "mode", {"operator": operator, "mode": mode, "reason": reason}
+                ),
+            }
         if action == "clear_faults":
             return {
                 "enclosure": enc.name,
@@ -1047,6 +1072,8 @@ class Console:
             raise ApiError(409, f"{enc.name} has no operator_control: manual control needs it")
         op = body.get("op")
         out: dict[str, Any] = {"enclosure": enc.name, "telescope": tel, "op": op}
+        if op == "take":
+            await self._mode_allows_manual(enc)
         if op in ("take", "release"):
             cid = send_command(
                 enc.control_dir,
@@ -1121,6 +1148,23 @@ class Console:
                 obj = "".join(c if c.isalnum() or c in "+-_" else "_" for c in body["object"])
                 cmd["object"] = obj[:40]
         return cmd
+
+    async def _mode_allows_manual(self, enc: ConsoleEnclosure) -> None:
+        """Manual control runs unless the mode commands nothing (shadow);
+        a supervisor that cannot be read decides nothing here (the
+        sequencer gates it too: docs/modes.md)."""
+        try:
+            status = await self.supervisors[enc.name].call("GET", "status")
+        except (ApiError, httpx.HTTPError):
+            return
+        mode = status.get("mode") if isinstance(status, dict) else None
+        policy = (mode or {}).get("policy") or {}
+        if policy.get("observe") == "shadow":
+            raise ApiError(
+                409,
+                f"refused: {enc.name} is in mode {(mode or {}).get('mode')}, which commands"
+                " nothing; switch modes first",
+            )
 
     async def _need_live_lease(self, enc: ConsoleEnclosure, session: dict[str, Any]) -> None:
         """Anything that needs the sky: refused unless the lease is live and

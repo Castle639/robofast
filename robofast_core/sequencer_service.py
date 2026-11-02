@@ -567,6 +567,9 @@ def snapshot(seq: Sequencer, interval: float = 5.0) -> dict[str, Any]:
         "generation": seq.generation,
         "quarantined": seq.quarantined,
         "needs_operator": seq.needs_operator,
+        # The enclosure's operating mode as the sequencer last read it.
+        "mode": seq.modes.mode,
+        "observe": seq.modes.observe,
         "telescopes": tels,
         # The latest of the sequencer's own timeline (the console's log).
         "timeline": seq.timeline.recent(TIMELINE_IN_SNAPSHOT, skip_sent=True),
