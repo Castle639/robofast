@@ -48,6 +48,9 @@ ZENODO = "https://zenodo.org"
 
 #: The registry name of the Gaia DR3 extracts record.
 GAIA_EXTRACTS = "gaia_extracts"
+#: Records whose licence is non-commercial: refused where non-commercial
+#: data are (``$ROBOFAST_ALLOW_NONCOMMERCIAL=0``; docs/sky.md, "Licences").
+NONCOMMERCIAL_RECORDS = frozenset({GAIA_EXTRACTS})
 
 
 @dataclass(frozen=True)

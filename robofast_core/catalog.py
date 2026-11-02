@@ -5,6 +5,18 @@ short, :class:`Catalog` answers ``cone(ra, dec, radius, epoch=...)`` with a
 :class:`Stars` table (RA, Dec at the requested epoch, proper motion, Gaia
 G, BP-RP and an estimated V) from, in order:
 
+The tiles come from one **catalog source** (:data:`CATALOG_SOURCES`, the
+config's ``catalog.source``): ``gaia`` (Gaia DR3, the default, described
+below), or a source whose licence allows commercial use -- ``ucac4``
+(USNO's UCAC4) or ``2mass`` (the 2MASS Point Source Catalog), both from
+IRSA (:mod:`robofast_core.catalog_sources`), their own photometry turned
+into an estimated Gaia G and BP-RP so everything downstream (limits,
+guide-star choice, plate solving, the simulator's zero points) works
+unchanged. ``catalog.allow_noncommercial: false`` (or
+``$ROBOFAST_ALLOW_NONCOMMERCIAL=0``, a floor for the whole host) refuses
+every non-commercial-licensed file: the Gaia tiles and bright stars, the
+Hipparcos supplement, the live Gaia service (:class:`NonCommercialRefused`).
+
 1. **Gaia DR3 tiles** (:class:`TileCache`): Gaia DR3 down to ``G < 16``
    (configurable), cut into HEALPix tiles (nested scheme, ``level`` 7 by
    default: 196 608 tiles of 0.21 deg2), one ``.npy`` file each under a
@@ -48,16 +60,22 @@ from typing import Any
 
 import numpy as np
 
+from robofast_core.plugins import Registry
+
 log = logging.getLogger(__name__)
 
 __all__ = [
+    "CATALOG_SOURCES",
     "GAIA_EPOCH",
+    "NONCOMMERCIAL_ENV",
     "TILE_DTYPE",
     "WDS_DTYPE",
     "Catalog",
+    "CatalogSource",
     "CatalogUnavailable",
     "DoubleStars",
     "GaiaArchive",
+    "NonCommercialRefused",
     "Stars",
     "TileCache",
     "VizierSource",
@@ -65,8 +83,10 @@ __all__ = [
     "bright_stars",
     "catalog_at",
     "catalog_from_config",
+    "catalog_source",
     "decimal_year",
     "g_to_v",
+    "noncommercial_allowed",
     "parse_wds",
     "pix2ang",
     "propagate",
@@ -93,6 +113,39 @@ _MAS = math.pi / (180.0 * 3600.0 * 1000.0)
 
 class CatalogUnavailable(RuntimeError):
     """The catalog cannot answer (tiles missing and no way to fetch them)."""
+
+
+class NonCommercialRefused(ValueError):
+    """Non-commercial-licensed catalog data asked for where
+    ``allow_noncommercial`` is false (docs/sky.md, "Licences")."""
+
+
+#: The environment variable that forbids non-commercial data on a host
+#: (``0``/``false``/``no``/``off``), whatever a config says.
+NONCOMMERCIAL_ENV = "ROBOFAST_ALLOW_NONCOMMERCIAL"
+
+
+def noncommercial_allowed(configured: Any = None) -> bool:
+    """May non-commercial-licensed data (Gaia) be loaded? False when
+    ``$ROBOFAST_ALLOW_NONCOMMERCIAL`` is a false value (a floor no config
+    raises), else the config's ``allow_noncommercial`` (default true)."""
+    env = os.environ.get(NONCOMMERCIAL_ENV)
+    if env is not None and env.strip().lower() in ("0", "false", "no", "off"):
+        return False
+    if configured is None:
+        return True
+    if not isinstance(configured, bool):
+        raise ValueError("catalog.allow_noncommercial: true or false")
+    return configured
+
+
+def _refuse(what: str) -> NonCommercialRefused:
+    return NonCommercialRefused(
+        f"{what} is licensed for non-commercial use only (CC BY-NC 3.0 IGO), and"
+        f" non-commercial data are refused here (catalog.allow_noncommercial false, or"
+        f" ${NONCOMMERCIAL_ENV}=0); choose a catalog.source whose licence allows your use"
+        " (docs/sky.md, Licences)"
+    )
 
 
 # -- time -------------------------------------------------------------------------
@@ -478,15 +531,19 @@ def parse_csv(text: str) -> np.ndarray:
 
 
 class TileCache:
-    """Gaia DR3 HEALPix tiles on disk (module doc; layout in docs/sky.md)::
+    """One catalog source's HEALPix tiles on disk (module doc; layout in
+    docs/sky.md), Gaia DR3 by default::
 
         <root>/gaia-dr3-g<mag>-hpx<level>/manifest.json
         <root>/gaia-dr3-g<mag>-hpx<level>/<pix // 1024:03d>/<pix:06d>.npy
 
+    (another source: its own directory, :attr:`CatalogSource.directory`).
     ``fetch(level, pix, mag_limit)`` returns a missing tile's records
-    (:class:`GaiaArchive`); None: offline, a missing tile raises
-    :class:`CatalogUnavailable`. Tiles are written atomically, so
-    concurrent readers and writers are safe."""
+    (:class:`GaiaArchive`, or the source's fetcher); None: offline, a
+    missing tile raises :class:`CatalogUnavailable`. Tiles are written
+    atomically, so concurrent readers and writers are safe.
+    ``allow_noncommercial`` false refuses a non-commercial source
+    (:class:`NonCommercialRefused`)."""
 
     def __init__(
         self,
@@ -495,17 +552,22 @@ class TileCache:
         level: int = 7,
         mag_limit: float = 16.0,
         fetch: Callable[[int, int, float], np.ndarray] | None = None,
+        source: CatalogSource | str = "gaia",
+        allow_noncommercial: bool = True,
     ) -> None:
         self.root = Path(root)
         self.level = level
         self.mag_limit = mag_limit
         self.fetch = fetch
+        self.source = catalog_source(source) if isinstance(source, str) else source
+        if self.source.noncommercial and not noncommercial_allowed(allow_noncommercial):
+            raise _refuse(f"the {self.source.title} tiles")
         self._lock = threading.Lock()
         self._mem: dict[int, np.ndarray] = {}
 
     @property
     def directory(self) -> Path:
-        return self.root / f"gaia-dr3-g{self.mag_limit:g}-hpx{self.level}"
+        return self.root / self.source.directory.format(mag=self.mag_limit, level=self.level)
 
     def path(self, pix: int) -> Path:
         return self.directory / f"{pix // 1024:03d}" / f"{pix:06d}.npy"
@@ -549,12 +611,16 @@ class TileCache:
             return
         m.parent.mkdir(parents=True, exist_ok=True)
         tmp = m.with_name(f".{uuid.uuid4().hex}.tmp")
+        src = self.source
         tmp.write_text(
             json.dumps(
                 {
-                    "catalog": "Gaia DR3 (gaiadr3.gaia_source)",
-                    "licence": "CC BY-NC 3.0 IGO; credit ESA/Gaia/DPAC (docs/sky.md)",
-                    "epoch": GAIA_EPOCH,
+                    "catalog": src.title,
+                    "source": src.name,
+                    "licence": src.licence,
+                    "noncommercial": src.noncommercial,
+                    "epoch": src.epoch,
+                    "magnitudes": src.magnitudes,
                     "healpix": {"scheme": "nested", "level": self.level},
                     "mag_limit": {"band": "G", "value": self.mag_limit},
                     "columns": {n: str(TILE_DTYPE[n]) for n in TILE_DTYPE.names},
@@ -565,15 +631,89 @@ class TileCache:
         os.replace(tmp, m)
 
     def cone(self, ra: float, dec: float, radius: float) -> Stars:
-        """Stars within ``radius`` deg (at epoch J2016; :class:`Catalog`
-        widens the cone for proper motion)."""
+        """Stars within ``radius`` deg (at the source's epoch, J2016 for
+        Gaia; :class:`Catalog` widens the cone for proper motion)."""
         tiles = tiles_in_cone(self.level, ra, dec, radius)
         recs = [self.tile(p) for p in tiles]
         rec = np.concatenate(recs) if recs else np.zeros(0, TILE_DTYPE)
-        return Stars.from_records(rec).cone(ra, dec, radius)
+        src = self.source
+        return Stars.from_records(rec, epoch=src.epoch, source=src.name).cone(ra, dec, radius)
 
     def missing(self, ra: float, dec: float, radius: float) -> list[int]:
         return [p for p in tiles_in_cone(self.level, ra, dec, radius) if not self.have(p)]
+
+
+# -- catalog sources ----------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class CatalogSource:
+    """Where a :class:`TileCache`'s stars come from (``catalog.source``;
+    docs/sky.md, "Catalog sources" and "Licences").
+
+    Every source fills the same :data:`TILE_DTYPE` records: ``g`` is Gaia
+    G or, for another catalog, an estimate of it from that catalog's own
+    photometry (``magnitudes`` says how), ``bp_rp`` likewise (NaN when it
+    cannot be estimated), ``pmra``/``pmdec`` zero for a catalog without
+    proper motions, positions at ``epoch``. ``fetcher(url)`` returns the
+    tile fetcher (``(level, pix, mag_limit) -> records``; ``url`` None:
+    the source's own service); ``bright(mag_limit, url)`` its stars
+    brighter than that, all sky, for the bright-star file
+    (``bright_file`` in the cache directory)."""
+
+    name: str
+    title: str
+    licence: str
+    #: The licence restricts use to non-commercial purposes.
+    noncommercial: bool
+    #: Where the licence terms are stated (docs/sky.md cites them).
+    licence_url: str
+    epoch: float
+    proper_motion: bool
+    #: The tile directory under the cache, ``{mag}`` and ``{level}`` filled in.
+    directory: str
+    bright_file: str
+    magnitudes: str
+    fetcher: Callable[[str | None], Callable[[int, int, float], np.ndarray]]
+    bright: Callable[[float, str | None], np.ndarray] | None = None
+
+
+#: Catalog sources by name (docs/plugins.md): ``gaia`` here, ``ucac4`` and
+#: ``2mass`` in :mod:`robofast_core.catalog_sources`; a plug-in may add more.
+CATALOG_SOURCES: Registry[CatalogSource] = Registry("catalog source")
+
+
+def catalog_source(name: Any, where: str = "catalog.source") -> CatalogSource:
+    """The registered source ``name`` (ValueError listing those registered)."""
+    if isinstance(name, CatalogSource):
+        return name
+    return CATALOG_SOURCES.lookup(name, where)
+
+
+def _gaia_bright(mag_limit: float, url: str | None) -> np.ndarray:
+    return GaiaArchive(url).query(
+        "SELECT source_id, ra, dec, pmra, pmdec, phot_g_mean_mag AS g, bp_rp "
+        f"FROM gaiadr3.gaia_source WHERE phot_g_mean_mag < {mag_limit:g}"
+    )
+
+
+CATALOG_SOURCES.register(
+    "gaia",
+    CatalogSource(
+        name="gaia",
+        title="Gaia DR3 (gaiadr3.gaia_source)",
+        licence="CC BY-NC 3.0 IGO; credit ESA/Gaia/DPAC (docs/sky.md)",
+        noncommercial=True,
+        licence_url="https://www.cosmos.esa.int/web/gaia-users/license",
+        epoch=GAIA_EPOCH,
+        proper_motion=True,
+        directory="gaia-dr3-g{mag:g}-hpx{level}",
+        bright_file="bright_stars.npy",
+        magnitudes="Gaia G and BP-RP",
+        fetcher=lambda url: GaiaArchive(url),
+        bright=_gaia_bright,
+    ),
+)
 
 
 # -- the bright stars ---------------------------------------------------------------
@@ -591,6 +731,8 @@ def bright_stars(path: str | Path | None = None) -> Stars:
     :func:`robofast_core.zenodo.data_dir` (docs/sky.md). Raises
     :class:`CatalogUnavailable` if it is not there and cannot be fetched."""
     global _BRIGHT
+    if path is None and not noncommercial_allowed():
+        raise _refuse("the Gaia DR3 bright-star list")
     if path is None and _BRIGHT is not None:
         return _BRIGHT
     if path is None:
@@ -695,9 +837,16 @@ class Catalog:
         bright_match: float = 3.0,
         max_pm: float = 3000.0,
         doubles: DoubleStars | None = None,
+        allow_noncommercial: bool = True,
     ) -> None:
         self.tiles = tiles
-        self.bright = _default_bright() if isinstance(bright, str) else bright
+        allowed = noncommercial_allowed(allow_noncommercial)
+        if live is not None and not allowed:
+            raise _refuse("the live Gaia DR3 service")
+        if isinstance(bright, str):
+            # The default bright list is Gaia's: only where that is allowed.
+            bright = _default_bright() if allowed else None
+        self.bright = bright
         self.live = live
         #: The WDS (for target vetting), when cached.
         self.doubles = doubles
@@ -710,6 +859,13 @@ class Catalog:
     @property
     def mag_limit(self) -> float:
         return self.tiles.mag_limit if self.tiles is not None else self.bright_limit
+
+    @property
+    def source(self) -> CatalogSource:
+        """The tiles' catalog source (Gaia without tiles, or for tiles that
+        do not say: a stand-in with only ``cone``)."""
+        src = getattr(self.tiles, "source", None)
+        return src if isinstance(src, CatalogSource) else catalog_source("gaia")
 
     def cone(
         self,
@@ -727,7 +883,7 @@ class Catalog:
         field (``bright_only``: the bright stars alone, which need no tile
         and no network once ``bright_stars.npy`` is in place)."""
         ep = decimal_year(epoch)
-        widen = 0.0 if ep is None else abs(ep - GAIA_EPOCH) * self.max_pm / 3.6e6
+        widen = 0.0 if ep is None else abs(ep - self.source.epoch) * self.max_pm / 3.6e6
         r0 = radius + widen
         parts: list[Stars] = []
         gaia: Stars | None = None
@@ -770,17 +926,27 @@ class Catalog:
 def catalog_from_config(cfg: dict[str, Any] | None, *, base: Path | None = None) -> Catalog:
     """A :class:`Catalog` from a ``catalog`` config entry (docs/sky.md)::
 
-        {"cache_dir": "/var/lib/robofast/catalog", "level": 7, "mag_limit": 16,
+        {"source": "gaia", "allow_noncommercial": true,
+         "cache_dir": "/var/lib/robofast/catalog", "level": 7, "mag_limit": 16,
          "fetch": true, "live": false}
 
+    ``source``: a :data:`CATALOG_SOURCES` name (default ``gaia``);
+    ``allow_noncommercial`` false refuses non-commercial data
+    (:func:`noncommercial_allowed`; a Gaia source is then an error);
     ``cache_dir`` defaults to ``$ROBOFAST_CATALOG_DIR``, else
     ``~/.cache/robofast/catalog``; ``fetch`` (default true) lets missing
-    tiles be downloaded; ``live`` adds the VizieR service."""
+    tiles be downloaded (from ``archive_url``, default the source's own
+    service); ``live`` adds the VizieR Gaia service (Gaia only)."""
     cfg = dict(cfg or {})
     cfg.pop("_note", None)
     known = {"cache_dir", "level", "mag_limit", "fetch", "live", "bright", "archive_url"}
+    known |= {"source", "allow_noncommercial"}
     if set(cfg) - known:
         raise ValueError(f"catalog: unknown keys {sorted(set(cfg) - known)}")
+    source = catalog_source(cfg.get("source", "gaia"), "catalog.source")
+    allowed = noncommercial_allowed(cfg.get("allow_noncommercial"))
+    if cfg.get("live") and source.name != "gaia":
+        raise ValueError("catalog.live: the live service is Gaia's; not with another source")
     root = cfg.get("cache_dir") or os.environ.get("ROBOFAST_CATALOG_DIR")
     root_path = Path(root) if root else Path.home() / ".cache" / "robofast" / "catalog"
     if base is not None and not root_path.is_absolute():
@@ -789,9 +955,11 @@ def catalog_from_config(cfg: dict[str, Any] | None, *, base: Path | None = None)
         root_path,
         level=int(cfg.get("level", 7)),
         mag_limit=float(cfg.get("mag_limit", 16.0)),
-        fetch=GaiaArchive(cfg.get("archive_url")) if cfg.get("fetch", True) else None,
+        fetch=source.fetcher(cfg.get("archive_url")) if cfg.get("fetch", True) else None,
         bright=bool(cfg.get("bright", True)),
         live=bool(cfg.get("live", False)),
+        source=source,
+        allow_noncommercial=allowed,
     )
 
 
@@ -803,16 +971,39 @@ def catalog_at(
     fetch: Callable[[int, int, float], np.ndarray] | None = None,
     bright: bool = True,
     live: bool = False,
+    source: CatalogSource | str = "gaia",
+    allow_noncommercial: bool = True,
 ) -> Catalog:
     """A :class:`Catalog` on the cache directory ``root``: its Gaia tiles,
     the bright stars (``root/bright_stars.npy`` if present, else
     :func:`bright_stars`'s download) plus ``root/hipparcos-not-in-gaia.npy``
     (the bright stars Gaia lacks) and ``root/wds.npy`` (double stars) when
-    present (``scripts/build_catalog.py`` writes them)."""
+    present (``scripts/build_catalog.py`` writes them).
+
+    Another ``source``: its tiles, and its own bright-star file
+    (``root/<source.bright_file>``) when present; nothing of Gaia's.
+    ``allow_noncommercial`` false refuses a non-commercial source."""
     root = Path(root)
-    tiles = TileCache(root, level=level, mag_limit=mag_limit, fetch=fetch)
+    src = catalog_source(source) if isinstance(source, str) else source
+    allowed = noncommercial_allowed(allow_noncommercial)
+    if live and not allowed:
+        raise _refuse("the live Gaia DR3 service")
+    tiles = TileCache(
+        root,
+        level=level,
+        mag_limit=mag_limit,
+        fetch=fetch,
+        source=src,
+        allow_noncommercial=allowed,
+    )
     b: Stars | None = None
-    if bright:
+    if bright and src.name != "gaia":
+        own = root / src.bright_file
+        b = bright_stars(own) if own.is_file() else None
+        if b is not None:
+            b.source = np.full(len(b), src.name, dtype="<U8")
+            b.epoch = src.epoch
+    elif bright:
         b = _default_bright(root)
         hip = root / "hipparcos-not-in-gaia.npy"
         if hip.is_file() and b is None:
@@ -829,6 +1020,7 @@ def catalog_at(
         bright=b,
         live=VizierSource() if live else None,
         doubles=DoubleStars.load(wds) if wds.is_file() else None,
+        allow_noncommercial=allowed,
     )
 
 
@@ -937,3 +1129,8 @@ class DoubleStars:
         near = np.abs(r["dec"] - dec) <= radius
         sub = r[near]
         return sub[separation(ra, dec, sub["ra"], sub["dec"]) <= radius]
+
+
+# The built-in sources with a commercial-friendly licence (they register
+# themselves; imported last, as they use this module's tables).
+from robofast_core import catalog_sources as _catalog_sources  # noqa: E402,F401

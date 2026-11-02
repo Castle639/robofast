@@ -855,7 +855,7 @@ VALUES: dict[str, tuple[str, str, str]] = {
     "gstar_ra": ("GSRA", "deg", "Offset guide star RA (ICRS, epoch of obs)"),
     "gstar_dec": ("GSDEC", "deg", "Offset guide star Dec (ICRS, epoch of obs)"),
     "gstar_g": ("GSMAG", "mag", "Offset guide star magnitude (Gaia G)"),
-    "gstar_id": ("GSID", "", "Offset guide star Gaia DR3 source_id"),
+    "gstar_id": ("GSID", "", "Offset guide star catalog source_id"),
     "gstar_east": ("GSOFFE", "arcsec", "Guide star minus target, east"),
     "gstar_north": ("GSOFFN", "arcsec", "Guide star minus target, north"),
     "gstar_x": ("GSPIXX", "pix", "Guide star setpoint X (guide camera)"),

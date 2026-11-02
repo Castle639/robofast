@@ -25,6 +25,10 @@ first. Sources, in order:
 | WDS (`DoubleStars`) | the Washington Double Star catalog (158 000 pairs) | the cache directory | `build_catalog.py wds` |
 | VizieR (`VizierSource`) | Gaia DR3 for a field nothing cached covers | -- | every query; needs astroquery (optional) |
 
+The tiles come from one **catalog source**, `catalog.source` (below,
+"Catalog sources"): Gaia DR3 by default; UCAC4 or 2MASS for a user whose
+use Gaia's non-commercial licence does not cover.
+
 Bright-catalog stars are added to a Gaia answer only where Gaia has no star
 within 3 arcsec. A cone is widened by 3 arcsec/yr times the epoch difference
 before it is cut, so a fast-moving star that has moved into the field is
@@ -65,9 +69,96 @@ filling a night's targets ahead of time is the intended use.
 `$ROBOFAST_CATALOG_DIR`, else `~/.cache/robofast/catalog`:
 
 ```json
-"catalog": {"cache_dir": "/var/lib/robofast/catalog", "level": 7, "mag_limit": 16,
+"catalog": {"source": "gaia", "allow_noncommercial": true,
+            "cache_dir": "/var/lib/robofast/catalog", "level": 7, "mag_limit": 16,
             "fetch": true, "live": false}
 ```
+
+`source` and `allow_noncommercial` are described next; `archive_url`
+overrides the source's own service (the Gaia archive, IRSA).
+
+### Catalog sources
+
+`robofast_core.catalog.CATALOG_SOURCES` is a registry (docs/plugins.md):
+core registers three, and a plug-in may add its own (a `CatalogSource`:
+its licence, epoch, tile directory and fetcher).
+
+| `source` | Catalog | Positions | Proper motions | Magnitudes (`g`, `bp_rp` in the tiles) | Fetched from |
+|---|---|---|---|---|---|
+| `gaia` (default) | Gaia DR3 | J2016.0 | yes | Gaia G, BP-RP | the ESA Gaia archive (TAP) |
+| `ucac4` | UCAC4 (USNO; Zacharias et al. 2013), to R ~ 16 | J2000.0 | yes (1-6 mas/yr) | G estimated from APASS B, V; else 2MASS J, Ks; else UCAC's model magnitude | IRSA TAP, `ucac4_sources` |
+| `2mass` | 2MASS All-Sky Point Source Catalog (Skrutskie et al. 2006) | as observed, 1997-2001 (taken as J2000.0) | **none** | G and BP-RP estimated from J, Ks | IRSA TAP, `fp_psc` |
+
+Every source fills the same tile records, so the rest of robofast does not
+know which it has: limits are in (estimated) G, the plate solver ranks by
+it, the guider chooses guide stars by it, the simulator puts it through
+each port's zero point, vetting compares it. The estimates use the Gaia
+EDR3 documentation's photometric relations (section 5.5.1, tables 5.7 and
+5.8; Riello et al. 2021): `G - V` from `B - V`, `G - Ks` and `BP - RP`
+from `J - Ks` (`robofast_core/catalog_sources.py` has the coefficients).
+Measured against Gaia DR3 on one high-latitude tile (2026-11-02, the 81
+Gaia stars with G < 16 around (213.0, +62.3)): UCAC4 matched 74, estimated
+G off by -0.01 mag median, 0.12 rms, BP-RP 0.12 rms, positions 0.05"
+median; 2MASS matched 77, G -0.02 median, 0.15 rms, positions 0.10" median
+(their stars' motion since 2000 included). Good enough for guide-star
+limits, plate solving and simulated fields; not photometry.
+
+**2MASS has no proper motions**: a star moving 50 mas/yr is 1.3" from its
+2MASS position in 2026. Plate solving tolerates that (the solver's match
+radius is larger); for offset guiding on a fast-moving star, and the
+acquisition-offset check of MINERVA's sheet (`docs/minerva_sheet.md`),
+prefer UCAC4. Neither carries the Gaia-lacking bright supplement or a
+bright-star list unless you build one: `build_catalog.py bright --source
+ucac4 --cache DIR` writes `ucac4_bright_stars.npy` (UCAC4 includes the
+Hipparcos and Tycho-2 bright stars), which `bright_only` queries (pointing
+models) then use.
+
+```sh
+python scripts/build_catalog.py tiles --source ucac4 --cache DIR --field 212.72 62.52 0.4
+python scripts/build_catalog.py bright --source ucac4 --cache DIR
+```
+
+Each source has its own tile directory under the cache
+(`ucac4-g16-hpx7/`, `2mass-psc-g16-hpx7/`), and its manifest records the
+source, licence and whether it is non-commercial.
+
+### Licences
+
+| Data | Licence | Commercial use | Source of the terms |
+|---|---|---|---|
+| Gaia DR3 (tiles, `bright_stars.npy`, the Zenodo record, the live VizieR service) | CC BY-NC 3.0 IGO | only with ESA's prior authorisation (request to data.licences@esa.int) | <https://www.cosmos.esa.int/web/gaia-users/license>; <https://www.cosmos.esa.int/web/esdc/terms-and-conditions> |
+| Hipparcos stars Gaia lacks | fetched from the ESA Gaia archive, whose terms (CC BY-NC 3.0 IGO) apply | as Gaia | <https://www.cosmos.esa.int/web/esdc/terms-and-conditions> |
+| UCAC4 | a US Government work (US Naval Observatory); "free of charge"; cite Zacharias et al. 2013, AJ 145, 44 and IRSA's DOI 10.26131/IRSA17 | no restriction stated | the UCAC4 readme (`readme_u4.txt`, distributed with the catalog); <https://irsa.ipac.caltech.edu/data/USNO/UCAC4/overview.html> |
+| 2MASS Point Source Catalog | public: IRSA's public data have "no usage restrictions"; acknowledgement and citation (Skrutskie et al. 2006, AJ 131, 1163) requested | no restriction stated | <https://irsa.ipac.caltech.edu/data_use_terms.html>; <https://ipac.caltech.edu/2mass/releases/allsky/faq.html> (the acknowledgement) |
+| WDS | a US Government work (US Naval Observatory) | yes | (above) |
+
+UCAC4 and 2MASS are US Government-funded catalogs without a licence of
+their own; neither states a restriction on commercial use, and both ask
+to be acknowledged. robofast does not give legal advice: a commercial user
+should read these terms (and, for 2MASS, can confirm with IRSA's helpdesk)
+before relying on them.
+
+**Refusing non-commercial data.** `"allow_noncommercial": false` in a
+`catalog` entry, or `ROBOFAST_ALLOW_NONCOMMERCIAL=0` in the environment
+(a floor for the whole host: no config turns it back on), makes robofast
+refuse every non-commercial file: a Gaia source is an error when the
+config is loaded (`NonCommercialRefused`, saying why and what to do), as
+is the live VizieR service; the Gaia bright-star list and the Hipparcos
+supplement are never read; the environment variable also stops the
+Zenodo download of the Gaia extracts (`python -m robofast_core.zenodo
+fetch` skips that record). The test suite's own fixtures are exempt only
+because the tests do not set it. Configure the `catalog` entry of every
+service that has one (guider, frame solver, vetting, pointing model,
+rotator calibration) or, simpler, set the environment variable in the
+systemd units.
+
+The acknowledgements, for anything published with these data: Gaia's
+(below); for UCAC4, cite Zacharias et al. 2013; for 2MASS: "This
+publication makes use of data products from the Two Micron All Sky
+Survey, which is a joint project of the University of Massachusetts and
+the Infrared Processing and Analysis Center/California Institute of
+Technology, funded by the National Aeronautics and Space Administration
+and the National Science Foundation."
 
 ```sh
 python scripts/build_catalog.py tiles --cache DIR --targets sites/minerva/targets.example.json
@@ -89,6 +180,7 @@ decision 2026-10-31). Everything is fetched on first use and cached:
 | What | Licence | Fetched from | Cached in |
 |---|---|---|---|
 | Gaia DR3 tiles (G < 16) | CC BY-NC 3.0 IGO | the ESA Gaia archive (TAP), per tile, as needed | `<cache_dir>` (catalog config) |
+| UCAC4 or 2MASS tiles (`source: ucac4` / `2mass`) | US Government catalogs (above, "Licences") | IRSA (TAP), per tile, as needed | `<cache_dir>` |
 | `bright_stars.npy` (Gaia DR3, G < 6.5) | CC BY-NC 3.0 IGO | Zenodo record `gaia_extracts` (pinned by size and md5 in `robofast_core/zenodo_assets.py`) | the data directory |
 | `test_fixture_tiles.npz` (Gaia DR3 tiles of the five test fields) | CC BY-NC 3.0 IGO | the same Zenodo record; read by the test suite only | the data directory |
 | Hipparcos stars Gaia lacks | ESA; terms not stated plainly, so never redistributed | the Gaia archive (`build_catalog.py hipparcos`) | `<cache_dir>` |
@@ -139,7 +231,8 @@ acknowledgement:
 
 and cite Gaia Collaboration, Prusti et al. 2016, A&A 595, A1 and Gaia
 Collaboration, Vallenari et al. 2023, A&A 674, A1. A commercial user should
-check ESA's terms before using the Gaia data at all.
+check ESA's terms before using the Gaia data at all, or choose another
+source ("Catalog sources", "Licences" above).
 
 **Publishing a new version** of the Zenodo record (a rebuilt bright-star
 list, new test fields): `python scripts/build_catalog.py bundle --out DIR`
