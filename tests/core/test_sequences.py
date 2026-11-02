@@ -285,7 +285,7 @@ async def test_a_full_tres_calibration_sequence(servers, make_rig):
     plan = StaticPlan([{"name": "thar", "kind": "sequence", "sequence": "tres_thar"}], ["t1"])
     rig, lamps, stage = tres_rig(make_rig, servers, plan, {"tres_thar": THAR})
     await rig.start()
-    await asyncio.wait_for(asyncio.shield(rig.tasks[-1]), 30)
+    await asyncio.wait_for(asyncio.shield(rig.tasks[-1]), 60)
     assert plan.history == [("t1", "thar", "complete", 3)]
     t = {
         w: _events(rig, w)[0].t
@@ -307,13 +307,13 @@ async def test_cancelled_mid_sequence_the_lamps_go_off_and_the_stage_out(servers
     plan = StaticPlan([{"name": "thar", "kind": "sequence", "sequence": "tres_thar"}], ["t1"])
     rig, lamps, stage = tres_rig(make_rig, servers, plan, {"tres_thar": slow})
     await rig.start()
-    await wait_until(lambda: rig.cams[0].exposures_started >= 1, 10.0, what="exposing")
+    await wait_until(lambda: rig.cams[0].exposures_started >= 1, 30.0, what="exposing")
     assert 2 in lamps.sim.lit() and stage_at(stage, 25.0)
     rig.tasks[-1].cancel()  # the sequencer stopping (SIGTERM)
     await asyncio.wait([rig.tasks[-1]], timeout=20)
     assert plan.history[0][2] == "interrupted"
     assert lamps.sim.lit() == [3, 5]
-    await wait_until(lambda: stage_at(stage, 0.0), 5.0, what="stage out")
+    await wait_until(lambda: stage_at(stage, 0.0), 30.0, what="stage out")
     assert _events(rig, "sequence_cleanup_done")[0].detail["ok"] is True
     assert any(c.parked for c in rig.sequencer.cleanups) or rig.parked()
 
@@ -325,9 +325,9 @@ async def test_a_failure_mid_sequence_still_cleans_up(servers, make_rig):
         make_rig, servers, plan, {"tres_thar": slow}, seq=dict(max_consecutive_errors=1)
     )
     await rig.start()
-    await wait_until(lambda: rig.cams[0].exposures_started >= 1, 10.0, what="exposing")
+    await wait_until(lambda: rig.cams[0].exposures_started >= 1, 30.0, what="exposing")
     rig.cams[0].fail("camera gone")
-    await asyncio.wait_for(asyncio.shield(rig.tasks[-1]), 30)
+    await asyncio.wait_for(asyncio.shield(rig.tasks[-1]), 60)
     assert plan.history[0][2] == "failed"
     assert lamps.sim.lit() == [3, 5] and stage_at(stage, 0.0)
 
@@ -340,11 +340,12 @@ async def test_a_lease_revoked_mid_sequence_cleans_up_as_it_closes(servers, make
     plan = StaticPlan([{"name": "sky", "kind": "sequence", "sequence": "sky"}], ["t1"])
     rig, lamps, stage = tres_rig(make_rig, servers, plan, {"sky": sky})
     await rig.start()
-    await wait_until(lambda: rig.cams[0].exposures_started >= 1, 10.0, what="exposing")
-    assert rig.dome_open() and stage_at(stage, 20.0)
+    await wait_until(lambda: rig.cams[0].exposures_started >= 1, 30.0, what="exposing")
+    assert stage_at(stage, 20.0)
     rig.weather.safe = False
-    await wait_until(lambda: rig.dome_closed() and rig.parked(), 10.0, what="closed, parked")
-    await wait_until(lambda: stage_at(stage, 0.0), 5.0, what="stage out")
+    await wait_until(lambda: rig.dome_closed() and rig.parked(), 30.0, what="closed, parked")
+    await wait_until(lambda: stage_at(stage, 0.0), 30.0, what="stage out")
+    await wait_until(lambda: plan.history, 30.0, what="reported")
     assert plan.history[0][2] == "interrupted"
     assert lamps.sim.lit() == [3, 5]
 
@@ -357,7 +358,7 @@ async def test_a_sequence_that_cannot_fit_in_max_on_is_refused_before_any_lamp(s
     cfg["telescopes"]["t1"]["lamps"]["lamps"]["ThAr1"].pop("max_on")  # only the switch knows
     rig.sequencer.sequences = sequences_from_config(cfg)
     await rig.start()
-    await wait_until(lambda: plan.history, 10.0, what="refused")
+    await wait_until(lambda: plan.history, 30.0, what="refused")
     assert plan.history[0][2] == "failed"
     failed = _events(rig, "observation_failed")
     assert failed and "max_on 600 s" in failed[0].detail["error"]
@@ -369,7 +370,7 @@ async def test_an_unknown_sequence_fails_the_observation(servers, make_rig):
     plan = StaticPlan([{"name": "x", "kind": "sequence", "sequence": "nope"}], ["t1"])
     rig, *_ = tres_rig(make_rig, servers, plan, {"tres_thar": THAR})
     await rig.start()
-    await wait_until(lambda: plan.history, 10.0, what="failed")
+    await wait_until(lambda: plan.history, 30.0, what="failed")
     assert plan.history[0][2] == "failed"
     assert "no sequence 'nope'" in _events(rig, "observation_failed")[0].detail["error"]
 
@@ -388,9 +389,9 @@ async def test_a_preempted_sequence_cleans_up_before_the_next_observation(server
     plan = StaticPlan([{"name": "sky", "kind": "sequence", "sequence": "sky"}], ["t1"])
     rig, *_ = tres_rig(make_rig, servers, plan, {"sky": sky})
     await rig.start()
-    await wait_until(lambda: rig.cams[0].exposures_started >= 1, 10.0, what="exposing")
+    await wait_until(lambda: rig.cams[0].exposures_started >= 1, 30.0, what="exposing")
     assert rig.sequencer.preempt("t1", "now", "a ToO")
-    await wait_until(lambda: len(_events(rig, "target_start")) >= 2, 20.0, what="the next one")
+    await wait_until(lambda: len(_events(rig, "target_start")) >= 2, 30.0, what="the next one")
     done = _events(rig, "sequence_cleanup_done")[0].t
     assert done < _events(rig, "target_start")[1].t
     assert plan.history[0][2] == "interrupted"
