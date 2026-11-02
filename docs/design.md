@@ -805,8 +805,8 @@ operator-duty checks (needed or not, whether an expired duty closes or only
 alarms, its ttl and grace) and automatic fault clearing; the weather,
 fault, shutter, lease, park and heartbeat checks are enforced in every mode
 that may open. The supervisor holds the mode (saved across restarts; a
-missing or unreadable file means the config's default, which the shipped
-sites make `attended`, the safe one) and the sequencer, the observer console
+missing or unreadable file means the config's default: `robotic` at
+MINERVA, `attended` at the 60-inch and MEarth South) and the sequencer, the observer console
 and the request API read it from its status; every switch (console or
 `python -m robofast_core.modes`) is logged with who, when and why and
 raised as a notice, never opens by itself (a less safe mode takes effect
@@ -814,7 +814,13 @@ through the normal lease path), and closes at once when the live lease may
 not go on under the new mode. The active mode is in the FITS headers
 (`OBSMODE`) and the plan record. `safety.attended_only` (section 3.3) is
 now the enclosure's floor (no mode lowers it: the built-in `robotic` is not
-offered without a heartbeat); the enclosure's `shadow` mode is the
+offered without a heartbeat). Running unattended with no watchdog anyway is
+the site's explicit choice (JDE 2026-11-02;
+`safety.allow_unattended_without_watchdog`, docs/modes.md): it lifts the
+floor and robofast warns loudly wherever the enclosure shows (the log at
+start, on every switch and periodically, the switch notice, the status,
+the console's enclosure panel and alarm list, the morning report). MEarth
+South opts in; the 60-inch does not. The enclosure's `shadow` mode is the
 documented way to shadow a legacy system with all of robofast (the weather
 bridge's `--shadow` stays the bridge's own flag).
 

@@ -420,8 +420,10 @@ async def test_shipped_enclosure_config_builds_both_services():
     names = sorted(enclosure_config.telescopes(config))
     assert names == [f"tel{n}" for n in range(11, 19)]
     safety = SafetyConfig(**config["safety"])
-    # No watchdog on this roof: attended only, and a roll-off roof parks first.
-    assert safety.attended_only and safety.heartbeat_interval is None
+    # No watchdog on this roof, but the site opts in to running it unattended
+    # (docs/modes.md; it starts attended); a roll-off roof parks first.
+    assert safety.heartbeat_interval is None and safety.unwatched
+    assert config["mode"] == "attended"
     assert safety.park_before_close and safety.fault_action == "Faults"
     assert not safety.fault_auto_clear
     SequencerConfig(**config["sequencer"])

@@ -187,6 +187,20 @@ def build_report(inp: _Inputs, qa: QAConfig | None = None) -> dict[str, Any]:
         "openings": len(intervals),
         "closes": closes,
     }
+    # Unattended with no hardware watchdog (the site's opt-in; docs/modes.md):
+    # the supervisor's ``unwatched`` events, said first in the report.
+    unwatched = [e for e in ev if e["what"] == "unwatched"]
+    rep["unwatched"] = (
+        None
+        if not unwatched
+        else {
+            "active": any(e["detail"].get("active") for e in unwatched),
+            "events": [
+                {"time": e["t"].isoformat(), "source": e["source"], **e["detail"]}
+                for e in unwatched
+            ],
+        }
+    )
     rep["weather"] = [
         {"time": e["t"].isoformat(), "detail": e["detail"]}
         for e in ev
@@ -344,6 +358,15 @@ def render_markdown(rep: dict[str, Any]) -> str:
     qa = rep["qa"]
     L += ["**QA: all good**" if qa["ok"] else "**QA: needs a look**", ""]
     L += [f"- {x}" for x in qa["look_at"]] + ([""] if qa["look_at"] else [])
+    uw = rep.get("unwatched")
+    if uw and uw["active"]:
+        modes = sorted({str(e.get("mode")) for e in uw["events"] if e.get("active")})
+        L += [
+            "**WARNING: the enclosure ran unattended with NO hardware watchdog** (mode"
+            f" {', '.join(modes)}; the site's safety.allow_unattended_without_watchdog):"
+            " nothing would have closed it had the safety supervisor died. docs/modes.md.",
+            "",
+        ]
     enc = rep["enclosure"]
     L += [
         "## Enclosure",
