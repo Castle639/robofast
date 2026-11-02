@@ -52,7 +52,7 @@ filled in there:
 | `snapshot_dir`, `keep` | where snapshots go (default `$ROBOFAST_DATA_DIR/minerva_sheet`, see `robofast_core.zenodo.data_dir`) and how many are kept (30) |
 
 The live fetch needs `gspread` and `google-auth`: `pip install --group
-sheets`. They are optional imports; nothing else in robofast needs them.
+sheets` (from the repository) or `pip install ".[sheets]"`. They are optional imports; nothing else in robofast needs them.
 Cells are read unformatted (the stored numbers, not the Sheet's display
 rounding of them), so coordinates keep their full precision.
 
