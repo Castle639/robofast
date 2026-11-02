@@ -135,11 +135,12 @@ sequencer, no Aqawan server.
    (`robofast-pwi-server --config $C --hardware`), reading status through
    Alpaca first, to check the mapping.
 
-**No homing in the first session.** T1's home sensor was replaced years
+**No home until the settings are checked.** T1's home sensor was replaced years
 ago and the PWI2 home-direction setting changed with it, so a Find Home
 from PWI4 may drive the wrong way: nothing in robofast homes implicitly,
 and pwi.md's checklist confirms the axis directions with tiny jogs and maps
-the PWI2 setting before the first (per-axis) home.
+the PWI2 settings to PWI4 (pwi.md checklist 7) before the first home, one
+axis at a time where PWI4 allows it.
 
 Stop a move **before** closing the tunnel: when the tunnel drops, the mount
 carries on with whatever it was last told.
