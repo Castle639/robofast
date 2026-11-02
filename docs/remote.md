@@ -28,7 +28,7 @@ ssh -N -p <gateway-ssh-port> \
 |---|---|---|---|
 | 7100 | Aqawan 1 PAC (TCP 22004) | `aqawan1_shadow.json`, `aqawan1_control.json` | see the Aqawan caution |
 | 7101 / 7102 | T1 / T2 PWI2 HTTP (44444) | `t1_pwi2.json`, `t2_pwi2.json` | in use by the legacy system today |
-| 7141 / 7142 | T1 / T2 PWI4 HTTP (8220) | `t1_pwi4.json`, `t2_pwi4.json` | PWI4 not installed yet |
+| 7141 / 7142 | T1 / T2 PWI4 HTTP (8220) | `t1_pwi4.json`, `t2_pwi4.json` | T1: installed, but its HTTP server must first listen on the LAN, firewalled to the gateway only (pwi.md); T2: not installed |
 | 7151 / 7152 | T1 / T2 ASCOM Remote (Alpaca: cameras) | `aqawan1.json` cameras | not installed yet |
 
 Check what is forwarded before starting anything: `ss -ltn | grep ':71'`.
@@ -111,6 +111,12 @@ sequencer, no Aqawan server.
 5. Only then, optionally, the PWI Alpaca server
    (`robofast-pwi-server --config $C --hardware`), reading status through
    Alpaca first, to check the mapping.
+
+**No homing in the first session.** T1's home sensor was replaced years
+ago and the PWI2 home-direction setting changed with it, so a Find Home
+from PWI4 may drive the wrong way: nothing in robofast homes implicitly,
+and pwi.md's checklist confirms the axis directions with tiny jogs and maps
+the PWI2 setting before the first (per-axis) home.
 
 Stop a move **before** closing the tunnel: when the tunnel drops, the mount
 carries on with whatever it was last told.
