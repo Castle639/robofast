@@ -19,18 +19,28 @@
   "requests": "requests.example.json",
   "state": "dispatch-state.json",
   "too_dropbox": "too-dropbox",
+  "seeing": {
+    "_note": "Where the seeing comes from (docs/seeing.md): the guiders' live FWHM, median of 30 min; guide 'auto' falls back to the guiding model's seeing.",
+    "source": "guider", "window": 1800, "max_age": 900, "min_samples": 3, "unknown": "pass"
+  },
   "instruments": {
     "spectrograph": {
       "type": "kiwispec",
       "guiding": {
         "_note": [
           "When to offset guide (robofast_core/guider/recommend.py; docs/offset_guiding.md): guide 'auto'.",
-          "CDK700 0.7 m; FAU plate scale 0.265 arcsec/px (legacy config/fau_t1.ini); the FAU sees ~2 % of",
-          "the light (docs/acquisition.md). ASSUMED, to measure: fiber_diameter, read_noise, obscuration,",
-          "throughput, exposure. Thresholds: max_error (arcsec rms), min_snr, prefer_annulus."
+          "CDK700 0.7 m. Sources: fiber_diameter 2.27 arcsec = the 50 um fiber core at 22 um/arcsec",
+          "(Swift et al. 2015, JATIS 1, 027002, sec. III.3); plate_scale 0.265 arcsec/px confirmed from the",
+          "FAU frames' FITS WCS; exposure 10 s (FAU frames use 8.6-15 s). The FAU's ZWO ASI174MM runs at",
+          "gain 0 (the legacy zwo.py sets ASI_GAIN=0 'for maximum dynamic range'): read_noise 6 e- and",
+          "~3.9 e-/ADU (12-bit) are ZWO DATASHEET ESTIMATES at gain 0, consistent with the measured",
+          "0.9-1.5 ADU frame noise. throughput 0.02 is UNCONFIRMED and may be much lower: in 6 recent T2 FAU",
+          "frames no spill or annulus showed within 40 arcsec of the fiber at 8 sigma. ASSUMED: obscuration.",
+          "seeing: the fallback when the guiders have nothing recent (docs/seeing.md).",
+          "Thresholds: max_error (arcsec rms), min_snr, prefer_annulus."
         ],
-        "aperture": 0.7, "obscuration": 0.25, "fiber_diameter": 2.0, "plate_scale": 0.265,
-        "read_noise": 3.0, "throughput": 0.02, "exposure": 1.0,
+        "aperture": 0.7, "obscuration": 0.25, "fiber_diameter": 2.27, "plate_scale": 0.265,
+        "read_noise": 6.0, "throughput": 0.02, "exposure": 10.0,
         "sky": 21.0, "seeing": 1.8, "star_g": 10.5, "separation": 60.0,
         "max_error": 0.3, "min_snr": 5.0, "prefer_annulus": 1.5
       }

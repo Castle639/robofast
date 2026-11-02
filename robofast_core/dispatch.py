@@ -24,7 +24,9 @@ next observation, and it decides from scratch, RTS2/POCS-style:
      airmass at most ``max_airmass``; hour angle within ``[min_ha, max_ha]``
      at its start and end; and the Moon at least ``min_moon_sep`` away
      (a configuration's ``min_lunar_distance``) and, if the configuration
-     sets ``max_lunar_phase``, at most that fraction illuminated.
+     sets ``max_lunar_phase``, at most that fraction illuminated; if it
+     sets ``max_seeing``, the seeing now (the plan's seeing source,
+     docs/seeing.md: by default the guiders' live FWHM) at most that.
      A configuration's ``constraints`` can only tighten these limits.
 
    **An error is not "observable".** An exception while evaluating a request
@@ -388,6 +390,7 @@ class DispatchScheduler:
         record: PlanRecord | None = None,
         vetter: Any = None,
         instruments: dict[str, Any] | None = None,
+        seeing: Any = None,
     ) -> None:
         if not allow_iers_download:
             sky.offline_iers()
@@ -419,6 +422,13 @@ class DispatchScheduler:
         #: a request naming one is checked against its frame type.
         self.sequences: dict[str, Any] = {}
         self.clock = clock or (lambda: datetime.now(UTC))
+        #: Where the seeing comes from (robofast_core.seeing; docs/seeing.md):
+        #: ``guide: "auto"`` and ``max_seeing``. Default: the guiders.
+        if seeing is None:
+            from robofast_core.seeing import seeing_from_config
+
+            seeing = seeing_from_config(None, self.clock)
+        self.seeing = seeing
         self.state_path = Path(state) if state is not None else None
         self.dropbox = Path(too_dropbox) if too_dropbox is not None else None
         self.groups: dict[str, RequestGroup] = {}
@@ -501,6 +511,21 @@ class DispatchScheduler:
         log.warning("spectrograph %s", "available again" if down is None else f"down: {down}")
         self._record(self.clock(), "spectrograph", available=available, reason=reason)
 
+    def bind_values(self, registry: Any) -> bool:
+        """The sequencer's value registry: the seeing source collects the
+        guiders' FWHM from it (docs/seeing.md). True: the source wants the
+        guiders' values published there."""
+        return self.seeing.bind(registry)
+
+    def seeing_now(self, now: datetime | None = None) -> Any:
+        """The seeing source's estimate now (with the configured fallback),
+        or None (:class:`robofast_core.seeing.Seeing`)."""
+        return self.seeing.current(now or self.clock())
+
+    def _seeing_record(self, now: datetime) -> dict[str, Any]:
+        est = self.seeing_now(now)
+        return {"seeing": None if est is None else est.as_json()}
+
     async def next_observation(self, telescope: str) -> Observation | Idle | None:
         now = self.clock()
         self._expire(now)
@@ -549,7 +574,13 @@ class DispatchScheduler:
         if best is None:
             self._idle.add(telescope)
             self.decisions.append((now, telescope, None, -math.inf))
-            self._record(now, "idle", telescope=telescope, **self._summary(None, cands))
+            self._record(
+                now,
+                "idle",
+                telescope=telescope,
+                **self._seeing_record(now),
+                **self._summary(None, cands),
+            )
             return Idle(self.config.idle_poll, "nothing observable")
         self._idle.discard(telescope)
         req = best.request
@@ -578,6 +609,7 @@ class DispatchScheduler:
             score=best.score,
             terms=best.terms,
             **self._guide_record(visit, obs),
+            **self._seeing_record(now),
             **({"demoted": best.demoted} if best.demoted else {}),
             **self._summary(best, cands),
         )
@@ -1277,6 +1309,23 @@ class DispatchScheduler:
                     cand.reasons.append(
                         f"{name}: Moon {phase:.2f} illuminated (limit {phase_limit:g})"
                     )
+            seeing_limit = c.constraints.max_seeing
+            if seeing_limit is not None:
+                why = self._seeing_check(seeing_limit, sky_now.when)
+                if why is not None:
+                    cand.reasons.append(f"{name}: {why}")
+
+    def _seeing_check(self, limit: float, now: datetime) -> str | None:
+        """Why ``max_seeing`` ``limit`` fails now (None: it holds). With no
+        seeing at all, the seeing entry's ``unknown`` decides."""
+        est = self.seeing_now(now)
+        if est is None:
+            if self.seeing.unknown == "fail":
+                return f'seeing unknown (max_seeing {limit:g}")'
+            return None
+        if not (math.isfinite(est.value) and est.value <= limit):
+            return f'seeing {est.value:.2f}" ({est.source}) > max_seeing {limit:g}"'
+        return None
 
     def _score(
         self,
@@ -1558,7 +1607,8 @@ class DispatchScheduler:
         """How configuration ``c`` is guided: ``offset``, or for ``guide:
         "auto"`` the recommendation of its instrument's guiding model for
         the target's ``target_mag`` under tonight's sky (Moon) and the
-        model's seeing (docs/offset_guiding.md). Without a model or a
+        seeing from the plan's seeing source, else the model's
+        (docs/offset_guiding.md, docs/seeing.md). Without a model or a
         magnitude, ``auto`` guides on the target."""
         if c.guide_on == "offset":
             return {"on": "offset"}
@@ -1587,9 +1637,15 @@ class DispatchScheduler:
             sky_mag = rc.sky_brightness(model, _moon_illumination(sn), moon_alt)
         except Exception as exc:
             log.warning("guide auto: no Moon for the sky brightness (%r); dark sky assumed", exc)
-        rec = rc.recommend(model, c.guide_mag, sky=sky_mag, star_g=star_g)
+        seeing = self.seeing.current(self.clock(), fallback=model.seeing)
+        rec = rc.recommend(
+            model, c.guide_mag, sky=sky_mag, star_g=star_g, seeing=seeing and seeing.value
+        )
         log.info("guide auto for %s (%s): %s -- %s", c.id, name, rec.method, rec.reason)
-        return {"on": rec.method, "instrument": name, "recommendation": rec.as_json()}
+        out = {"on": rec.method, "instrument": name, "recommendation": rec.as_json()}
+        if seeing is not None:
+            out["seeing"] = seeing.as_json()
+        return out
 
     @staticmethod
     def _guide_record(visit: _Visit, obs: Observation) -> dict[str, Any]:
@@ -1839,6 +1895,8 @@ def dispatch_from_config(
           "instruments": {"spectrograph": {"type": "kiwispec"}},   # names' types
           "plugins": ["mysite.robofast"],     # optional: plug-ins (docs/plugins.md)
           "vetting": "sky.json",          # optional: target vetting (docs/sky.md)
+          "seeing": {"source": "guider"},  # optional: where seeing comes from
+                                           # (docs/seeing.md)
           ...DispatchConfig fields (max_sun_alt, w_setting, idle_poll, ...)
         }
 
@@ -1902,6 +1960,12 @@ def dispatch_from_config(
             vetter = Vetter.from_config(json.loads(vpath.read_text()), base=vpath.parent)
         else:
             vetter = Vetter.from_config(vetting, base=base)
+    from robofast_core.seeing import seeing_from_config
+
+    try:
+        seeing = seeing_from_config(config.pop("seeing", None), clock)
+    except ValueError as exc:
+        raise ValueError(f"dispatch plan: {exc}") from None
     instruments = config.pop("instruments", None) or {}
     if not isinstance(instruments, dict):
         raise ValueError("dispatch plan: 'instruments' is {name: {'type': ...}}")
@@ -1935,4 +1999,5 @@ def dispatch_from_config(
         record=record,
         vetter=vetter,
         instruments=instruments,
+        seeing=seeing,
     )

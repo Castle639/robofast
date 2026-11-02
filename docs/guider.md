@@ -296,11 +296,14 @@ built-in `robofast_core.devices` plug-in. In short:
 **Telemetry**: state and reason; per frame (ring buffer): centroid, error,
 correction, tip/tilt position, flux, FWHM, latency; over the window:
 residual rms (pixels, and arcsec with `plate_scale`), loop rate, latency
-statistics, flux, FWHM, range used, offloads, re-acquisitions.
+statistics, flux, FWHM, range used, offloads, re-acquisitions; with
+`plate_scale`, the seeing (`seeing_arcsec`: a whole star's FWHM, or on a
+fiber the width the annulus centroider learned from a star clear of the
+hole; docs/seeing.md).
 
 **Value registry** (design.md 3.8): `<scope>.guide_state` (GUIDSTAT),
 `guide_rms` (GUIDRMS), `guide_rms_arcsec` (GUIDRMSA), `guide_flux`,
-`guide_fwhm`, `guide_rate`, `guide_latency`, `guide_exptime`, `fiber_x/y`
+`guide_fwhm`, `guide_seeing` (GUIDSEE, arcsec), `guide_rate`, `guide_latency`, `guide_exptime`, `fiber_x/y`
 (XSCIFIB/YSCIFIB, as tres-guider), `tiptilt_a/b` (TTPOSA/B). The service
 keeps its own registry; `GuiderRemote` copies them into the sequencer's
 registry every `poll_interval` while guiding, so they land in the FITS
@@ -336,11 +339,14 @@ guider fails an observation that asks to guide. Config: per telescope,
 ## Safety
 
 Every real device backend -- a serial port (SX AO), PI's USB or TCP, a ZWO
-or frame-grabber camera, an Alpaca camera or telescope at a non-loopback
-address -- is refused unless the config says `"allow_hardware": true`
-**and** the command line passes `--hardware` (as the Aqawan and TCSGO
-servers). Simulators and loopback devices never need it. The service's
-tests check every backend against the gate.
+or frame-grabber camera, an Alpaca camera or telescope that is not a
+verified simulator -- is refused unless the config says
+`"allow_hardware": true` **and** the command line passes `--hardware` (as
+the Aqawan and TCSGO servers). An Alpaca device on loopback is a simulator
+only if the port belongs to OmniSim or a registered robofast simulator
+([the hardware gate](design.md#the-hardware-gate)): an ASCOM Remote
+reached through an SSH tunnel is loopback too, and is refused. The
+service's tests check every backend against the gate.
 
 ## The simulator
 

@@ -103,8 +103,9 @@ their good ideas instead (section 9).
   and SI camera server, runs one job at a time with every step bounded,
   terminates on exposure-meter counts and reports the flux-weighted
   midpoint, and gives the sequencer's cleanup a bounded abort that never
-  raises. Like the Aqawan server, it refuses a non-loopback PC without
-  `allow_hardware` in the config and `--hardware`.
+  raises. Like the Aqawan server, it refuses anything but a verified
+  simulator without `allow_hardware` in the config and `--hardware`
+  (below, "The hardware gate").
 - **The guider** (`robofast_core/guider/`, `docs/guider.md`) is one such
   service per guide camera, run on the computer the camera is plugged into
   so frames never cross the network in the loop: camera, centroider,
@@ -114,6 +115,32 @@ their good ideas instead (section 9).
   behind the same `allow_hardware` + `--hardware` gate.
 - Vendor extras that Alpaca lacks (PWI4 M3 port selection, fans, pointing
   models) use Alpaca `Action()` or a typed side channel per device client.
+- <a id="the-hardware-gate"></a>**The hardware gate.** A server that speaks
+  a vendor protocol (PAC, TCSGO, the spectrograph PC, SNMP, PWI, a guide
+  camera's Alpaca server, a legacy Redis) talks to real hardware only with
+  `"allow_hardware": true` in its config **and** `--hardware` on its
+  command line; shipped configs say false. Without both it talks only to a
+  simulator it has **verified** itself (`robofast_core/hwgate.py`).
+  Loopback is not evidence: `ssh -L 7100:pac:22004` puts the real PAC on
+  127.0.0.1, as would socat, a VPN helper or a container port mapping. A
+  simulator proves itself by holding a Linux abstract Unix socket
+  `robofast-sim:<proto>:<port>` in the process that owns the listening
+  socket (`hwgate.SimulatorRegistration`; OmniSim is recognised by its
+  loaded assembly). The server checks from `/proc` -- which process holds
+  the listening socket, and whether it holds the registration -- before the
+  first byte goes out, so an unverified endpoint is sent nothing, not even
+  a status query; the registration dies with the process, so it cannot go
+  stale; and a client that connects per command re-verifies before every
+  connection (`hwgate.SimulatorGuard`), so a tunnel that takes over a dead
+  simulator's port is refused. Alternatives rejected: an in-band identity
+  probe (it sends bytes to whatever answers, and binary or fixed-format
+  protocols such as TCSGO's and the SI camera's have nowhere to put a
+  marker) and a `"simulator": true` config flag (a claim, not a check: the
+  loophole is exactly a config that says one thing while a tunnel says
+  another). Limits, all failing closed: Linux only, same host, and only
+  processes this user can inspect; anything else needs the gate. A serial
+  or parallel port has no such ambiguity: its servers run their simulator
+  in-process (`port.type: "sim"`) and gate every real device path.
 - **robofast ships its own small asyncio Alpaca client.** alpyca serializes
   every request in a process behind one lock with a fixed 5 s timeout, so a
   hung device delays the safety supervisor's close. Our client has per-call
@@ -345,7 +372,14 @@ dispatch scheduler chooses annulus or offset guiding from the instrument's
 guiding model (`instruments.<name>.guiding`:
 `robofast_core/guider/recommend.py`, a photon-noise prediction of each
 method's error checked against the guide loop in the simulator), and
-records the recommendation and its reason.
+records the recommendation and its reason. **Seeing** comes from a
+configured, pluggable source (`robofast_core/seeing.py`,
+`docs/seeing.md`; the dispatch plan's `seeing` entry): by default the
+guiders' live FWHM (the median over the last 30 min, stale after 15),
+falling back to the guiding model's value; the same estimate decides a
+configuration's `max_seeing` constraint, and the decision record keeps
+it (JDE 2026-11-02: "schedulers may use seeing as a selection criterion,
+too").
 
 **Saving frames.** With an `images` entry in the enclosure config, every
 frame is saved (`robofast_core/imaging.py`, `docs/data.md`). The image is
@@ -582,8 +616,9 @@ may be wrong about the 60-inch's focus.
   every configuration not yet finished; an observation in progress
   finishes, then its visit ends. A TOM uses TOM Toolkit's own
   `OCSFacility` with settings only (`docs/tom_facility.md`); not supported
-  yet: time accounting per proposal, non-sidereal targets, seeing and
-  transparency constraints, dither/mosaic expansion, an archive.
+  yet: time accounting per proposal, non-sidereal targets, a
+  transparency constraint, dither/mosaic expansion, an archive
+  (`max_seeing` is honored: `docs/seeing.md`).
 - Configured as the enclosure's plan entry, `{"type": "dispatch", "site":
   ..., "requests": ..., "telescopes": {...limits...}, ...}`
   (`sites/minerva/dispatch.example.json`).
@@ -824,8 +859,13 @@ floor and robofast warns loudly wherever the enclosure shows (the log at
 start, on every switch and periodically, the switch notice, the status,
 the console's enclosure panel and alarm list, the morning report). MEarth
 South opts in; the 60-inch does not. The enclosure's `shadow` mode is the
-documented way to shadow a legacy system with all of robofast (the weather
-bridge's `--shadow` stays the bridge's own flag).
+documented way to shadow a legacy system with all of robofast; it commands
+nothing that moves except one thing: an enclosure found open while an
+enforced close condition is active (unsafe weather verdict, an enclosure
+fault) is closed at once, with a critical alarm (the mode's `intervene`,
+JDE 2026-11-02: "if there's an active safety risk, it should intervene
+immediately"); the weather bridge's `--shadow` stays the bridge's own
+flag.
 
 **(c) Sequences and plug-ins: site code without forking core (steps 2
 and 4, done).** Two mechanisms, for two kinds of difference:
