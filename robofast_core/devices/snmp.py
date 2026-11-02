@@ -16,6 +16,8 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
+from robofast_core import hwgate
+
 log = logging.getLogger(__name__)
 
 __all__ = [
@@ -259,8 +261,13 @@ class SNMPClient:
         timeout: float = 2.0,
         retries: int = 2,
         version: int = 1,
+        allow_hardware: bool = False,
     ) -> None:
         self.host, self.port = host, int(port)
+        #: Without the hardware gate, every request first re-verifies that
+        #: the agent is a robofast simulator (robofast_core.hwgate).
+        self.allow_hardware = allow_hardware
+        self._guard: hwgate.SimulatorGuard | None = None
         self.read_community = read_community
         self.write_community = write_community
         self.timeout = timeout
@@ -268,6 +275,19 @@ class SNMPClient:
         self.version = version
 
     async def _request(self, pdu: int, community: str, varbinds: list[tuple[str, Any]]) -> Message:
+        try:
+            if self._guard is None:
+                self._guard = hwgate.SimulatorGuard(
+                    self.host,
+                    self.port,
+                    hardware=self.allow_hardware,
+                    what="SNMP agent",
+                    proto="udp",
+                )
+            else:
+                self._guard.check()
+        except hwgate.HardwareNotAllowed as exc:
+            raise SNMPError(str(exc)) from None
         loop = asyncio.get_running_loop()
         transport, proto = await loop.create_datagram_endpoint(
             _Proto, remote_addr=(self.host, self.port)

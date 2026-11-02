@@ -60,7 +60,9 @@ from robofast_core.guider.tiptilt import (
 )
 from robofast_core.sites.flwo60.guider_calibration import from_tres_legacy
 from robofast_core.sites.minerva.guider_calibration import from_sx_legacy
+from robofast_core.testing.alpaca_server import FakeAlpacaServer
 from robofast_core.testing.fakes import FakeCamera
+from robofast_core.testing.tunnel import FakeTunnel
 
 ROI32 = ROI(100, 200, 32, 32)
 
@@ -503,7 +505,15 @@ def test_real_backends_are_refused_without_the_hardware_gate():
         alpaca_telescope("192.0.2.10:11111")
     with pytest.raises(HardwareNotAllowed):
         AlpacaCamera.at("192.0.2.10:11111")
-    check_address("127.0.0.1:11111", "x", allowed=False)  # loopback: a simulator
+    with FakeTunnel() as tunnel:  # loopback is not enough: an SSH tunnel is loopback too
+        with pytest.raises(HardwareNotAllowed, match="tunnel"):
+            check_address(tunnel.address, "x", allowed=False)
+        assert not tunnel.touched
+    fake = FakeAlpacaServer({}).start()  # a registered simulator
+    try:
+        check_address(fake.address, "x", allowed=False)
+    finally:
+        fake.stop()
 
 
 async def test_frame_grabber_is_only_a_hook():

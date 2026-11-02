@@ -66,6 +66,7 @@ import threading
 import time
 from dataclasses import dataclass
 
+from robofast_core import hwgate
 from robofast_core.devices.tcsgo_client import COMMANDS, TCSStatus
 
 log = logging.getLogger(__name__)
@@ -713,11 +714,13 @@ class TCSGOSim:
         self._stopping = asyncio.Event()
         server = await asyncio.start_server(self._session, self.host, self.port)
         self.port = server.sockets[0].getsockname()[1]
+        registration = hwgate.SimulatorRegistration(self.port)
         ticker = asyncio.create_task(self._ticker())
         self._ready.set()
         try:
             await self._stopping.wait()
         finally:
+            registration.close()
             ticker.cancel()
             server.close()
             with contextlib.suppress(Exception):

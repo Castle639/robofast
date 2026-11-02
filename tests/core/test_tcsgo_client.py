@@ -122,8 +122,8 @@ async def test_refuses_disallowed_commands_and_hardware(rig):
     with pytest.raises(HardwareNotAllowed):
         TCSClient(NOT_LOOPBACK, 5003)
     with pytest.raises(HardwareNotAllowed):
-        check_tcs_address(NOT_LOOPBACK, allow_hardware=False)
-    assert check_tcs_address("127.0.0.1", allow_hardware=False) == "127.0.0.1"
+        check_tcs_address(NOT_LOOPBACK, 5003, allow_hardware=False)
+    assert check_tcs_address("127.0.0.1", sim.port, allow_hardware=False) == "127.0.0.1"
     with pytest.raises(ValueError):
         TCSClient("localhost", 5003)  # an IP literal only
 

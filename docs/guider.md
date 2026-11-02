@@ -336,11 +336,14 @@ guider fails an observation that asks to guide. Config: per telescope,
 ## Safety
 
 Every real device backend -- a serial port (SX AO), PI's USB or TCP, a ZWO
-or frame-grabber camera, an Alpaca camera or telescope at a non-loopback
-address -- is refused unless the config says `"allow_hardware": true`
-**and** the command line passes `--hardware` (as the Aqawan and TCSGO
-servers). Simulators and loopback devices never need it. The service's
-tests check every backend against the gate.
+or frame-grabber camera, an Alpaca camera or telescope that is not a
+verified simulator -- is refused unless the config says
+`"allow_hardware": true` **and** the command line passes `--hardware` (as
+the Aqawan and TCSGO servers). An Alpaca device on loopback is a simulator
+only if the port belongs to OmniSim or a registered robofast simulator
+([the hardware gate](design.md#the-hardware-gate)): an ASCOM Remote
+reached through an SSH tunnel is loopback too, and is refused. The
+service's tests check every backend against the gate.
 
 ## The simulator
 

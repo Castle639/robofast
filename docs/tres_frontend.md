@@ -155,8 +155,9 @@ can keep the legacy Redis keys working
   followed (it needs a subscription); if the live window publishes, either
   add that or keep the window on the `SET` build during the transition.
 * The client sends only `SELECT`, `GET` and `SET`, and only for those two
-  keys. A non-loopback Redis needs `allow_hardware` and `--hardware`, like
-  the stage. Redis errors never affect the stage.
+  keys. A Redis that is not a verified simulator (a tunnel to the TCS host
+  is loopback too) needs `allow_hardware` and `--hardware`, like the stage
+  ([the hardware gate](design.md#the-hardware-gate)). Redis errors never affect the stage.
 * Delete the shim when the legacy window stops commanding the stage.
 
 robofast itself never needs Redis.

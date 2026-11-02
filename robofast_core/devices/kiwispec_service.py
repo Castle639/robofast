@@ -62,7 +62,9 @@ legacy label, ``n`` + the UTC date, by this service's clock).
 
 Safety
 ------
-The spectrograph PC must be loopback (the simulator) unless the config says
+The spectrograph PC must be a verified simulator (loopback, and the ports
+registered by a robofast simulator: :mod:`robofast_core.hwgate`; an SSH
+tunnel to the real PC is loopback too) unless the config says
 ``"allow_hardware": true`` **and** the command line passes ``--hardware``.
 
 Running
@@ -241,7 +243,7 @@ class KiwiSpecConfig:
     telescopes: list[str]
     name: str = "kiwispec"
     listen: str = "127.0.0.1:8130"
-    #: Must be true (and ``--hardware`` given) for a non-loopback PC.
+    #: Must be true (and ``--hardware`` given) for a PC that is not a verified simulator.
     allow_hardware: bool = False
     #: The iodine stage's named positions (mm), as a CROSS-CHECK only. The
     #: live ``spectrograph_server.ini`` on the spectrograph PC is
@@ -1170,7 +1172,7 @@ class KiwiSpecServer:
         if config.allow_hardware != hardware:
             log.info(
                 "hardware use needs allow_hardware in the config AND --hardware;"
-                " only a loopback spectrograph PC is allowed now"
+                " only a verified simulator spectrograph PC is allowed now"
             )
         s, cam = config.spectrograph, config.camera
         spec = SpecServerClient(
@@ -1414,7 +1416,7 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument(
         "--hardware",
         action="store_true",
-        help="allow a non-loopback spectrograph PC (the config must also say allow_hardware)",
+        help="allow a real spectrograph PC (the config must also say allow_hardware)",
     )
     ap.add_argument("--listen", help="host:port, overriding the config")
     ap.add_argument("--log-level", default="INFO")

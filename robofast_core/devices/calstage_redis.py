@@ -33,8 +33,11 @@ for the two configured keys: nothing else on the server can be read or
 written. Each operation opens its own connection, bounded by ``timeout``.
 A Redis that is down or slow never affects the stage: errors are logged
 (once per outage) and the next poll tries again. Like every robofast
-device link, a non-loopback Redis needs ``allow_hardware`` in the server's
-config **and** ``--hardware``.
+device link, a Redis that is not a verified simulator (loopback is not
+enough: an SSH tunnel to the TCS host is loopback too) needs
+``allow_hardware`` in the server's config **and** ``--hardware``
+(:mod:`robofast_core.hwgate`); without them every new connection is
+re-verified.
 """
 
 from __future__ import annotations
@@ -48,6 +51,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
 
+from robofast_core import hwgate
 from robofast_core.cancel import stop_task
 from robofast_core.resp import RedisError, read_reply
 
@@ -88,10 +92,32 @@ class LegacyRedisConfig:
 class LegacyKeys:
     """Read and write exactly two Redis keys (RESP2, one connection per call)."""
 
-    def __init__(self, host: str, port: int, db: int, keys: set[str], *, timeout: float) -> None:
+    def __init__(
+        self,
+        host: str,
+        port: int,
+        db: int,
+        keys: set[str],
+        *,
+        timeout: float,
+        allow_hardware: bool = False,
+    ) -> None:
         self.host, self.port, self.db = host, port, db
         self.keys = frozenset(keys)
         self.timeout = timeout
+        self.allow_hardware = allow_hardware
+        self._guard: hwgate.SimulatorGuard | None = None
+
+    def _check_endpoint(self) -> None:
+        try:
+            if self._guard is None:
+                self._guard = hwgate.SimulatorGuard(
+                    self.host, self.port, hardware=self.allow_hardware, what="legacy Redis"
+                )
+            else:
+                self._guard.check()
+        except hwgate.HardwareNotAllowed as exc:
+            raise RedisError(str(exc)) from None
 
     def _encode(self, *parts: bytes | str | int) -> bytes:
         raw = [p if isinstance(p, bytes) else str(p).encode() for p in parts]
@@ -106,6 +132,7 @@ class LegacyKeys:
 
     async def _call(self, *parts: bytes | str | int) -> Any:
         msg = self._encode(*parts)
+        self._check_endpoint()
         async with asyncio.timeout(self.timeout):
             reader, writer = await asyncio.open_connection(self.host, self.port)
             try:

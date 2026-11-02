@@ -84,10 +84,12 @@ supervisor. Connecting reads the PAC's status once.
 
 Safety
 ------
-The PAC address must be loopback (a simulator) unless the config says
+The PAC must be a verified simulator (loopback, and the port registered by
+a robofast simulator: :mod:`robofast_core.hwgate`) unless the config says
 ``"allow_hardware": true`` **and** the command line passes ``--hardware``.
-The address is resolved once at startup and checked; the server connects to
-that literal address only.
+Loopback alone is not enough: an SSH tunnel puts the real PAC on
+``127.0.0.1``. The address is resolved once at startup and checked; the
+server connects to that literal address only.
 
 Running
 -------
@@ -185,7 +187,8 @@ class AqawanConfig:
     name: str
     open_order: tuple[int, int]
     pac: PACConfig = field(default_factory=PACConfig)
-    #: Must be true (and ``--hardware`` given) for a non-loopback PAC.
+    #: Must be true (and ``--hardware`` given) for a PAC that is not a
+    #: verified simulator (a real one, also through a tunnel).
     allow_hardware: bool = False
     listen: str = "127.0.0.1:11113"
     close_command: str = "CLOSE_SEQUENTIAL"
@@ -755,9 +758,9 @@ class AqawanServer(ThreadingHTTPServer):
         if config.allow_hardware != hardware:
             log.info(
                 "hardware use needs allow_hardware in the config AND --hardware;"
-                " only a loopback PAC is allowed now"
+                " only a verified simulator PAC is allowed now"
             )
-        self.pac_ip = check_pac_address(config.pac.host, allow_hardware=allow)
+        self.pac_ip = check_pac_address(config.pac.host, config.pac.port, allow_hardware=allow)
         if allow:
             log.warning("HARDWARE MODE: PAC at %s:%d", self.pac_ip, config.pac.port)
         host, _, port = config.listen.rpartition(":")
@@ -1073,7 +1076,7 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument(
         "--hardware",
         action="store_true",
-        help="allow a non-loopback PAC (the config must also say allow_hardware)",
+        help="allow a real PAC (the config must also say allow_hardware)",
     )
     ap.add_argument("--listen", help="host:port, overriding the config")
     ap.add_argument("--log-level", default="INFO")

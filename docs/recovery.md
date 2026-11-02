@@ -70,8 +70,9 @@ dependency; `apc_pdu.py`: PowerNet-MIB `sPDUOutletCtl`, as legacy
 - SNMP communities come only from `credentials`, a JSON file
   `{"read": ..., "write": ...}` readable by its owner alone (mode 600);
   never in the config, never logged.
-- The PDU address must be loopback unless the config says
-  `allow_hardware: true` **and** the command line passes `--hardware`.
+- The PDU must be a verified simulator unless the config says
+  `allow_hardware: true` **and** the command line passes `--hardware`
+  ([the hardware gate](design.md#the-hardware-gate)).
   `--simulate` runs a simulated PDU (`APCPDUSim`) on loopback.
 
 ```json

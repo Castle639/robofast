@@ -41,8 +41,10 @@ This client
 * Commands run one at a time from a priority queue: "urgent" ones (stop the
   mount, the dome, the shutters; park) go before queued routine ones and
   cut short a query in flight.
-* :func:`check_tcs_address` refuses a non-loopback TCS unless hardware use
-  is explicitly allowed (the server requires a config flag *and* a CLI flag).
+* :func:`check_tcs_address` refuses a TCS that is not a verified simulator
+  unless hardware use is explicitly allowed (the server requires a config
+  flag *and* a CLI flag; :mod:`robofast_core.hwgate`). Loopback is not
+  enough: an SSH tunnel puts the real TCS on ``127.0.0.1``.
 """
 
 from __future__ import annotations
@@ -53,10 +55,10 @@ import ipaddress
 import itertools
 import logging
 import re
-import socket
 import time
 from dataclasses import dataclass, fields
 
+from robofast_core import hwgate
 from robofast_core.cancel import stop_task
 from robofast_core.owner import DeviceError, DeviceTimeout
 
@@ -187,27 +189,26 @@ class TCSProtocolError(TCSError):
     """A reply that cannot be understood (garbled, truncated, wrong length)."""
 
 
-class HardwareNotAllowed(Exception):
-    """A non-loopback TCS address without explicit permission."""
+class HardwareNotAllowed(hwgate.HardwareNotAllowed):
+    """A TCS that may be real hardware, without explicit permission."""
 
 
-def check_tcs_address(host: str, *, allow_hardware: bool) -> str:
+# -- addresses ------------------------------------------------------------------
+
+
+def check_tcs_address(host: str, port: int, *, allow_hardware: bool, what: str = "TCS") -> str:
     """Resolve ``host`` once and return the IP literal to connect to.
 
-    Unless ``allow_hardware``, every address ``host`` resolves to must be
-    loopback; otherwise :class:`HardwareNotAllowed`.
+    Unless ``allow_hardware``, ``host:port`` must be a verified simulator
+    (:func:`robofast_core.hwgate.check_endpoint`); otherwise
+    :class:`HardwareNotAllowed`.
     """
     try:
-        infos = socket.getaddrinfo(host, None, type=socket.SOCK_STREAM)
-    except socket.gaierror as exc:
-        raise HardwareNotAllowed(f"cannot resolve TCS host {host!r}: {exc}") from exc
-    addrs = [ipaddress.ip_address(str(info[4][0]).split("%")[0]) for info in infos]
-    if not allow_hardware and not all(a.is_loopback for a in addrs):
-        raise HardwareNotAllowed(
-            f"TCS host {host!r} ({', '.join(map(str, addrs))}) is not loopback: refusing to"
-            " talk to real hardware without allow_hardware in the config AND --hardware"
+        return hwgate.check_endpoint(
+            host, port, allow_hardware=allow_hardware, what=what, allow_absent=True
         )
-    return str(addrs[0])
+    except hwgate.HardwareNotAllowed as exc:
+        raise HardwareNotAllowed(str(exc)) from None
 
 
 # -- encoding and parsing ----------------------------------------------------------
@@ -497,7 +498,8 @@ class TCSClient:
     """One TCSGalil at ``host:port``. Use from one event loop.
 
     ``host`` must be an IP literal that passed :func:`check_tcs_address`;
-    the constructor re-checks loopback unless ``allow_hardware``.
+    unless ``allow_hardware``, the constructor re-checks that it is a
+    verified simulator, and every new connection re-verifies it.
     """
 
     def __init__(
@@ -512,9 +514,11 @@ class TCSClient:
         min_interval: float = 0.5,
         max_attempts: int = 2,
     ) -> None:
-        addr = ipaddress.ip_address(host)  # ValueError for a hostname
-        if not allow_hardware and not addr.is_loopback:
-            raise HardwareNotAllowed(f"TCS {host} is not loopback")
+        ipaddress.ip_address(host)  # ValueError for a hostname
+        try:
+            self._guard = hwgate.SimulatorGuard(host, port, hardware=allow_hardware, what="TCS")
+        except hwgate.HardwareNotAllowed as exc:
+            raise HardwareNotAllowed(str(exc)) from None
         if max_attempts < 1:
             raise ValueError("max_attempts must be >= 1")
         self.host, self.port = host, port
@@ -656,6 +660,10 @@ class TCSClient:
 
     async def _exchange(self, spec: Command, line: bytes) -> tuple[float, ...]:
         what = f"#{spec.number} {spec.name}"
+        try:
+            self._guard.check()
+        except hwgate.HardwareNotAllowed as exc:
+            raise _NotSent(TCSError(f"{what}: {exc}")) from None
         try:
             async with asyncio.timeout(self.connect_timeout):
                 reader, writer = await asyncio.open_connection(self.host, self.port)
