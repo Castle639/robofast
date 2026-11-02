@@ -150,10 +150,23 @@ async def test_the_operator_clears_a_spectrograph_marked_down(make_rig, tmp_path
     assert inner.calls[-1] == (True, up.detail["why"])
 
 
+#: Timeouts this test never reaches. Its claim is about the busy answer, not
+#: about the wall clock; with the rig's fast safety timings (weather stale
+#: after 0.6 s, a lease lost if not renewed within 1 s) a loaded host that
+#: starves the event loop for a second closed the roof between the two
+#: spectra, so the second was interrupted too (15 of 16 parallel runs). A
+#: weather read or lease renewal that is late here is the host, not the
+#: sequencer; the supervisor's own timeouts are test_safety's subject.
+NO_WALL_CLOCK = dict(
+    safety=dict(stale_after=3600.0, lease_ttl=3600.0),
+    seq=dict(spectrum_ready_timeout=3600.0, spectrum_margin=3600.0),
+)
+
+
 async def test_a_busy_spectrograph_requeues_the_spectrum(make_rig, tmp_path):
     plan = SpecPlan(spectra=2)
     plan.imaged = True
-    rig = rv_rig(make_rig, tmp_path, plan)
+    rig = rv_rig(make_rig, tmp_path, plan, **NO_WALL_CLOCK)
     expose = rig.spec.expose
     busy = [1]
 
@@ -164,7 +177,7 @@ async def test_a_busy_spectrograph_requeues_the_spectrum(make_rig, tmp_path):
         return await expose(**frame)
 
     rig.spec.expose = maybe_busy
-    await run_to_end(rig)
+    await run_to_end(rig, timeout=120.0)  # a hang guard only
     assert [h[2] for h in plan.history] == ["interrupted", "complete"]
     [b] = events(rig, "spectrograph_busy")
     assert "busy" in b.detail["error"]
