@@ -71,6 +71,22 @@ revokes the lease and closes, as for any revocation. Going off duty
 (:meth:`SafetySupervisor.duty_off`) with the enclosure open closes it at
 once. An enclosure with a heartbeat (MINERVA's Aqawan) is unaffected.
 
+Unattended without a watchdog
+-----------------------------
+Whether to run such an enclosure unattended anyway is the site's choice
+(JDE 2026-11-02: "some may decide it's worth the dome not closing (with a
+loud warning) to operate unattended"). ``allow_unattended_without_watchdog``
+(default false) lifts the floor: ``attended_only`` defaults to false, so
+every mode, ``robotic`` included, is offered. Without it, ``attended_only``
+false with no heartbeat is refused. While it is set the supervisor warns,
+loudly and repeatedly: a critical log line and an ``unwatched`` timeline
+event when it starts and on every switch into a mode that may open with
+nobody on duty (:func:`robofast_core.modes.unattended`), the warning in the
+switch notice, ``unwatched`` in its mode status (so on the console's
+enclosure panel, in the sequencer's snapshot and the request API's status)
+and an ``unwatched`` event every ``unwatched_warning_interval`` seconds
+while it runs that way (the morning report lists them).
+
 Operating modes
 ---------------
 The enclosure's mode (:mod:`robofast_core.modes`, docs/modes.md) is held
@@ -140,6 +156,7 @@ from robofast_core.modes import (
     lease_survives,
     modes_from_config,
     now_iso,
+    unattended,
 )
 from robofast_core.owner import DeviceError, DeviceOwner, Grant
 from robofast_core.timeline import Timeline
@@ -251,8 +268,17 @@ class SafetyConfig:
     #: modes cannot lower). ``None``: true exactly when there is no hardware
     #: heartbeat device (``heartbeat_interval`` unset). Setting it false
     #: without a heartbeat runs an enclosure unattended with nothing behind
-    #: the supervisor.
+    #: the supervisor, and is refused unless the site opts in with
+    #: ``allow_unattended_without_watchdog``.
     attended_only: bool | None = None
+    #: The site's explicit choice to run an enclosure with no hardware
+    #: heartbeat unattended (module doc, "Unattended without a watchdog"):
+    #: ``attended_only`` then defaults to false and the supervisor warns
+    #: loudly while it runs unattended. With a heartbeat it changes nothing;
+    #: with ``attended_only`` true the floor stays.
+    allow_unattended_without_watchdog: bool = False
+    #: While unattended with no watchdog, repeat the warning this often (s).
+    unwatched_warning_interval: float = 900.0
     #: An operator's duty expires (critical alarm) this long after its last
     #: renewal, and the supervisor closes ``duty_grace`` after that (a mode
     #: may set its own).
@@ -263,8 +289,19 @@ class SafetyConfig:
         for key in ("clear_faults_action", "heartbeat_action"):
             if not isinstance(getattr(self, key), str) or not getattr(self, key):
                 raise ValueError(f"{key}: an Alpaca action name")
+        no_hb = self.heartbeat_interval is None
+        if not isinstance(self.allow_unattended_without_watchdog, bool):
+            raise ValueError("allow_unattended_without_watchdog: true or false")
         if self.attended_only is None:
-            self.attended_only = self.heartbeat_interval is None
+            self.attended_only = no_hb and not self.allow_unattended_without_watchdog
+        elif no_hb and not self.attended_only and not self.allow_unattended_without_watchdog:
+            raise ValueError(
+                "attended_only false with no hardware heartbeat: nothing closes this"
+                " enclosure if the supervisor dies. To run it unattended anyway, set"
+                " allow_unattended_without_watchdog: true (docs/modes.md)"
+            )
+        if not self.unwatched_warning_interval > 0:
+            raise ValueError("unwatched_warning_interval must be > 0")
         if self.duty_ttl <= 0 or self.duty_grace < 0:
             raise ValueError("duty_ttl must be > 0 and duty_grace >= 0")
         if self.fault_auto_clear and not self.fault_action:
@@ -282,6 +319,19 @@ class SafetyConfig:
                     f"heartbeat_interval {hb:g} s must be > 0 and <= heartbeat_timeout/4"
                     f" ({timeout / 4:g} s): at least 4 pings per device timeout"
                 )
+
+    @property
+    def unwatched(self) -> bool:
+        """The site lets this enclosure run unattended with no hardware
+        watchdog (module doc)."""
+        return self.heartbeat_interval is None and not self.attended_only
+
+
+#: The warning shown wherever an enclosure runs unattended with no watchdog.
+UNWATCHED_TEXT = (
+    "NO WATCHDOG: this enclosure may open with nobody on duty, and nothing closes it"
+    " if the safety supervisor dies or hangs (safety.allow_unattended_without_watchdog)"
+)
 
 
 class OpenLease:
@@ -431,12 +481,8 @@ class SafetySupervisor:
         #: The operator on duty (``attended_only``): name, since, last renewal.
         self._duty: dict[str, Any] | None = None
         self._duty_expired: str | None = None
-        if not self.config.attended_only and self._hb is None:
-            log.warning(
-                "%s: attended_only is off and there is no hardware heartbeat:"
-                " nothing closes this enclosure if the supervisor dies",
-                name,
-            )
+        #: When the no-watchdog warning was last repeated (module doc).
+        self._unwatched_warned: float | None = None
 
         self._safe = False
         self._reason = "startup (no weather read yet)"
@@ -469,6 +515,8 @@ class SafetySupervisor:
         elif not self.modes.configured:
             log.info("%s: no 'mode' in the config: mode %s (as before modes)", name, self.mode)
         log.warning("%s: mode %s", name, self.mode)
+        if self.config.unwatched:
+            self._warn_unwatched("start", time.monotonic())
 
     # -- the operating mode (module doc) -----------------------------------------
 
@@ -493,6 +541,41 @@ class SafetySupervisor:
         if p.enclosure == "watch":
             return False
         return self.config.fault_auto_clear if p.fault_auto_clear is None else p.fault_auto_clear
+
+    def _unwatched_active(self) -> bool:
+        """Running unattended with no watchdog now: the site's opt-in and a
+        mode that may open with nobody on duty."""
+        return self.config.unwatched and unattended(self.policy)
+
+    def _warn_unwatched(self, why: str, now: float) -> None:
+        """The loud no-watchdog warning (module doc): a critical log line
+        and an ``unwatched`` timeline event."""
+        self._unwatched_warned = now
+        active = self._unwatched_active()
+        self.timeline.event(
+            self.name,
+            "unwatched",
+            why=why,
+            mode=self.mode,
+            active=active,
+            level="critical" if active else "warning",
+        )
+        if active:
+            log.critical("%s: mode %s: %s", self.name, self.mode, UNWATCHED_TEXT)
+        else:
+            log.warning(
+                "%s: mode %s needs an operator on duty, but this site lets the enclosure"
+                " run unattended with no watchdog in another mode (%s)",
+                self.name,
+                self.mode,
+                ", ".join(n for n, p in self.modes.modes.items() if unattended(p)) or "none",
+            )
+
+    def unwatched_status(self) -> dict[str, Any] | None:
+        """``unwatched`` in the mode status: None unless the site opted in."""
+        if not self.config.unwatched:
+            return None
+        return {"active": self._unwatched_active(), "text": UNWATCHED_TEXT}
 
     def _watching(self) -> bool:
         """The enclosure is only watched (a ``watch`` mode, its close done)."""
@@ -525,6 +608,8 @@ class SafetySupervisor:
         self._mode_fallback = None
         self._would_open = None
         text = f"mode {old_name} -> {mode} by {operator}: {reason}"
+        if self.config.unwatched and unattended(new):
+            text += f" -- {UNWATCHED_TEXT}"
         self._mode_notice = (now, text)
         self.timeline.event(
             self.name,
@@ -542,6 +627,8 @@ class SafetySupervisor:
                 f"mode {mode} not saved ({self._mode_store.error}): a restart would start"
                 f" in {self.modes.default}"
             )
+        if self.config.unwatched and unattended(new) != unattended(old):
+            self._warn_unwatched(f"switch from {old_name}", now)
         if self._duty_expired is not None and not new.attended_only:
             self._duty_expired = None
         lease = self._lease
@@ -578,6 +665,7 @@ class SafetySupervisor:
             "saved_error": self._mode_store.error,
             "would_open": None if p.open else self.open_allowed(now, ignore_mode=True),
             "finishing_close": self._finish_close,
+            "unwatched": self.unwatched_status(),
         }
 
     # -- public state -----------------------------------------------------
@@ -1137,6 +1225,12 @@ class SafetySupervisor:
         now = time.monotonic()
         cfg = self.config
         self._check_duty(now)
+        if (
+            self._unwatched_active()
+            and self._unwatched_warned is not None
+            and now - self._unwatched_warned >= cfg.unwatched_warning_interval
+        ):
+            self._warn_unwatched("still unattended with no watchdog", now)
         if self._safe and (
             self._last_good_read is None or now - self._last_good_read > cfg.stale_after
         ):

@@ -88,6 +88,13 @@ the guide star**, in arcsec on the sky (no cos dec), so `offset_star` is
 Legacy needed both to be non-zero, so a pure north or east offset was
 silently ignored.
 
+Each offset is checked against the star catalog when the sheet is
+imported: a star of sensible brightness must be at the target plus the
+offset, proper motion applied to both, or the row is refused (or flagged)
+with where the nearest star is (`docs/minerva_sheet.md`, "Acquisition
+offsets"). The check is `check_offset_star` in
+`robofast_core/guider/offset.py`, for any explicit `{"east", "north"}`.
+
 ## When to offset guide
 
 `robofast_core/guider/recommend.py` predicts the error of each method from

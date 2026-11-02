@@ -186,7 +186,7 @@ from robofast_core.owner import DeviceOwner
 from robofast_core.plan import CalibrationPlan, PlanProvider, StaticPlan, plan_from_config
 from robofast_core.plugins import load_config_plugins
 from robofast_core.sequencer import Sequencer, SequencerConfig, TelescopeUnit
-from robofast_core.sequences import sequences_from_config
+from robofast_core.sequences import check_request_sequences, sequences_from_config
 from robofast_core.spectra import SpectrumRecorder
 from robofast_core.timeline import Timeline
 
@@ -487,6 +487,10 @@ def check_plan_sequences(plan: PlanProvider, sequences: dict[str, Any]) -> None:
     """A static or calibration plan's sequence observations name sequences
     of the config, for telescopes they run on; a calibration plan's are dark
     (it never opens the enclosure). Other plans are checked as they run."""
+    limits = getattr(plan, "limits", None)
+    if isinstance(limits, dict) and isinstance(getattr(plan, "sequences", None), dict):
+        # A dispatch plan: the sequences its requests may name.
+        plan.sequences = check_request_sequences(limits, sequences)
     queues = getattr(plan, "queues", None)
     if not isinstance(queues, dict):
         return
@@ -504,6 +508,16 @@ def check_plan_sequences(plan: PlanProvider, sequences: dict[str, Any]) -> None:
                 )
             if not seq.runs_on(tel):
                 raise ValueError(f"{what}: sequence {seq.name} is for {list(seq.telescopes or ())}")
+            if obs.sequence_params:
+                if seq.rebuild is None:
+                    raise ValueError(
+                        f"{what}: sequence {seq.name} is not made from a template, so it takes"
+                        " no sequence_params"
+                    )
+                try:
+                    seq = seq.rebuild(dict(obs.sequence_params))
+                except ValueError as exc:
+                    raise ValueError(f"{what}: sequence_params: {exc}") from None
             if calibration and seq.light:
                 raise ValueError(
                     f"{what}: sequence {seq.name} takes sky light; a calibration plan never opens"
@@ -614,6 +628,8 @@ def snapshot(seq: Sequencer, interval: float = 5.0) -> dict[str, Any]:
         # The enclosure's operating mode as the sequencer last read it.
         "mode": seq.modes.mode,
         "observe": seq.modes.observe,
+        # A site that runs unattended with no hardware watchdog (docs/modes.md).
+        "unwatched": seq.modes.unwatched,
         "telescopes": tels,
         # The latest of the sequencer's own timeline (the console's log).
         "timeline": seq.timeline.recent(TIMELINE_IN_SNAPSHOT, skip_sent=True),

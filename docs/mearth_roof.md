@@ -65,15 +65,18 @@ and does not re-close; a fault anywhere else reads `shutterError` and the
 supervisor closes. The fault channel is `Action("Faults")`; there is no
 automatic clearing (legacy never cleared STUCK by itself).
 
-### Why attended only
+### Attended by default, robotic by choice
 
-The design (`docs/design.md` section 3.3) lets an enclosure run unattended
-only behind a hardware heartbeat that closes it when the software stops.
-This roof has none (legacy had a spare "watchdog" bit, never wired, and a
-"ping" routine marked not implemented). So `sites/mearth_south/mearth_south.json`
-is `attended_only`: no lease, and no opening, unless an operator is on
-duty. A watchdog in the interface box (close if no strobe for N seconds)
-would lift this; it would need hardware work on site.
+The design (`docs/design.md` section 3.3) runs an enclosure unattended
+behind a hardware heartbeat that closes it when the software stops. This
+roof has none (legacy had a spare "watchdog" bit, never wired, and a
+"ping" routine marked not implemented). MEarth nevertheless ran it
+robotically for years, so `sites/mearth_south/mearth_south.json` opts in
+(`safety.allow_unattended_without_watchdog`, docs/modes.md): it starts
+`attended` (no opening unless an operator is on duty) and may be switched
+to `robotic`, with a loud warning while it runs that way. A watchdog in the
+interface box (close if no strobe for N seconds) would remove the risk; it
+would need hardware work on site.
 
 ### Power failure
 
@@ -138,7 +141,7 @@ The server refuses a real port until the roof config says
    altitude 10, azimuth 190), and whether a roof can close over a mount
    that failed to park.
 9. Whether a hardware watchdog can be added to the box (the only way to
-   run unattended).
+   run unattended without the risk the site now accepts).
 
 ## MEarth North (FLWO), for later
 

@@ -17,6 +17,7 @@ It writes `report-<night>.md` and `report-<night>.json` to `--out` and, with
 
 | Section | From |
 |---|---|
+| Unattended with no hardware watchdog (first, in bold, when it happened; JSON `unwatched`) | the supervisor's `unwatched` events (a site's `safety.allow_unattended_without_watchdog`, docs/modes.md). Not a QA "look": the site chose it |
 | Enclosure: open time, each close and why | the timeline lines of the supervisor's log (`enclosure_open`/`enclosure_closed`, the `unsafe`/`lease_revoked`/`idle_release` before it) |
 | Weather interruptions | `unsafe` events |
 | Per telescope: light frames, exposure, spectra time, plate solves, median pointing offset, zero points per filter and their change against earlier reports | the frame index (`*.frames.jsonl`), the spectrum sidecars, `--history` (default `--out`) |

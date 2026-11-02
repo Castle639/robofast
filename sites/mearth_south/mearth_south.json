@@ -9,13 +9,13 @@
     "dome: the MEarth roof Alpaca server (roof.json listens on 11150; hardware not allowed there until confirmed on site).",
     "safetymonitor, observingconditions: the weather bridge (weather.yaml listens on 11111). Its station source is a placeholder: no reader for the site's weather station and cloud sensor exists yet, so the bridge reports unsafe and nothing opens.",
     "tel11-tel18: placeholders for each telescope PC's Alpaca (ASCOM Remote) mount and camera. The legacy mounts and cameras were driven through Windows software; which Alpaca drivers serve them is to be decided.",
-    "No hardware heartbeat: the roof interface box holds its last command and has no watchdog, so nothing closes the roof if the supervisor dies. attended_only (also the default without a heartbeat): no lease, and the roof never opens, unless an operator is on duty.",
+    "No hardware heartbeat: the roof interface box holds its last command and has no watchdog, so nothing closes the roof if the supervisor dies. The site opts in to running unattended anyway (allow_unattended_without_watchdog; JDE 2026-11-02: MEarth operated robotically for years with this roof), so robotic is offered; the supervisor warns loudly whenever it runs unattended (docs/modes.md, Unattended without a watchdog).",
     "park_before_close: a roll-off roof closes over the telescopes; legacy parked at alt 10, az 190 (telescope.cfg). Clearance with other park positions is unconfirmed.",
     "fault_action Faults: a roof that timed out, never left its limit, shows both limits or neither, alarms and blocks opening (docs/mearth_roof.md). No automatic clearing (legacy never cleared its STUCK flag by itself).",
     "reopen_hold 1200 s: legacy latched each weather alert for 20 minutes (alert_timeout).",
     "No telescope lists 'limits' (manual-slew altitude limits) yet: the legacy values are unconfirmed, so the observer console refuses manual slews until they are added.",
     "site: legacy MEarth::Config for CTIO (-30 10 20.9, -70 48 00.5, 2124 m).",
-    "mode: attended (no watchdog: attended_only, so robotic is not offered; docs/modes.md)."
+    "mode: attended by default (an operator on duty to open); switch to robotic to run unattended with no watchdog (docs/modes.md)."
   ],
   "name": "mearth_south",
   "listen": "127.0.0.1:8150",
@@ -67,7 +67,7 @@
   "safety": {
     "park_before_close": true,
     "park_wait": 120,
-    "attended_only": true,
+    "allow_unattended_without_watchdog": true,
     "duty_ttl": 300,
     "duty_grace": 300,
     "fault_action": "Faults",

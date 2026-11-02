@@ -421,6 +421,10 @@ class Aggregator:
         mode = sup.get("mode") if isinstance(sup.get("mode"), dict) else None
         if mode is not None and mode.get("notice"):
             alarm("mode", str(mode["notice"]), "warning")  # a notice: who switched, why
+        uw = mode.get("unwatched") if mode is not None else None
+        if isinstance(uw, dict) and uw.get("active"):
+            # Unattended with no hardware watchdog (docs/modes.md): for as long as it lasts.
+            alarm("mode", str(uw.get("text") or "unattended with no hardware watchdog"), "warning")
         hb = sup.get("pinged_ago")
         return {
             "reachable": True,

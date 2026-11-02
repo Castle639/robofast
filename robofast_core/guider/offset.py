@@ -57,9 +57,12 @@ log = logging.getLogger(__name__)
 __all__ = [
     "AutoConfig",
     "GuideStar",
+    "OffsetCheck",
     "OffsetGuide",
     "OffsetSite",
+    "OffsetVerdict",
     "TargetPosition",
+    "check_offset_star",
     "choose_guide_star",
     "guide_star_from_spec",
     "pixel_offset",
@@ -437,6 +440,158 @@ def choose_guide_star(
         ),
         notes,
     )
+
+
+# -- checking an explicit offset against the catalog ----------------------------------
+
+
+@dataclass(frozen=True)
+class OffsetCheck:
+    """How an explicit offset (``{"east", "north"}``) is checked against the
+    catalog (:func:`check_offset_star`; docs/offset_guiding.md).
+
+    A catalog star must lie within ``tolerance`` arcsec of target + offset
+    at the date of observation (both moved along their proper motion), and
+    be a sensible guide star: brighter than ``g_faint`` and fainter than
+    ``g_bright`` (catalog magnitude, Gaia G by default; the same limits as
+    :class:`AutoConfig`). ``search`` arcsec: how far round the expected
+    position the nearest star is reported, to help fix a wrong offset.
+    ``action``: what a failed check does to the row -- ``refuse`` it, or
+    ``flag`` it (kept, with a warning)."""
+
+    tolerance: float = 3.0
+    g_bright: float = 7.0
+    g_faint: float = 14.5
+    search: float = 60.0
+    action: str = "refuse"
+    enabled: bool = True
+    #: The catalog's config entry (docs/sky.md); None: the default catalog.
+    catalog: dict[str, Any] | None = None
+
+    ACTIONS = ("refuse", "flag")
+
+    @classmethod
+    def from_dict(cls, d: Any) -> OffsetCheck:
+        """From a config entry: an object, ``false`` (off) or None/``true``
+        (the defaults). Raises ValueError naming the bad key."""
+        if d is None or d is True:
+            return cls()
+        if d is False:
+            return cls(enabled=False)
+        if not isinstance(d, dict):
+            raise ValueError("offset_check: an object, true or false")
+        d = {k: v for k, v in d.items() if not k.startswith("_")}
+        known = {f for f in cls.__dataclass_fields__}
+        if set(d) - known:
+            raise ValueError(f"offset_check: unknown keys {sorted(set(d) - known)}")
+        out: dict[str, Any] = {}
+        for k, v in d.items():
+            if k in ("tolerance", "g_bright", "g_faint", "search"):
+                if isinstance(v, bool) or not isinstance(v, int | float) or not math.isfinite(v):
+                    raise ValueError(f"offset_check.{k}: a number")
+                out[k] = float(v)
+            elif k == "action":
+                if v not in cls.ACTIONS:
+                    raise ValueError(f"offset_check.action: one of {', '.join(cls.ACTIONS)}")
+                out[k] = v
+            elif k == "enabled":
+                if not isinstance(v, bool):
+                    raise ValueError("offset_check.enabled: true or false")
+                out[k] = v
+            elif k == "catalog":
+                if v is not None and not isinstance(v, dict):
+                    raise ValueError("offset_check.catalog: a catalog entry (docs/sky.md)")
+                out[k] = v
+        c = cls(**out)
+        if c.tolerance <= 0 or c.search < c.tolerance or c.g_bright >= c.g_faint:
+            raise ValueError("offset_check: tolerance > 0, search >= tolerance, g_bright < g_faint")
+        return c
+
+
+@dataclass(frozen=True)
+class OffsetVerdict:
+    """What :func:`check_offset_star` found. ``ok``: True (a sensible star
+    is there), False (none, or not a usable one), None (not checked: the
+    catalog could not answer). ``g``: the matched star's catalog magnitude;
+    ``miss``: arcsec from the expected position to it; ``source_id``: its
+    catalog id; ``reason``: one line for a log or an import summary."""
+
+    ok: bool | None
+    reason: str
+    g: float | None = None
+    miss: float | None = None
+    source_id: int | None = None
+    #: The nearest star's own offset from the target (east, north arcsec),
+    #: when one was found within ``search``: what the offset perhaps should be.
+    found: tuple[float, float] | None = None
+
+
+def check_offset_star(
+    catalog: Any,
+    target: TargetPosition,
+    east: float,
+    north: float,
+    when: datetime | float,
+    check: OffsetCheck | None = None,
+) -> OffsetVerdict:
+    """Is there a catalog star at ``target`` + (``east``, ``north``) arcsec
+    (the guide star relative to the target, on the sky) at ``when``?
+
+    ``catalog``: a :class:`~robofast_core.catalog.Catalog` (anything with
+    its ``cone(ra, dec, radius, epoch=..., mag_limit=...)``). Both the
+    target and the catalog's stars are moved to ``when``. The verdict is
+    ``ok`` only for a star within ``tolerance`` whose magnitude is inside
+    (``g_bright``, ``g_faint``); a catalog that cannot answer (tiles missing
+    offline) gives ``ok`` None, never a refusal."""
+    from robofast_core.catalog import CatalogUnavailable
+
+    c = check or OffsetCheck()
+    ra0, dec0 = target.at(when)
+    ra, dec = _untan(ra0, dec0, math.radians(east / 3600.0), math.radians(north / 3600.0))
+    ra, dec = float(ra), float(dec)
+    try:
+        stars = catalog.cone(ra, dec, c.search / 3600.0, epoch=when)
+    except (CatalogUnavailable, OSError) as exc:
+        return OffsetVerdict(None, f"not checked: the catalog cannot answer ({exc})")
+    if not len(stars):
+        return OffsetVerdict(False, f'no catalog star within {c.search:g}" of target + offset')
+    d = separation(ra, dec, stars.ra, stars.dec) * 3600.0
+    near = d <= c.tolerance
+    if not near.any():
+        i = int(np.argmin(d))
+        found = sky_offset(ra0, dec0, float(stars.ra[i]), float(stars.dec[i]))
+        return OffsetVerdict(
+            False,
+            f'no catalog star within {c.tolerance:g}" of target + offset; the nearest'
+            f' (mag {float(stars.g[i]):.1f}) is {float(d[i]):.1f}" away, at'
+            f' east {found[0]:+.1f}" north {found[1]:+.1f}" from the target',
+            g=float(stars.g[i]),
+            miss=float(d[i]),
+            source_id=int(stars.source_id[i]),
+            found=found,
+        )
+    # Of the stars within the tolerance, the brightest (the guider would
+    # centroid on it).
+    idx = np.flatnonzero(near)
+    i = int(idx[np.argmin(np.where(np.isfinite(stars.g[idx]), stars.g[idx], np.inf))])
+    g, miss = float(stars.g[i]), float(d[i])
+    found = sky_offset(ra0, dec0, float(stars.ra[i]), float(stars.dec[i]))
+    base = dict(g=g, miss=miss, source_id=int(stars.source_id[i]), found=found)
+    if not math.isfinite(g) or g >= c.g_faint:
+        return OffsetVerdict(
+            False,
+            f'the catalog star {miss:.1f}" from target + offset is too faint to guide on'
+            f" (mag {g:.1f}, limit {c.g_faint:g})",
+            **base,
+        )
+    if g <= c.g_bright:
+        return OffsetVerdict(
+            False,
+            f'the catalog star {miss:.1f}" from target + offset saturates the guider'
+            f" (mag {g:.1f}, limit {c.g_bright:g})",
+            **base,
+        )
+    return OffsetVerdict(True, f'catalog star mag {g:.1f} {miss:.1f}" from target + offset', **base)
 
 
 #: A clock-time -> UTC mapping, for the guide loop (virtual or real time).

@@ -18,7 +18,7 @@
     "site: the 60-inch on Mt. Hopkins, approximate (public).",
     "mode: attended (JDE 2026-10-31: the dome has no watchdog). The enclosure is attended_only, so the built-in robotic mode is not offered here and no mode may open without an operator on duty (docs/modes.md); engineering (manual control only) and shadow (log what it would do, command nothing) are.",
     "lamps.lamps.*.max_on: repeats each outlet's max_on in pulizzi.json (placeholders there too), so the sequences below are checked against it when this file is loaded; the switch's own limit is checked again before a lamp goes on.",
-    "sequences (docs/sequences.md): the TRES calibration sets as step lists, run by observations of kind 'sequence' (calibration.example.json runs them with the dome closed). EVERY VALUE IS A PLACEHOLDER, UNCONFIRMED: the exposure times and counts, the warm-ups, the lamp choice, and the calibration stage's 'in' position (null in tres_frontend.json, so these fail before any lamp goes on until it is set). Each ends with its lamps off and the stage out, and its cleanup puts the stage out whatever happened (cancelled, failed); every lamp it switched on is switched off first."
+    "sequences (docs/sequences.md): the TRES calibration sets, made from robofast's generic templates arc_set and lamp_flat_set (the stage in, the lamp on and its warm-up, the frames, the lamp off, the stage out; the stage out again in the cleanup), run by observations of kind 'sequence' (calibration.example.json runs them with the dome closed). EVERY VALUE IS A PLACEHOLDER, UNCONFIRMED: the exposure times and counts, the warm-ups, the lamp choice, and the calibration stage's 'in' position (null in tres_frontend.json, so these fail before any lamp goes on until it is set). Each ends with its lamps off and the stage out, and its cleanup puts the stage out whatever happened (cancelled, failed); every lamp it switched on is switched off first."
   ],
   "name": "flwo60",
   "listen": "127.0.0.1:8160",
@@ -49,27 +49,15 @@
   "sequences": {
     "tres_thar": {
       "description": "TRES ThAr arcs (placeholder values, unconfirmed)",
-      "instrument": "camera_spectrograph",
-      "steps": [
-        {"calstage": "in"},
-        {"lamp": "ThAr1", "on": true, "warmup": 60},
-        {"expose": {"type": "ARC", "exptime": 30, "n": 3, "object": "ThAr"}},
-        {"lamp": "ThAr1", "on": false},
-        {"calstage": "out"}
-      ],
-      "cleanup": [{"calstage": "out"}]
+      "template": "arc_set", "instrument": "camera_spectrograph",
+      "lamp": "ThAr1", "warmup": 60, "exptime": 30, "count": 3, "object": "ThAr",
+      "calstage": "in", "calstage_after": "out"
     },
     "tres_flat": {
       "description": "TRES fiber flats on the incandescent lamp (placeholder values, unconfirmed)",
-      "instrument": "camera_spectrograph",
-      "steps": [
-        {"calstage": "in"},
-        {"lamp": "Incand", "on": true, "warmup": 30},
-        {"expose": {"type": "LAMP_FLAT", "exptime": 10, "n": 5, "object": "flat"}},
-        {"lamp": "Incand", "on": false},
-        {"calstage": "out"}
-      ],
-      "cleanup": [{"calstage": "out"}]
+      "template": "lamp_flat_set", "instrument": "camera_spectrograph",
+      "lamp": "Incand", "warmup": 30, "exptime": 10, "count": 5, "object": "flat",
+      "calstage": "in", "calstage_after": "out"
     }
   },
   "sequencer_name": "flwo60-sequencer",
