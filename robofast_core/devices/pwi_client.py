@@ -125,6 +125,10 @@ class PWIStatus:
     rotator_mech_deg: float | None = None
     rotator_moving: bool | None = None
     pointing_model: str | None = None
+    #: PWI's version (PWI4 ``pwi4.version``; PWI2 reports none).
+    version: str | None = None
+    #: Per-axis homed flags where reported (PWI4 ``axisN.is_homed``), az, alt.
+    axes_homed: tuple[bool, bool] | None = None
     raw: dict[str, str] = field(default_factory=dict, repr=False)
 
     @property
@@ -184,9 +188,10 @@ def parse_pwi4_status(text: str) -> PWIStatus:
         port = int(float(raw.get("m3.port", "0")))
     except ValueError:
         port = 0
-    homed = None
+    homed = axes_homed = None
     if "mount.axis0.is_homed" in raw and "mount.axis1.is_homed" in raw:
-        homed = _b(raw["mount.axis0.is_homed"]) and _b(raw["mount.axis1.is_homed"])
+        axes_homed = (_b(raw["mount.axis0.is_homed"]), _b(raw["mount.axis1.is_homed"]))
+        homed = all(axes_homed)
     return PWIStatus(
         backend="pwi4",
         connected=_b(raw.get("mount.is_connected")),
@@ -203,6 +208,8 @@ def parse_pwi4_status(text: str) -> PWIStatus:
         lst_hours=_f(raw.get("site.lmst_hours")),
         finding_home=None,
         homed=homed,
+        axes_homed=axes_homed,
+        version=raw.get("pwi4.version") or None,
         m3_port=port if port in (1, 2) else 0,
         m3_moving=port not in (1, 2) and raw.get("m3.exists", "0").strip() not in ("0", "false"),
         focuser_connected=_b(raw.get("focuser.is_connected"))
@@ -321,7 +328,8 @@ PWI4_PATHS: dict[str, bool] = {
     "/mount/connect": False,
     "/mount/enable": False,
     "/mount/disable": True,  # stops the axes
-    "/mount/find_home": True,
+    "/mount/find_home": True,  # both axes (4.0.3+)
+    "/mount/findhome": True,  # ?axis=0|1: one axis (4.1.7 beta 3+, changelog spelling)
     "/mount/goto_ra_dec_j2000": True,
     "/mount/goto_alt_az": True,
     "/mount/offset": True,
@@ -436,7 +444,8 @@ class PWIClient:
     async def disable_motors(self) -> PWIStatus:
         raise NotImplementedError
 
-    async def find_home(self) -> PWIStatus:
+    async def find_home(self, axis: int | None = None) -> PWIStatus:
+        """Home both axes (``axis`` None) or one (0 azimuth, 1 altitude)."""
         raise NotImplementedError
 
     async def goto_radec_j2000(self, ra_hours: float, dec_deg: float) -> PWIStatus:
@@ -501,8 +510,14 @@ class PWI4Client(PWIClient):
         await self._cmd("/mount/disable", axis=0)
         return await self._cmd("/mount/disable", axis=1)
 
-    async def find_home(self) -> PWIStatus:
-        return await self._cmd("/mount/find_home")
+    async def find_home(self, axis: int | None = None) -> PWIStatus:
+        if axis is None:
+            return await self._cmd("/mount/find_home")
+        if axis not in (0, 1):
+            raise ValueError(f"axis {axis}: 0 (azimuth) or 1 (altitude)")
+        # The changelog (4.1.7 beta 3) spells this one "findhome"; an older
+        # PWI4 answers 404 and nothing moves. Callers check the version first.
+        return await self._cmd("/mount/findhome", axis=axis)
 
     async def goto_radec_j2000(self, ra_hours: float, dec_deg: float) -> PWIStatus:
         return await self._cmd(
@@ -568,7 +583,9 @@ class PWI2Client(PWIClient):
     async def disable_motors(self) -> PWIStatus:
         return await self._cmd("mount", "disable")
 
-    async def find_home(self) -> PWIStatus:
+    async def find_home(self, axis: int | None = None) -> PWIStatus:
+        if axis is not None:
+            raise PWIError("PWI2 homes both axes together; it cannot home one axis")
         return await self._cmd("mount", "findhome")
 
     async def goto_radec_j2000(self, ra_hours: float, dec_deg: float) -> PWIStatus:
@@ -605,6 +622,22 @@ class PWI2Client(PWIClient):
 
     async def rotator_stop(self, port: int) -> PWIStatus:
         return await self._cmd(f"rotator{int(port)}", "stop")
+
+
+def version_at_least(version: str | None, minimum: tuple[int, ...]) -> bool:
+    """``"4.1.8.0"`` >= ``(4, 1, 7)``; False when unknown or unparsable.
+    A beta counts as its base version (4.1.7 beta 3 reports 4.1.7.x)."""
+    if not version:
+        return False
+    try:
+        parts = tuple(int(x) for x in re.findall(r"\d+", version)[: len(minimum)])
+    except ValueError:
+        return False
+    return len(parts) == len(minimum) and parts >= minimum
+
+
+#: PWI4 versions with per-axis homing (``/mount/findhome?axis=``).
+PER_AXIS_HOME_VERSION = (4, 1, 7)
 
 
 def make_client(backend: str, host: str, port: int, **kw: Any) -> PWIClient:

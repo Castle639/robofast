@@ -117,8 +117,9 @@ their good ideas instead (section 9).
   Telescope + Focuser + Rotator server (`robofast_core/devices/pwi_*`,
   `docs/pwi.md`) over PWI's HTTP API, PWI4 or the legacy PWI2, with
   simulators of both and ConformU in CI: altitude limits and a limit watch
-  enforced in the server, motors enabled and homing only on explicit
-  command, the M3 port as the `SelectPort` Action, and `robofast-pwi-jog`
+  enforced in the server, motors enabled only on explicit command,
+  homing only on explicit, opted-in command (one axis at a time on PWI4),
+  moves refused while unhomed without an engineering override, the M3 port as the `SelectPort` Action, and `robofast-pwi-jog`
   for bounded moves in a first hardware session. Behind the hardware gate.
 - Vendor extras that Alpaca lacks (PWI4 M3 port selection, fans, pointing
   models) use Alpaca `Action()` or a typed side channel per device client.

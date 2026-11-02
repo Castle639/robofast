@@ -12,6 +12,7 @@ file, and logs everything it reads and sends.
     robofast-pwi-jog --config ... --hardware connect
     robofast-pwi-jog --config ... --hardware enable | disable
     robofast-pwi-jog --config ... --hardware tracking-off
+    robofast-pwi-jog --config ... --hardware home --axis 0|1|both [--yes]
     robofast-pwi-jog --config ... --hardware altaz --dalt 0.5 --daz 0 [--yes]
     robofast-pwi-jog --config ... --hardware radec --dra 60 --ddec 0 [--yes]
 
@@ -20,6 +21,14 @@ file, and logs everything it reads and sends.
 * ``connect`` asks PWI to connect to the mount controller; ``enable`` /
   ``disable`` switch both axis motors (``enable`` asks for confirmation).
   Nothing else here ever connects, enables or homes.
+* ``home --axis 0|1|both`` is the only way this tool homes: azimuth (0) or
+  altitude (1) alone needs PWI4 4.1.7+ (``/mount/findhome?axis=``); it asks
+  first, prints the position, and stops on Ctrl-C, after ``home_timeout``
+  s, or if the *other* axis moves (a PWI4 that ignored the axis parameter).
+* ``altaz`` and ``radec`` are refused while the mount is not homed (PWI2
+  ``encoders_have_been_set``, PWI4 ``axisN.is_homed``; unknown counts as not
+  homed) unless the config says ``allow_unhomed_moves`` **and** the command
+  line ``--allow-unhomed`` (engineering; logged as a warning).
 * ``altaz``: a relative alt/az move (degrees), sent as a PWI alt/az goto to
   the current position plus the offsets. Each offset at most
   ``max_jog_deg`` (config, default 1); the target altitude within
@@ -32,7 +41,8 @@ Every move prints its plan and waits for ``yes`` on the terminal (or
 ``--yes``), then polls PWI every ``--poll`` s and prints the position.
 It sends **stop** on Ctrl-C, after ``jog_timeout`` s, if the mount goes
 further from where it started than the plan allows (+ ``--slack`` deg), or
-if the altitude leaves the limits. The log is appended to
+if the altitude leaves the limits. PWI's version (PWI4 ``pwi4.version``) and
+any home-related status keys are logged at the first read. The log is appended to
 ``$ROBOFAST_DATA_DIR/pwi-jog/<name>.log`` (or ``--log``).
 """
 
@@ -53,7 +63,14 @@ from pathlib import Path
 
 from robofast_core import hwgate
 from robofast_core.config import load_device_config
-from robofast_core.devices.pwi_client import PWIClient, PWIError, PWIStatus, make_client
+from robofast_core.devices.pwi_client import (
+    PER_AXIS_HOME_VERSION,
+    PWIClient,
+    PWIError,
+    PWIStatus,
+    make_client,
+    version_at_least,
+)
 from robofast_core.devices.pwi_server import PWIConfig, _sep_deg
 
 log = logging.getLogger("robofast.pwi_jog")
@@ -71,6 +88,12 @@ def fmt(st: PWIStatus) -> str:
         f"  motors {int(st.az_enabled)}{int(st.alt_enabled)}  track {int(st.tracking)}"
         f"  slew {st.slewing if st.slewing is not None else '?'}"
         f"  m3 {st.m3_port}  focus {'?' if f is None else round(f)}"
+        f"  homed {'?' if st.homed is None else int(st.homed)}"
+        + (
+            ""
+            if st.axes_homed is None
+            else f" (az {int(st.axes_homed[0])} alt {int(st.axes_homed[1])})"
+        )
     )
 
 
@@ -125,8 +148,12 @@ class Jog:
         confirm: Callable[[str], Awaitable[bool]] | None = None,
         poll: float = 0.25,
         slack: float = 0.5,
+        unhomed_ok: bool = False,
     ) -> None:
         self.cfg = cfg
+        #: The engineering override (config allow_unhomed_moves AND --allow-unhomed).
+        self.unhomed_ok = unhomed_ok
+        self._version_logged = False
         self.pwi = client
         self.out = out
         self.confirm = confirm or _ask
@@ -139,6 +166,12 @@ class Jog:
 
     async def status(self) -> PWIStatus:
         st = await self.pwi.status()
+        if not self._version_logged:
+            self._version_logged = True
+            self.say(f"PWI ({st.backend}) version {st.version or 'not reported'}")
+            homes = {k: v for k, v in st.raw.items() if "home" in k.lower()}
+            if homes:
+                self.say(f"home-related status: {homes}")
         self.say(fmt(st))
         log.debug("status %s", json.dumps(st.as_dict()))
         return st
@@ -170,9 +203,20 @@ class Jog:
         await fn()
         await self.status()
 
+    def _check_homed(self, st: PWIStatus) -> None:
+        if st.homed:
+            return
+        state = "NOT HOMED" if st.homed is False else "homed state NOT REPORTED"
+        if not self.unhomed_ok:
+            raise JogRefused(
+                f"mount {state}: moves need allow_unhomed_moves in the config AND --allow-unhomed"
+            )
+        self.say(f"WARNING: UNHOMED MOVE ({state}); engineering override in effect")
+
     async def altaz(self, dalt: float, daz: float) -> bool:
         st = await self.status()
         alt, az = plan_altaz(self.cfg, st, dalt, daz)
+        self._check_homed(st)
         planned = _sep_deg(st.alt_deg, st.az_deg, alt, az)
         text = (
             f"PLAN {self.cfg.name}: alt {st.alt_deg:.4f} -> {alt:.4f} ({dalt:+.4f}),"
@@ -190,6 +234,7 @@ class Jog:
     async def radec(self, dra: float, ddec: float) -> bool:
         st = await self.status()
         planned = plan_radec(self.cfg, st, dra, ddec)
+        self._check_homed(st)
         text = (
             f"PLAN {self.cfg.name}: offset RA {dra:+.1f} coordinate arcsec, Dec {ddec:+.1f}"
             f" arcsec ({planned * 3600:.1f} arcsec on the sky) while tracking"
@@ -202,6 +247,87 @@ class Jog:
         self.say(f"offset ra {dra} dec {ddec}")
         await self.pwi.offset_radec(dra, ddec)
         return await self._watch(start, planned, target=None)
+
+    async def home(self, axis: int | None) -> bool:
+        """Home both axes or one (0 azimuth, 1 altitude; PWI4 4.1.7+), with
+        confirmation, printing the position, stop at hand."""
+        st = await self.status()
+        if not st.connected or not st.motors_enabled:
+            raise JogRefused("mount not connected or motors disabled (connect / enable first)")
+        if st.tracking:
+            raise JogRefused("tracking is on: send tracking-off (or stop) first")
+        which = "BOTH axes" if axis is None else ("AZIMUTH (axis 0)", "ALTITUDE (axis 1)")[axis]
+        if axis is not None and (
+            st.backend != "pwi4" or not version_at_least(st.version, PER_AXIS_HOME_VERSION)
+        ):
+            raise JogRefused(
+                f"homing one axis needs PWI4 4.1.7 or later (this is {st.backend}"
+                f" {st.version or 'version unknown'})"
+            )
+        text = (
+            f"PLAN {self.cfg.name}: FIND HOME, {which}. The axis drives to its home sensor"
+            " and may travel far, possibly the wrong way if the home-sensor direction"
+            " setting is wrong. Watch the webcam; Ctrl-C (or the stop command) stops it."
+        )
+        self.say(text)
+        if not await self.confirm(text + "\nhome?"):
+            self.say("not confirmed: nothing sent")
+            return False
+        self.say(f"find home {'both' if axis is None else axis}")
+        await self.pwi.find_home(axis)
+        return await self._watch_home(st, axis)
+
+    async def _watch_home(self, start: PWIStatus, axis: int | None) -> bool:
+        cfg = self.cfg
+        t0 = time.monotonic()
+        quiet_since: float | None = None
+        last: PWIStatus | None = None
+        try:
+            while True:
+                await asyncio.sleep(self.poll)
+                elapsed = time.monotonic() - t0
+                try:
+                    st = await self.pwi.status()
+                except PWIError as exc:
+                    self.say(f"status failed: {exc}")
+                    if elapsed > cfg.home_timeout:
+                        await self.stop("home timeout, PWI not answering")
+                        return False
+                    continue
+                self.say(f"t {elapsed:5.1f}s  {fmt(st)}")
+                if axis is not None:
+                    # The other axis must not move (an older PWI4 that ignored
+                    # the axis parameter would home both).
+                    other = (
+                        abs(st.alt_deg - start.alt_deg)
+                        if axis == 0
+                        else abs((st.az_deg - start.az_deg + 180) % 360 - 180)
+                    )
+                    if other > 0.5:
+                        await self.stop(f"the other axis moved {other:.2f} deg")
+                        return False
+                if elapsed > cfg.home_timeout:
+                    await self.stop(f"home not finished within home_timeout {cfg.home_timeout} s")
+                    return False
+                still = (
+                    last is not None
+                    and _sep_deg(st.alt_deg, st.az_deg, last.alt_deg, last.az_deg) < 0.001
+                    and st.slewing is not True
+                    and not st.finding_home
+                )
+                if still and elapsed > 2.0:
+                    quiet_since = quiet_since or time.monotonic()
+                    if time.monotonic() - quiet_since >= 2.0:
+                        self.say(f"home finished; PWI homed: {st.homed} {st.axes_homed or ''}")
+                        if axis is not None and st.axes_homed is not None:
+                            return st.axes_homed[axis]
+                        return st.homed is not False
+                else:
+                    quiet_since = None
+                last = st
+        except (KeyboardInterrupt, asyncio.CancelledError):
+            await self.stop("interrupted")
+            raise
 
     async def _watch(
         self, start: tuple[float, float], planned: float, target: tuple[float, float] | None
@@ -310,7 +436,12 @@ async def run(args: argparse.Namespace, cfg: PWIConfig) -> int:
         "OPEN" if allow else "closed",
     )
     confirm = _yes if args.yes else None
-    jog = Jog(cfg, client, confirm=confirm, poll=args.poll, slack=args.slack)
+    unhomed_ok = bool(cfg.allow_unhomed_moves and args.allow_unhomed)
+    if args.allow_unhomed and not cfg.allow_unhomed_moves:
+        log.warning("--allow-unhomed ignored: the config does not say allow_unhomed_moves")
+    if unhomed_ok:
+        log.warning("ENGINEERING OVERRIDE: moves allowed while the mount is not homed")
+    jog = Jog(cfg, client, confirm=confirm, poll=args.poll, slack=args.slack, unhomed_ok=unhomed_ok)
     task: asyncio.Task | None = None
     try:
         if args.command == "status":
@@ -326,7 +457,10 @@ async def run(args: argparse.Namespace, cfg: PWIConfig) -> int:
         if args.command in ("connect", "enable", "disable", "tracking-off"):
             await jog.simple(args.command)
             return 0
-        if args.command == "altaz":
+        if args.command == "home":
+            axis = None if args.axis == "both" else int(args.axis)
+            task = asyncio.ensure_future(jog.home(axis))
+        elif args.command == "altaz":
             task = asyncio.ensure_future(jog.altaz(args.dalt, args.daz))
         else:
             task = asyncio.ensure_future(jog.radec(args.dra, args.ddec))
@@ -348,6 +482,11 @@ def main(argv: list[str] | None = None) -> None:
     )
     ap.add_argument("--yes", action="store_true", help="do not ask before moving")
     ap.add_argument(
+        "--allow-unhomed",
+        action="store_true",
+        help="engineering: move while not homed (the config must say allow_unhomed_moves)",
+    )
+    ap.add_argument(
         "--poll", type=float, default=0.25, help="status poll interval during a move (s)"
     )
     ap.add_argument(
@@ -365,6 +504,8 @@ def main(argv: list[str] | None = None) -> None:
     sub.add_parser("enable", help="enable both axis motors (asks first)")
     sub.add_parser("disable", help="disable both axis motors")
     sub.add_parser("tracking-off", help="turn tracking off")
+    hm = sub.add_parser("home", help="find home: both axes or one (PWI4 4.1.7+); asks first")
+    hm.add_argument("--axis", choices=["0", "1", "both"], required=True, help="0 az, 1 alt")
     aa = sub.add_parser("altaz", help="relative alt/az move, degrees")
     aa.add_argument("--dalt", type=float, default=0.0)
     aa.add_argument("--daz", type=float, default=0.0)

@@ -27,7 +27,7 @@ All three are device number 0 on one server (`/api/v1/telescope/0`,
 * **Telescope** (ITelescopeV4, alt-az, J2000): `SlewToCoordinatesAsync`
   (tracking on), `SlewToAltAzAsync` (tracking off), `AbortSlew`, `Park`
   (alt/az slew to `park_alt`/`park_az`, then tracking off), `Unpark`,
-  `FindHome`, `Tracking`, `PulseGuide` (as a PWI RA/Dec offset of
+  `FindHome` (only with `allow_find_home`; see "Homing"), `Tracking`, `PulseGuide` (as a PWI RA/Dec offset of
   `guide_rate` arcsec/s, RA in coordinate arcsec). No sync, no MoveAxis.
 * **Focuser** (absolute, microns): the focuser **on the current M3 port**.
   `Move` refused outside [`focus_min`, `focus_max`] or while the M3 moves.
@@ -43,6 +43,7 @@ Actions on the telescope:
 | `Offset` | `{"east": E, "north": N}` arcsec on the sky | RA/Dec offset (RA `E / cos Dec`); tracking; at most `max_offset` |
 | `MountConnect` | | PWI connects to the mount controller (moves nothing) |
 | `MotorsEnable` / `MotorsDisable` | | both axis motors |
+| `FindHome` | `"both"`, `"0"` (azimuth) or `"1"` (altitude) | home; only with `allow_find_home`; one axis needs PWI4 4.1.7+ |
 | `Stop` | | mount stop; works without `Connected` |
 | `Status` | | JSON: PWI's typed status and the server's state |
 
@@ -54,7 +55,8 @@ Actions on the telescope:
 | mount connect | `/mount/connect` | `device=mount&cmd=connect` | both: legacy |
 | enable motors | `/mount/enable?axis=0`, `axis=1` | `device=mount&cmd=enable` | both: legacy (`axis=-1` rejected by PWI4 4.1.4) |
 | disable motors | `/mount/disable?axis=0`, `axis=1` | `device=mount&cmd=disable` | both: legacy |
-| find home | `/mount/find_home` | `device=mount&cmd=findhome` | both: legacy |
+| find home (both axes) | `/mount/find_home` | `device=mount&cmd=findhome` | both: legacy |
+| find home (one axis) | `/mount/findhome?axis=0\|1` | (none: PWI2 homes both) | PWI4 changelog, 4.1.7 beta 3 ("Add axis parameter to /mount/findhome"); **path spelling and values unconfirmed** |
 | goto J2000 | `/mount/goto_ra_dec_j2000?ra_hours=&dec_degs=` (decimal) | `device=mount&cmd=move&ra2000=&dec2000=` (decimal hours/deg) | PWI4: legacy; PWI2: legacy (docstring says decimal or sexagesimal) |
 | goto alt/az | `/mount/goto_alt_az?alt_degs=&az_degs=` | `device=mount&cmd=move&alt=&azm=` | both: legacy (park) |
 | RA/Dec offset | `/mount/offset?ra_add_arcsec=&dec_add_arcsec=` | `device=mount&cmd=move&incrementra=&incrementdec=` | legacy; **sign conventions not confirmed on the sky** |
@@ -78,6 +80,10 @@ Status fields read (`PWIStatus`): PWI4 `mount.is_connected`,
 `azm_radian`, `ra_radian`, `dec_radian`, `ra_2000`, `dec_2000`,
 `is_finding_home`, `encoders_have_been_set`, `*_motor_error_code`,
 `status.lst`, `m3.port`, `m3.moving_rotate`, `focuserN.*`, `rotatorN.*`.
+PWI4 also: `pwi4.version`, and `mount.axisN.is_homed` where present (PWI4
+4.1.4 had none, and the changelog documents no homed status key; PWI4
+4.1.2+ "remembers if [a CDK700 has] been homed since the last power
+cycle" but how it reports that over HTTP is to be seen on T1).
 
 Quirks handled:
 
@@ -88,6 +94,40 @@ Quirks handled:
 * **PWI4 reports only the GUI-selected focuser and rotator** ("Select from
   M3" must be ticked in PWI4; nothing in the API can check it), and
   `rotator.mech_position_degs` is always Rotator index 0's.
+
+## Homing
+
+Homing drives each axis to its home sensor. On T1 the home sensor was
+replaced years ago and a PWI2 setting for the home-sensor direction was
+changed then (PWI2 kept `settingsMount.20161219.badhome.xml` next to
+`settingsMount.xml`), so a PWI4 configured from defaults may home the wrong
+way. Therefore:
+
+* **Nothing homes implicitly**: not starting, not connecting, not enabling,
+  not before a slew. The server's `FindHome` (Alpaca, and the `FindHome`
+  Action) is refused (NotImplemented, `CanFindHome` false) unless the config
+  says `"allow_find_home": true`; the MINERVA configs say false.
+* The engineering path is `robofast-pwi-jog home --axis 0|1|both`: it asks
+  first, prints the position while it runs, and sends stop on Ctrl-C, after
+  `home_timeout` s, or (for one axis) if the other axis moves more than
+  0.5 deg -- what a PWI4 that ignored the axis parameter would do.
+* One axis at a time needs PWI4 4.1.7 or later (by `pwi4.version`); PWI2
+  homes both together.
+* **Moves are refused while the mount is not homed**: slews, park,
+  tracking on, offsets, pulses, and the jog's `altaz`/`radec`. Homed means
+  PWI2 `encoders_have_been_set`, or PWI4 `axisN.is_homed` where reported;
+  a PWI4 that reports nothing counts as not homed until robofast's server
+  has homed both axes itself. The engineering override is
+  `"allow_unhomed_moves": true` in the config **and** `--allow-unhomed` on
+  the command line (server or jog); every such move is logged as a
+  warning. The MINERVA remote configs set the config half for the first
+  session (small jogs before homing, to see which way each axis goes).
+
+The PWI version (PWI4 `pwi4.version`; PWI2 reports none) is logged by the
+server at start and on any change, by the jog at its first read, and is in
+the `Status` Action's JSON. It is not yet in FITS headers: the header path
+reads standard Alpaca properties, and a PWI version needs a new value
+source there (a later step).
 
 ## Safety
 
@@ -121,9 +161,10 @@ Quirks handled:
 `max_offset`, `guide_rate`, `max_pulse_ms`, `limit_margin`,
 `watch_interval`, `moving_speed`, `slew_report_min`, `park_tolerance`,
 `status_max_age`, `request_timeout`, `aperture_diameter`, `focal_length`,
-`max_jog_deg`, `jog_timeout`, `discovery_port`.
+`max_jog_deg`, `jog_timeout`, `home_timeout`, `allow_find_home`,
+`allow_unhomed_moves`, `discovery_port`.
 
-    robofast-pwi-server --config sites/minerva/remote/t1_pwi2.json --hardware
+    robofast-pwi-server --config sites/minerva/remote/t1_pwi4.json --hardware [--allow-unhomed]
 
 ## Simulators
 
@@ -147,7 +188,8 @@ way (as a mount's cable wrap might). Fault modes (`/robofast-sim/mode?mode=`):
 | `connect` | PWI connects to the mount controller |
 | `enable` / `disable` | both axis motors (`enable` asks first) |
 | `tracking-off` | tracking off |
-| `altaz --dalt D --daz D` | relative alt/az goto, each at most `max_jog_deg`; target inside the limits; tracking off; no azimuth move across 0/360 |
+| `home --axis 0\|1\|both` | find home (asks first; see "Homing") |
+| `altaz --dalt D --daz D` | relative alt/az goto, each at most `max_jog_deg`; target inside the limits; tracking off; no azimuth move across 0/360; homed (or `--allow-unhomed`) |
 | `radec --dra A --ddec A` | relative RA/Dec offset in arcsec while tracking, each at most `max_jog_deg` x 3600 |
 
 A move prints its plan and waits for `yes` (or `--yes`), then prints the
@@ -156,39 +198,69 @@ position every `--poll` s. It sends **stop** on Ctrl-C, after
 where it started, or if the altitude leaves the limits. Everything is
 logged to `$ROBOFAST_DATA_DIR/pwi-jog/<name>.log` (or `--log`).
 
+## PWI4 on the network
+
+PWI4's HTTP API (port 8220) must be reachable from the site gateway, which
+carries the tunnel:
+
+* In PWI4's HTTP server settings, allow connections from other machines
+  (PWI4 has a setting for it; by default it may listen on localhost only).
+* Add a Windows Defender Firewall inbound rule on the telescope PC: TCP
+  8220, allowed **only** from the gateway's address (Scope: remote IP
+  address), nothing else. No other machine needs PWI4's API.
+* Check from the gateway (`curl http://<telescope PC>:8220/status`), then
+  through the tunnel from the control machine
+  (`robofast-pwi-jog --config ... --hardware status`).
+
 ## First hardware session
 
 Checklist (before any command that moves):
 
 1. **Enclosure closed** (the mount moves; no sky needed). Nobody in it.
 2. **Legacy users stopped**: the legacy control code (`mainNew` and
-   anything else that talks to PWI2 on that telescope) is not running, so
+   anything else that talks to PWI on that telescope) is not running, so
    robofast is PWI's only client. Only one of PWI2 and PWI4 is running.
 3. **Webcam on the telescope**, watched by someone who can see the mount.
 4. **The PDU outlet** for the mount (and how to switch it off) is known.
 5. **Abort at hand**: a second terminal with
    `robofast-pwi-jog --config ... --hardware stop` typed and ready; PWI's
    own Stop button as a second path.
-6. The tunnel is up (`docs/remote.md`); `status` reads sane values
-   (altitude, azimuth, motors as expected).
+6. The tunnel is up (`docs/remote.md`); PWI4's API reachable ("PWI4 on the
+   network").
+7. **Before any home**: compare PWI2's two mount settings files on the
+   telescope PC (`settingsMount.xml` vs
+   `settingsMount.20161219.badhome.xml`), find the home-sensor direction
+   key that changed, and set the matching PWI4 mount setting.
 
-Sequence (T1, PWI2, through the 7101 tunnel):
+Sequence (T1 on PWI4, through the 7141 tunnel):
 
-    C=sites/minerva/remote/t1_pwi2.json
-    robofast-pwi-jog --config $C --hardware status                # read only
-    robofast-pwi-jog --config $C --hardware status --watch 2      # leave running in a window
-    robofast-pwi-jog --config $C --hardware connect               # only if status says conn 0
-    robofast-pwi-jog --config $C --hardware enable                # only if motors 00; asks yes
-    robofast-pwi-jog --config $C --hardware tracking-off          # only if track 1
-    robofast-pwi-jog --config $C --hardware altaz --dalt 0.2      # first move: 0.2 deg up; asks yes
-    robofast-pwi-jog --config $C --hardware altaz --dalt -0.2     # back
-    robofast-pwi-jog --config $C --hardware altaz --daz 0.2       # azimuth, away from 0/360
-    robofast-pwi-jog --config $C --hardware altaz --daz -0.2
-    robofast-pwi-jog --config $C --hardware stop                  # any time
+    C=sites/minerva/remote/t1_pwi4.json
+    J="robofast-pwi-jog --config $C --hardware"
+    # 1. Read only.
+    $J status                          # version, alt/az, conn, motors, homed
+    $J status --watch 2                # leave running in a window
+    # 2. Connect and enable (no motion).
+    $J connect                         # only if conn 0
+    $J enable                          # only if motors 00; asks yes
+    $J tracking-off                    # only if track 1
+    # 3. Tiny jogs BEFORE homing, to see which way each axis goes.
+    $J --allow-unhomed altaz --dalt 0.2     # up 0.2 deg; asks yes; watch the webcam
+    $J --allow-unhomed altaz --dalt -0.2    # back
+    $J --allow-unhomed altaz --daz 0.2      # azimuth (away from 0/360)
+    $J --allow-unhomed altaz --daz -0.2
+    # 4. Settings checked (checklist 7)? Home one axis at a time.
+    $J home --axis 1                   # altitude; asks yes; stop at hand
+    $J home --axis 0                   # azimuth
+    $J status                          # homed 1?
+    # 5. Homed: jogs without the override.
+    $J altaz --dalt 0.5
+    $J stop                            # any time
 
 Watch on the webcam that each move goes the right way and by about the
-right amount. Only then the server (`robofast-pwi-server --config $C
---hardware`) and Alpaca clients.
+right amount, and that each home goes toward its sensor. Only then the
+server (`robofast-pwi-server --config $C --hardware`) and Alpaca clients.
+On PWI2 (T1 config `t1_pwi2.json`, tunnel 7101) the steps are the same
+except that `home --axis both` is the only home.
 
 ## To check on hardware
 
@@ -200,6 +272,10 @@ right amount. Only then the server (`robofast-pwi-server --config $C
 * Offset sign conventions (`incrementra` / `ra_add_arcsec` positive = RA
   increases) and the PulseGuide directions, with a star on a camera.
 * Whether PWI4's `/mount/find_home` reports `is_slewing` while homing.
+* The per-axis home request: `/mount/findhome?axis=0|1` (changelog
+  spelling; the older both-axes command is `/mount/find_home`), axis 0 =
+  azimuth, 1 = altitude; and whether PWI4 reports homed state over HTTP.
+* T1's home-sensor direction in PWI4 (checklist 7).
 * The azimuth cable wrap: which way PWI takes for a goto near the wrap
   limits (the jog refuses azimuth moves across 0/360 meanwhile).
 * Focuser positions (microns) and rotator mechanical angles match legacy.

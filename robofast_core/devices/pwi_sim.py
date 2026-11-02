@@ -15,14 +15,20 @@ The model, from the legacy driver's use of PWI (``docs/pwi.md``):
 
 * motion needs the mount connected and both axes enabled; a goto otherwise
   does nothing (*assumed*: what PWI does then is not known). Nothing is
-  connected, enabled or homed at start unless asked (``--ready``).
+  connected or enabled at start unless asked (``--ready``), and not homed
+  unless asked (``--homed``): moves work unhomed here, as on a real mount;
+  refusing them is robofast's job.
 * each axis slews at ``slew_rate`` deg/s. Azimuth moves linearly within
   [0, 360) and **never crosses 0/360** (a crude cable wrap): a goto from
   az 359 to 1 goes the long way round, as a real mount with a wrap might.
 * ``goto_ra_dec_j2000`` slews and then tracks (J2000 = apparent here);
   ``goto_alt_az`` slews and stops tracking (PWI4; PWI2 keeps its tracking
   state and holds the alt/az); ``stop`` and ``disable`` stop the axes and
-  tracking; ``find_home`` takes ``home_time`` s and sets "homed".
+  tracking; ``find_home`` drives the axes to (``home_alt``, ``home_az``)
+  and sets "homed" (after at least ``home_time`` s); PWI4's
+  ``/mount/findhome?axis=0|1`` (4.1.7 beta 3+) homes one axis. PWI4 reports
+  ``mount.axisN.is_homed`` only with ``report_homed`` (PWI4 4.1.4 did not);
+  PWI2 reports ``encoders_have_been_set``.
 * the M3 takes ``m3_time`` s between ports (``m3.port`` 0 meanwhile); one
   focuser (microns) and one rotator (mechanical deg) per port. PWI4
   commands act on the current port's; PWI4's ``rotator.mech_position_degs``
@@ -101,6 +107,11 @@ class CDK700Model:
         alt: float = 30.0,
         az: float = 90.0,
         ready: bool = False,
+        homed: bool = False,
+        report_homed: bool = False,
+        home_alt: float = 60.0,
+        home_az: float = 180.0,
+        version: str = "4.1.8.0",
     ) -> None:
         self.lat, self.lon = latitude, longitude
         self.slew_rate = slew_rate
@@ -109,7 +120,11 @@ class CDK700Model:
         self.lock = threading.RLock()
         self.connected = ready
         self.enabled = [ready, ready]
-        self.homed = ready
+        self.axes_homed = [homed, homed]
+        self.report_homed = report_homed
+        self.home_pos = (home_alt, home_az)
+        self.version = version
+        self.homing_axes: tuple[int, ...] = ()
         self.alt, self.az = alt, az
         self.tracking = False
         #: Tracked/slew target in RA (h) / Dec (deg), or None.
@@ -146,9 +161,11 @@ class CDK700Model:
         with self.lock:
             now = time.monotonic() if now is None else now
             dt, self._t = max(0.0, now - self._t), now
-            if self.homing_until and now >= self.homing_until:
+            if self.homing_until and now >= self.homing_until and not self.slewing:
                 self.homing_until = 0.0
-                self.homed = True
+                for i in self.homing_axes:
+                    self.axes_homed[i] = True
+                self.homing_axes = ()
             if self.m3_until and now >= self.m3_until:
                 self.m3_until = 0.0
                 self.m3_port = self.m3_target
@@ -195,13 +212,24 @@ class CDK700Model:
         self.stop()
 
     def stop(self) -> None:
+        self.homing_until = 0.0
+        self.homing_axes = ()
         self.slewing = False
         self.tracking = False
         self.radec = self.altaz = None
 
-    def find_home(self) -> None:
+    @property
+    def homed(self) -> bool:
+        return all(self.axes_homed)
+
+    def find_home(self, axis: int | None = None) -> None:
         if self._can_move("find_home"):
             self.stop()
+            axes = (0, 1) if axis is None else (axis,)
+            alt = self.home_pos[0] if 1 in axes else self.alt
+            az = self.home_pos[1] if 0 in axes else self.az
+            self.radec, self.altaz, self.slewing = None, (alt, az), True
+            self.homing_axes = axes
             self.homing_until = time.monotonic() + self.home_time
 
     def goto_radec(self, ra: float, dec: float) -> None:
@@ -259,6 +287,7 @@ class CDK700Model:
                 "connected": self.connected,
                 "enabled": list(self.enabled),
                 "homed": self.homed,
+                "axes_homed": list(self.axes_homed),
                 "homing": self.homing,
                 "alt": self.alt,
                 "az": self.az,
@@ -288,7 +317,7 @@ def pwi4_status(m: CDK700Model) -> str:
     foc, rot = m.focusers[sel], m.rotators[sel]
     moving = m.slewing or m.homing
     lines = [
-        ("pwi4.version", "4.1.4.0"),
+        ("pwi4.version", m.version),
         ("response.timestamp_utc", time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime())),
         ("site.latitude_degs", repr(m.lat)),
         ("site.longitude_degs", repr(m.lon)),
@@ -307,6 +336,11 @@ def pwi4_status(m: CDK700Model) -> str:
         ("mount.is_tracking", _b4(m.tracking)),
         ("mount.axis0.is_enabled", _b4(m.enabled[0])),
         ("mount.axis1.is_enabled", _b4(m.enabled[1])),
+        *(
+            [(f"mount.axis{i}.is_homed", _b4(m.axes_homed[i])) for i in (0, 1)]
+            if m.report_homed
+            else []
+        ),
         ("mount.axis0.setpoint_velocity_degs_per_sec", repr(m.slew_rate if moving else 0.0)),
         ("mount.axis1.setpoint_velocity_degs_per_sec", repr(m.slew_rate if moving else 0.0)),
         ("mount.model.filename", m.model_file),
@@ -363,7 +397,14 @@ def pwi4_handle(m: CDK700Model, path: str, q: dict[str, list[str]]) -> str:
                 raise _HTTPError(400, f"Invalid value for axis: {axis}. Must be 0 or 1")
             (m.enable if path.endswith("enable") else m.disable)(int(axis))
         elif path == "/mount/find_home":
-            m.find_home()
+            m.find_home()  # both axes; an axis parameter is not read here
+        elif path == "/mount/findhome":
+            if tuple(int(x) for x in m.version.split(".")[:3]) < (4, 1, 7):
+                raise _HTTPError(404, "Command not found")
+            axis = q.get("axis", [""])[0]
+            if axis not in ("0", "1"):
+                raise _HTTPError(400, f"Invalid value for axis: {axis}")
+            m.find_home(int(axis))
         elif path == "/mount/stop":
             m.stop()
         elif path == "/mount/goto_ra_dec_j2000":
@@ -688,9 +729,10 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("--m3-time", type=float, default=1.0)
     ap.add_argument("--alt", type=float, default=30.0, help="starting altitude")
     ap.add_argument("--az", type=float, default=90.0, help="starting azimuth")
-    ap.add_argument(
-        "--ready", action="store_true", help="start connected, enabled and homed (ConformU)"
-    )
+    ap.add_argument("--ready", action="store_true", help="start connected and enabled (ConformU)")
+    ap.add_argument("--homed", action="store_true", help="start homed")
+    ap.add_argument("--report-homed", action="store_true", help="PWI4: report mount.axisN.is_homed")
+    ap.add_argument("--version", default="4.1.8.0", help="PWI4 version to report")
     args = ap.parse_args(argv)
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
@@ -705,6 +747,9 @@ def main(argv: list[str] | None = None) -> None:
         alt=args.alt,
         az=args.az,
         ready=args.ready,
+        homed=args.homed,
+        report_homed=args.report_homed,
+        version=args.version,
     ).start()
     print(f"{args.api} simulator on {sim.address}", flush=True)
     try:

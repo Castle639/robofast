@@ -4,7 +4,8 @@ by the PWI4 and PWI2 simulators.
     python scripts/conformu_pwi.py --conformu PATH [--out DIR] [--backends pwi4,pwi2]
 
 For each backend, starts ``robofast_core.devices.pwi_sim`` (connected,
-enabled and homed: ConformU must be able to slew) and
+enabled and homed, PWI4 reporting it: ConformU must be able to slew; the
+server's FindHome is allowed here) and
 ``robofast_core.devices.pwi_server`` on free loopback ports, then runs
 ConformU's ``conformance`` and ``alpacaprotocol`` checks on each device.
 Exits non-zero if any check reports an error or an issue. Logs and results
@@ -45,7 +46,7 @@ def main() -> None:
             sim, line = start(
                 [
                     "robofast_core.devices.pwi_sim",
-                    *("--api", backend, "--port", "0", "--ready"),
+                    *("--api", backend, "--port", "0", "--ready", "--homed", "--report-homed"),
                     *("--slew-rate", "6", "--home-time", "1", "--m3-time", "0.5"),
                 ],
                 out / f"{backend}-sim.log",
@@ -73,6 +74,8 @@ def main() -> None:
                         "status_max_age": 0.1,
                         "slew_report_min": 0.5,
                         "watch_interval": 0,
+                        # ConformU tests FindHome; the sims home harmlessly.
+                        "allow_find_home": True,
                     }
                 )
             )

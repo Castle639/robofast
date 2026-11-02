@@ -15,8 +15,14 @@ Devices
   connected in PWI and both axis motors are enabled. ``AbortSlew`` stops the
   mount (PWI ``stop``, which also stops tracking). ``Park`` slews to
   (``park_alt``, ``park_az``) with tracking off; ``Unpark`` only clears the
-  parked state. ``FindHome`` runs PWI's home search (``AtHome`` is true
-  after it until the mount moves). ``PulseGuide`` is a PWI RA/Dec offset of
+  parked state. ``FindHome`` runs PWI's home search, **only** with
+  ``"allow_find_home": true`` in the config (else NotImplemented and
+  ``CanFindHome`` false); ``AtHome`` is true after it until the mount moves.
+  Every slew, park, tracking-on, offset and pulse is **refused while the
+  mount is not homed** (PWI2 ``encoders_have_been_set``; PWI4
+  ``axisN.is_homed`` where reported, else a home done by this server),
+  unless ``"allow_unhomed_moves": true`` **and** ``--allow-unhomed``
+  (engineering; every such move is logged as a warning). ``PulseGuide`` is a PWI RA/Dec offset of
   ``guide_rate`` (RA coordinate or Dec) arcsec/s times the duration (needs tracking). No sync, no
   MoveAxis.
 * ``focuser/0`` (IFocuserV4, absolute, microns): the focuser **on the current
@@ -42,6 +48,8 @@ Actions (telescope)
 * ``MotorsEnable`` / ``MotorsDisable``: enable / disable both axes.
   **Enabling is never implicit**: nothing here enables motors, homes or
   moves on its own, and connecting (Alpaca or PWI) never does.
+* ``FindHome``: ``"both"`` (default), ``"0"`` (azimuth) or ``"1"``
+  (altitude; one axis needs PWI4 4.1.7+), with ``allow_find_home`` only.
 * ``Stop``: mount stop, accepted even while not connected.
 * ``Status``: JSON of PWI's status (typed) and the server's state.
 
@@ -100,6 +108,7 @@ from robofast_core.devices.aqawan_server import (
 )
 from robofast_core.devices.pwi_client import (
     BACKENDS,
+    PER_AXIS_HOME_VERSION,
     PWI2_PORT,
     PWI4_PORT,
     PWIClient,
@@ -107,6 +116,7 @@ from robofast_core.devices.pwi_client import (
     PWIStatus,
     PWITimeout,
     make_client,
+    version_at_least,
 )
 from robofast_core.devices.tcsgo_server import (
     COMMON_NAMES,
@@ -130,6 +140,7 @@ TELESCOPE_ACTIONS = (
     "MountConnect",
     "MotorsEnable",
     "MotorsDisable",
+    "FindHome",
     "Stop",
     "Status",
 )
@@ -211,6 +222,15 @@ class PWIConfig:
     request_timeout: float = 10.0
     aperture_diameter: float | None = None
     focal_length: float | None = None
+    #: FindHome (Alpaca) and the FindHome Action are refused unless true:
+    #: homing drives the axes to their home sensors, which on a mount whose
+    #: home sensor or its direction setting changed can mean the wrong way.
+    allow_find_home: bool = False
+    #: Moves while PWI does not report the mount homed are refused unless
+    #: this is true AND the command line says --allow-unhomed (engineering).
+    allow_unhomed_moves: bool = False
+    #: robofast-pwi-jog home: give up (stop) after this long (s).
+    home_timeout: float = 300.0
     #: robofast-pwi-jog: largest relative move per axis (deg) and its timeout.
     max_jog_deg: float = 1.0
     jog_timeout: float = 60.0
@@ -297,7 +317,13 @@ class PWIMount:
         self._lock = asyncio.Lock()
         self._moving_since = -1e9
         self._homing_since: float | None = None
+        self._homing_axes: tuple[int, ...] = ()
         self._home_at: tuple[float, float] | None = None
+        #: Axes this process saw homed (for a PWI that reports no homed flag).
+        self.homed_here: set[int] = set()
+        #: The engineering override (config AND --allow-unhomed).
+        self.unhomed_ok = False
+        self.version: str | None = None
         #: "unknown", "parking", "parked", "unparked".
         self.park_state = "unknown"
         self.target_ra: float | None = None
@@ -332,6 +358,9 @@ class PWIMount:
         elif self._prev is None:
             self._prev = (t, st.alt_deg, st.az_deg)
         self._st, self._st_at = st, t
+        if st.version != self.version:
+            self.version = st.version
+            log.warning("PWI (%s) version %s", st.backend, st.version or "not reported")
 
     def _invalidate(self) -> None:
         self._st_at = -1e9
@@ -376,7 +405,19 @@ class PWIMount:
             return True
         self._homing_since = None
         self._home_at = (st.alt_deg, st.az_deg)
+        if st.homed is not False and st.axes_homed is None:
+            self.homed_here |= set(self._homing_axes)
+        log.info("homing done (axes %s); PWI homed: %s", self._homing_axes, st.homed)
         return False
+
+    def is_homed(self, st: PWIStatus) -> bool | None:
+        """PWI's homed flag; without one, whether this process homed both
+        axes; None: unknown (treated as not homed)."""
+        if st.homed is not None:
+            return st.homed
+        if self.homed_here >= {0, 1}:
+            return True
+        return None
 
     async def at_home(self) -> bool:
         """True after a completed FindHome until the mount moves away."""
@@ -402,7 +443,7 @@ class PWIMount:
 
     # -- checks -------------------------------------------------------------------------
 
-    async def _ready(self, what: str) -> PWIStatus:
+    async def _ready(self, what: str, *, motion: bool = True) -> PWIStatus:
         st = await self.status(0)
         if not st.connected:
             raise AlpacaException(
@@ -416,6 +457,15 @@ class PWIMount:
         for axis, err in (("alt", st.alt_motor_error), ("az", st.az_motor_error)):
             if err is not None and err[0] != 0:
                 raise AlpacaException(INVALID_OPERATION, f"{what}: {axis} drive error {err}")
+        if motion and not self.is_homed(st):
+            state = "not homed" if st.homed is False else "homed state unknown"
+            if not self.unhomed_ok:
+                raise AlpacaException(
+                    INVALID_OPERATION,
+                    f"{what}: mount {state}; refusing (engineering override: allow_unhomed_moves"
+                    " in the config AND --allow-unhomed)",
+                )
+            log.warning("UNHOMED MOVE (%s): mount %s; override in effect", what, state)
         return st
 
     def _check_alt(self, alt: float, what: str) -> None:
@@ -525,14 +575,31 @@ class PWIMount:
             raise AlpacaException(INVALID_OPERATION, "Unpark: still parking")
         self.park_state = "unparked"
 
-    async def find_home(self) -> None:
+    async def find_home(self, axis: int | None = None) -> None:
+        """Home both axes, or one (0 azimuth, 1 altitude; PWI4 4.1.7+).
+        Never called implicitly: only FindHome / the FindHome Action, and
+        only with ``allow_find_home``."""
+        if not self.config.allow_find_home:
+            raise AlpacaException(
+                NOT_IMPLEMENTED, "FindHome is disabled (allow_find_home is false in the config)"
+            )
         await self._not_parked("FindHome")
-        await self._ready("FindHome")
+        st = await self._ready("FindHome", motion=False)
+        if axis is not None:
+            if st.backend != "pwi4" or not version_at_least(st.version, PER_AXIS_HOME_VERSION):
+                raise AlpacaException(
+                    INVALID_OPERATION,
+                    f"FindHome axis {axis}: needs PWI4 4.1.7 or later (this is"
+                    f" {st.backend} {st.version or 'version unknown'})",
+                )
+        log.warning("FIND HOME: axes %s", "both" if axis is None else axis)
+        self._homing_axes = (0, 1) if axis is None else (axis,)
+        self.homed_here -= set(self._homing_axes)
         self._homing_since = time.monotonic()
         self._home_at = None
         self._moving_since = time.monotonic()
         self._watch_latched = True  # homing may cross the limits
-        await self._send(self.pwi.find_home, "find home")
+        await self._send(lambda: self.pwi.find_home(axis), f"find home {axis}")
 
     async def mount_connect(self) -> None:
         await self._send(self.pwi.mount_connect, "mount connect")
@@ -627,6 +694,9 @@ class PWIMount:
             "speed_deg_s": self.speed,
             "limits": [self.config.min_alt, self.config.max_alt],
             "watch_stops": self.watch_stops,
+            "homed": self.is_homed(st),
+            "homed_here": sorted(self.homed_here),
+            "unhomed_override": self.unhomed_ok,
         }
 
     # -- the limit watch -----------------------------------------------------------------
@@ -728,7 +798,6 @@ class PWIMount:
 # -- Alpaca over HTTP ------------------------------------------------------------------
 
 TELESCOPE_CAN = {
-    "canfindhome": True,
     "canpark": True,
     "canpulseguide": True,
     "cansetdeclinationrate": False,
@@ -780,7 +849,9 @@ class PWIServer(ThreadingHTTPServer):
     daemon_threads = True
     allow_reuse_address = True
 
-    def __init__(self, config: PWIConfig, *, hardware: bool = False) -> None:
+    def __init__(
+        self, config: PWIConfig, *, hardware: bool = False, allow_unhomed: bool = False
+    ) -> None:
         allow = hwgate.gate_open(config.allow_hardware, hardware, what="PWI hardware")
         what = f"{config.backend} PWI"
         self.pwi_ip = hwgate.check_endpoint(
@@ -808,6 +879,11 @@ class PWIServer(ThreadingHTTPServer):
         self._discovery: _Discovery | None = None
         self._watch: concurrent.futures.Future | None = None
         self.mount: PWIMount = self._run_sync(self._build())
+        self.mount.unhomed_ok = config.allow_unhomed_moves and allow_unhomed
+        if self.mount.unhomed_ok:
+            log.warning("ENGINEERING OVERRIDE: moves allowed while the mount is not homed")
+        elif config.allow_unhomed_moves != allow_unhomed:
+            log.info("unhomed moves need allow_unhomed_moves in the config AND --allow-unhomed")
 
     async def _build(self) -> PWIMount:
         p = self.config.pwi
@@ -959,6 +1035,8 @@ class PWIServer(ThreadingHTTPServer):
             self._call(t.abort, "Stop")
             return ""
         if verb == "GET":
+            if member == "canfindhome":
+                return cfg.allow_find_home
             if member in TELESCOPE_CAN:
                 return TELESCOPE_CAN[member]
             if member in ("canmoveaxis", "axisrates"):
@@ -1111,6 +1189,13 @@ class PWIServer(ThreadingHTTPServer):
         if key in ("motorsenable", "motorsdisable"):
             on = key == "motorsenable"
             self._call(lambda: t.motors(on), name)
+            return ""
+        if key == "findhome":
+            p = (parameters or "both").strip().lower()
+            if p not in ("both", "0", "1"):
+                raise AlpacaException(INVALID_VALUE, 'FindHome: "both", "0" (az) or "1" (alt)')
+            axis = None if p == "both" else int(p)
+            self._call(lambda: t.find_home(axis), "FindHome")
             return ""
         if key == "status":
             return json.dumps(self._call(t.report, "Status"))
@@ -1276,6 +1361,11 @@ class PWIServer(ThreadingHTTPServer):
     # -- lifecycle --------------------------------------------------------------------
 
     def start(self) -> PWIServer:
+        # One status read, to log PWI's version (reading only; never fatal).
+        try:
+            self._call(lambda: self.mount.status(0), "startup status")
+        except AlpacaException as exc:
+            log.warning("startup status read failed: %s", exc)
         self._http_thread = threading.Thread(
             target=self.serve_forever, name="pwi-http", daemon=True
         )
@@ -1312,6 +1402,11 @@ def main(argv: list[str] | None = None) -> None:
         action="store_true",
         help="allow a real PWI (the config must also say allow_hardware)",
     )
+    ap.add_argument(
+        "--allow-unhomed",
+        action="store_true",
+        help="engineering: allow moves while not homed (the config must say allow_unhomed_moves)",
+    )
     ap.add_argument("--listen", help="host:port, overriding the config")
     ap.add_argument("--log-level", default="INFO")
     args = ap.parse_args(argv)
@@ -1322,7 +1417,7 @@ def main(argv: list[str] | None = None) -> None:
     if args.listen:
         config.listen = args.listen
     try:
-        server = PWIServer(config, hardware=args.hardware)
+        server = PWIServer(config, hardware=args.hardware, allow_unhomed=args.allow_unhomed)
     except hwgate.HardwareNotAllowed as exc:
         log.error("%s", exc)
         sys.exit(2)

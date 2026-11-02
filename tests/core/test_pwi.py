@@ -23,6 +23,7 @@ from robofast_core.alpaca_client import (
     InvalidOperationException,
     InvalidValueException,
     NotConnectedException,
+    NotImplementedException,
     ParkedException,
 )
 from robofast_core.devices.pwi_client import (
@@ -69,6 +70,7 @@ def config(port: int, backend: str, **kw) -> PWIConfig:
         "watch_interval": 0.1,
         "m3_timeout": 5.0,
         "request_timeout": 5.0,
+        "allow_find_home": True,
     }
     return PWIConfig.from_dict({**base, **kw})
 
@@ -77,18 +79,30 @@ def config(port: int, backend: str, **kw) -> PWIConfig:
 def make():
     made: list = []
 
-    def build(backend: str, *, ready: bool = True, hardware: bool = False, sim_kw=None, **kw):
+    def build(
+        backend: str,
+        *,
+        ready: bool = True,
+        hardware: bool = False,
+        allow_unhomed: bool = False,
+        sim_kw=None,
+        **kw,
+    ):
         skw = {
             "slew_rate": 20.0,
             "home_time": 0.3,
             "m3_time": 0.3,
             "ready": ready,
+            "homed": True,
+            "report_homed": True,
             **(sim_kw or {}),
         }
         sim = PWISim(backend, **skw)
         sim.start()
         made.append(sim)
-        server = PWIServer(config(sim.port, backend, **kw), hardware=hardware).start()
+        server = PWIServer(
+            config(sim.port, backend, **kw), hardware=hardware, allow_unhomed=allow_unhomed
+        ).start()
         made.append(server)
         return sim, server
 
@@ -450,7 +464,9 @@ def jog_for(sim: PWISim, backend: str, confirm=_yes, **kw) -> tuple[Jog, _Out, P
 
 @pytest.mark.parametrize("backend", BACKENDS)
 async def test_jog_altaz_arrives(backend):
-    sim = PWISim(backend, ready=True, slew_rate=2.0, alt=40.0, az=100.0).start()
+    sim = PWISim(
+        backend, ready=True, slew_rate=2.0, alt=40.0, az=100.0, homed=True, report_homed=True
+    ).start()
     jog, out, _ = jog_for(sim, backend)
     try:
         assert await jog.altaz(0.5, -0.3)
@@ -464,7 +480,7 @@ async def test_jog_altaz_arrives(backend):
 
 @pytest.mark.parametrize("backend", BACKENDS)
 async def test_jog_not_confirmed_sends_nothing(backend):
-    sim = PWISim(backend, ready=True).start()
+    sim = PWISim(backend, ready=True, homed=True, report_homed=True).start()
     jog, _out, _ = jog_for(sim, backend, confirm=_no)
     try:
         assert not await jog.altaz(0.5, 0.0)
@@ -503,7 +519,9 @@ def test_jog_plans_refuse():
 @pytest.mark.parametrize("backend", BACKENDS)
 async def test_jog_stops_a_runaway(backend):
     """PWI goes further than planned: the jog sends stop."""
-    sim = PWISim(backend, ready=True, slew_rate=3.0, alt=40.0, az=100.0).start()
+    sim = PWISim(
+        backend, ready=True, slew_rate=3.0, alt=40.0, az=100.0, homed=True, report_homed=True
+    ).start()
     jog, out, _ = jog_for(sim, backend)
     real = jog.pwi.goto_altaz
 
@@ -522,7 +540,9 @@ async def test_jog_stops_a_runaway(backend):
 
 
 async def test_jog_cancel_sends_stop():
-    sim = PWISim("pwi4", ready=True, slew_rate=0.5, alt=40.0, az=100.0).start()
+    sim = PWISim(
+        "pwi4", ready=True, slew_rate=0.5, alt=40.0, az=100.0, homed=True, report_homed=True
+    ).start()
     jog, out, _ = jog_for(sim, "pwi4")
     try:
         task = asyncio.ensure_future(jog.altaz(1.0, 0.0))
@@ -559,3 +579,160 @@ def test_jog_cli_status_and_stop(tmp_path, capsys):
 
 def test_pwi4_client_and_pwi2_client_are_backends():
     assert PWI4Client.backend == "pwi4" and PWI2Client.backend == "pwi2"
+
+
+# -- homing -----------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("backend", BACKENDS)
+async def test_moves_refused_unhomed_unless_override(make, backend):
+    sim, server = make(backend, sim_kw={"homed": False})
+    tel = await device(server)
+    with pytest.raises(InvalidOperationException, match="homed"):
+        await tel.put("SlewToAltAzAsync", Altitude=40.0, Azimuth=100.0, timeout=T)
+    with pytest.raises(InvalidOperationException, match="homed"):
+        await tel.set("Tracking", True, timeout=T)
+    with pytest.raises(InvalidOperationException, match="homed"):
+        await tel.call("Park", timeout=T)
+    assert not any("goto" in c or "move" in c or "tracking" in c for c in sim.model.commands)
+    await tel.aclose()
+    # The config flag alone is not enough...
+    _, server2 = make(backend, sim_kw={"homed": False}, allow_unhomed_moves=True)
+    tel2 = await device(server2)
+    with pytest.raises(InvalidOperationException, match="homed"):
+        await tel2.put("SlewToAltAzAsync", Altitude=40.0, Azimuth=100.0, timeout=T)
+    await tel2.aclose()
+    # ... config AND --allow-unhomed.
+    sim3, server3 = make(
+        backend, sim_kw={"homed": False}, allow_unhomed_moves=True, allow_unhomed=True
+    )
+    tel3 = await device(server3)
+    await tel3.put("SlewToAltAzAsync", Altitude=40.0, Azimuth=100.0, timeout=T)
+    await until(lambda: _not(tel3.get("Slewing", timeout=T)), what="slew end")
+    assert abs(sim3.model.state()["alt"] - 40.0) < 0.01
+    await tel3.aclose()
+
+
+async def test_pwi4_without_homed_flag_counts_as_unhomed_until_homed_here(make):
+    _, server = make("pwi4", sim_kw={"report_homed": False})
+    tel = await device(server)
+    with pytest.raises(InvalidOperationException, match="homed state unknown"):
+        await tel.put("SlewToAltAzAsync", Altitude=40.0, Azimuth=100.0, timeout=T)
+    await tel.put("FindHome", timeout=T)
+    await until(lambda: tel.get("AtHome", timeout=T), what="home")
+    await tel.put("SlewToAltAzAsync", Altitude=40.0, Azimuth=100.0, timeout=T)
+    await tel.aclose()
+
+
+@pytest.mark.parametrize("backend", BACKENDS)
+async def test_find_home_needs_opt_in_and_never_happens_implicitly(make, backend):
+    sim, server = make(backend, ready=False, sim_kw={"homed": False}, allow_find_home=False)
+    tel = await device(server)
+    assert not await tel.get("CanFindHome", timeout=T)
+    with pytest.raises(NotImplementedException):
+        await tel.put("FindHome", timeout=T)
+    with pytest.raises(NotImplementedException):
+        await tel.call("Action", "FindHome", "both", timeout=T)
+    await tel.call("Action", "MountConnect", "", timeout=T)
+    await tel.call("Action", "MotorsEnable", "", timeout=T)
+    with pytest.raises(InvalidOperationException):
+        await tel.put("SlewToAltAzAsync", Altitude=40.0, Azimuth=100.0, timeout=T)
+    with pytest.raises(InvalidOperationException):
+        await tel.set("Tracking", True, timeout=T)
+    await tel.call("Action", "Stop", "", timeout=T)
+    await asyncio.sleep(0.3)
+    assert not any("home" in c for c in sim.model.commands)
+    assert sim.model.state()["axes_homed"] == [False, False]
+    await tel.aclose()
+
+
+async def test_find_home_one_axis(make):
+    sim, server = make("pwi4", sim_kw={"homed": False})
+    tel = await device(server)
+    await tel.call("Action", "FindHome", "1", timeout=T)
+    await until(lambda: _async(sim.model.state()["axes_homed"] == [False, True]), what="alt")
+    assert "/mount/findhome?axis=1" in sim.model.commands
+    await until(lambda: _not(tel.get("Slewing", timeout=T)), what="alt done")
+    with pytest.raises(InvalidOperationException, match="homed"):  # azimuth still unhomed
+        await tel.put("SlewToAltAzAsync", Altitude=40.0, Azimuth=100.0, timeout=T)
+    await tel.call("Action", "FindHome", "0", timeout=T)
+    await until(lambda: _async(sim.model.state()["homed"]), what="az")
+    await until(lambda: _not(tel.get("Slewing", timeout=T)), what="home done")
+    await tel.put("SlewToAltAzAsync", Altitude=40.0, Azimuth=100.0, timeout=T)
+    await tel.aclose()
+
+
+async def test_find_home_one_axis_needs_pwi4_417(make):
+    _, server = make("pwi4", sim_kw={"version": "4.1.4.0"})
+    tel = await device(server)
+    with pytest.raises(InvalidOperationException, match=r"4\.1\.7"):
+        await tel.call("Action", "FindHome", "0", timeout=T)
+    await tel.aclose()
+    _, server2 = make("pwi2")
+    tel2 = await device(server2)
+    with pytest.raises(InvalidOperationException, match=r"4\.1\.7"):
+        await tel2.call("Action", "FindHome", "1", timeout=T)
+    await tel2.aclose()
+
+
+@pytest.mark.parametrize("backend", BACKENDS)
+async def test_jog_refuses_unhomed_unless_override(backend):
+    sim = PWISim(backend, ready=True, homed=False, alt=40.0, az=100.0).start()
+    jog, out, _ = jog_for(sim, backend)
+    try:
+        with pytest.raises(JogRefused, match="allow-unhomed"):
+            await jog.altaz(0.2, 0.0)
+        assert sim.model.commands == []
+        jog.unhomed_ok = True
+        assert await jog.altaz(0.2, 0.0)
+        assert any("UNHOMED MOVE" in line for line in out)
+    finally:
+        await jog.pwi.aclose()
+        sim.stop()
+
+
+async def test_jog_home_one_axis_then_the_other():
+    sim = PWISim("pwi4", ready=True, report_homed=True, slew_rate=20.0, home_time=0.2).start()
+    jog, out, _ = jog_for(sim, "pwi4")
+    try:
+        assert await jog.home(1)
+        assert sim.model.state()["axes_homed"] == [False, True]
+        assert await jog.home(0)
+        assert sim.model.state()["homed"]
+        assert any("FIND HOME, ALTITUDE" in line for line in out)
+        assert any(line.startswith("PWI (pwi4) version 4.1.8.0") for line in out)
+    finally:
+        await jog.pwi.aclose()
+        sim.stop()
+
+
+async def test_jog_home_stops_if_the_other_axis_moves():
+    """A PWI4 that ignored the axis parameter homes both: the jog stops it."""
+    sim = PWISim("pwi4", ready=True, slew_rate=2.0, alt=40.0, az=100.0).start()
+    jog, out, _ = jog_for(sim, "pwi4")
+    real = jog.pwi.find_home
+
+    async def both(axis=None):
+        return await real(None)
+
+    jog.pwi.find_home = both  # type: ignore[method-assign]
+    try:
+        assert not await jog.home(0)
+        assert any("the other axis moved" in line for line in out)
+        assert not sim.model.state()["slewing"]
+    finally:
+        await jog.pwi.aclose()
+        sim.stop()
+
+
+async def test_jog_home_refusals():
+    sim = PWISim("pwi2", ready=True).start()
+    jog, _, _ = jog_for(sim, "pwi2")
+    try:
+        with pytest.raises(JogRefused, match=r"4\.1\.7"):
+            await jog.home(0)
+        assert not await Jog(jog.cfg, jog.pwi, out=_Out(), confirm=_no).home(None)
+        assert sim.model.commands == []
+    finally:
+        await jog.pwi.aclose()
+        sim.stop()
