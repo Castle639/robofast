@@ -14,6 +14,7 @@ import logging
 import os
 import sys
 import types
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -33,7 +34,8 @@ def table(name: str) -> list[list[str]]:
 
 
 def spec(name: str) -> ms.ListSpec:
-    return ms.DEFAULT_LISTS[name]
+    # The instrument is a site value (sites/minerva/dispatch.example.json).
+    return replace(ms.DEFAULT_LISTS[name], instrument="spectrograph")
 
 
 # -- rows to requests --------------------------------------------------------------
@@ -109,7 +111,11 @@ def test_bstars_share_one_visit_a_night():
         ic = r["configurations"][0]["instrument_configs"][0]
         assert ic["extra_params"] == {"iodine": True}
     groups = load_request_groups(sl.groups)
-    d = DispatchScheduler(groups, ms_site(), {"t1": TelescopeLimits(instruments=["spectrograph"])})
+    d = DispatchScheduler(
+        groups,
+        ms_site(),
+        {"t1": TelescopeLimits(instruments=["spectrograph"], min_alt=21, max_alt=83)},
+    )
     assert all(r.cadence.pool == "bstars" for r in d.requests.values())
 
 
@@ -159,9 +165,11 @@ def test_config_errors(tmp_path):
     with pytest.raises(ms.SheetError, match="unknown keys"):
         ms.SheetConfig.from_dict({"lists": {"t": {"kind": "targets", "tab": "x"}}, "bogus": 1})
     with pytest.raises(ms.SheetError, match="kind 'red'"):
-        ms.SheetConfig.from_dict({"lists": {"t": {"kind": "red", "tab": "x"}}})
-    with pytest.raises(ms.SheetError, match="'kind' and 'tab'"):
+        ms.SheetConfig.from_dict({"lists": {"t": {"kind": "red", "tab": "x", **INSTRUMENT}}})
+    with pytest.raises(ms.SheetError, match="'kind', 'instrument' required"):
         ms.SheetConfig.from_dict({"lists": {"t": {"tab": "x"}}})
+    with pytest.raises(ms.SheetError, match="no instrument"):
+        ms.convert(table("bstars"), ms.DEFAULT_LISTS["bstars"])
 
 
 def test_key_path_from_the_environment(monkeypatch):
@@ -207,6 +215,7 @@ class FakeClient:
 
 
 SHEET = "synthetic-sheet-key-0123456789"
+INSTRUMENT = {"instrument": "spectrograph"}
 
 
 def config(tmp: Path, **kw) -> ms.SheetConfig:
@@ -214,8 +223,10 @@ def config(tmp: Path, **kw) -> ms.SheetConfig:
         "key_file": "/etc/robofast/secrets/k.json",
         "snapshot_dir": str(tmp / "snaps"),
         "lists": {
-            "targets": {"sheet": SHEET, "tab": "targets", "kind": "targets", "id_prefix": "RV"},
-            "bstars": {"sheet": SHEET, "tab": "B stars", "kind": "bstars", "id_prefix": "BSTAR"},
+            "targets": {"sheet": SHEET, "tab": "targets", "kind": "targets", "id_prefix": "RV"}
+            | INSTRUMENT,
+            "bstars": {"sheet": SHEET, "tab": "B stars", "kind": "bstars", "id_prefix": "BSTAR"}
+            | INSTRUMENT,
         },
         **kw,
     }
@@ -364,13 +375,16 @@ def test_snapshots_are_pruned_and_checked(tmp_path):
 
 def test_cli_check_and_export_from_csv(tmp_path, capsys):
     t, b = f"targets={DATA / 'targets.csv'}", f"bstars={DATA / 'bstars.csv'}"
-    assert ms.main(["check", "--csv", t, "--csv", b]) == 2  # refused rows
+    assert ms.main(["check", "--csv", b]) == 2  # no instrument: a site value
+    assert "no instrument" in capsys.readouterr().err
+    inst = ["--instrument", "spectrograph"]
+    assert ms.main(["check", *inst, "--csv", t, "--csv", b]) == 2  # refused rows
     err = capsys.readouterr().err
     assert "refused: targets row 6: pmra is blank" in err
     assert "targets: 2 requests, 1 inactive, 8 refused" in err
     assert "bstars: 2 requests, 1 inactive, 0 refused" in err
     out = tmp_path / "requests.json"
-    assert ms.main(["export", "--csv", t, "--csv", b, "-o", str(out)]) == 0
+    assert ms.main(["export", *inst, "--csv", t, "--csv", b, "-o", str(out)]) == 0
     doc = json.loads(out.read_text())
     assert [g["id"] for g in doc["groups"]] == [
         "RV-SYN-ALPHA",
@@ -379,9 +393,9 @@ def test_cli_check_and_export_from_csv(tmp_path, capsys):
         "BSTAR-SYN-B2",
     ]
     assert len(load_request_groups(str(out))) == 4
-    assert ms.main(["export", "--csv", t, "--strict"]) == 2
-    assert ms.main(["check", "--csv", b]) == 0
-    assert ms.main(["check", "--csv", f"nope={DATA / 'bstars.csv'}"]) == 2
+    assert ms.main(["export", *inst, "--csv", t, "--strict"]) == 2
+    assert ms.main(["check", *inst, "--csv", b]) == 0
+    assert ms.main(["check", *inst, "--csv", f"nope={DATA / 'bstars.csv'}"]) == 2
     assert ms.main(["check"]) == 2
 
 
@@ -392,7 +406,7 @@ def test_cli_offline_and_snapshot(tmp_path, capsys, monkeypatch):
     raw = {
         "snapshot_dir": str(tmp_path / "snaps"),
         "lists": {
-            k: {"kind": v.kind, "tab": v.tab, "sheet": SHEET, "id_prefix": v.id_prefix}
+            k: {"kind": v.kind, "tab": v.tab, "sheet": SHEET, "id_prefix": v.id_prefix} | INSTRUMENT
             for k, v in cfg.lists.items()
         },
     }
@@ -400,7 +414,7 @@ def test_cli_offline_and_snapshot(tmp_path, capsys, monkeypatch):
     assert ms.main(["check", "--config", str(cfile), "--offline"]) == 2
     out = capsys.readouterr().out
     assert f"fallback snapshot {loaded.path}" in out
-    assert ms.main(["check", "--snapshot", str(loaded.path)]) == 2
+    assert ms.main(["check", "--instrument", "spectrograph", "--snapshot", str(loaded.path)]) == 2
     assert f"snapshot {loaded.path}" in capsys.readouterr().out
     # fetch with no key file: an error, no fallback, exit 2.
     monkeypatch.delenv(ms.KEY_ENV, raising=False)

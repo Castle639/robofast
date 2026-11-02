@@ -52,7 +52,7 @@ import re
 import shutil
 import sys
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -182,7 +182,9 @@ class ListSpec:
     sheet: str = ""
     proposal: str = ""
     id_prefix: str = ""
-    instrument: str = "spectrograph"
+    #: The spectrograph's ``instrument_type`` in the site's dispatch config
+    #: (a site value: no default, docs/design.md 3.10).
+    instrument: str = ""
     #: B stars: the cadence pool that shares ``max_per_night``.
     pool: str = ""
     #: B stars: how many of the pool a night.
@@ -214,13 +216,15 @@ class ListSpec:
         unknown = set(d) - cls.KEYS - {"_note"}
         if unknown:
             raise SheetError(f"list {name!r}: unknown keys {sorted(unknown)}")
-        if "kind" not in d or "tab" not in d:
-            raise SheetError(f"list {name!r}: 'kind' and 'tab' are required")
+        missing = [k for k in ("kind", "tab", "instrument") if not d.get(k)]
+        if missing:
+            raise SheetError(f"list {name!r}: {', '.join(repr(k) for k in missing)} required")
         return cls(name=name, **{k: v for k, v in d.items() if k != "_note"})
 
 
-#: The lists as legacy has them, without the sheet keys (those come from
-#: the site config). Used for ``--csv`` without a config.
+#: The lists as legacy has them, without the sheet keys or the instrument
+#: (those come from the site config). Used for ``--csv`` / ``--snapshot``
+#: without a config, with ``--instrument``.
 DEFAULT_LISTS = {
     "targets": ListSpec("targets", "targets", "targets", proposal="minerva-rv", id_prefix="RV"),
     "bstars": ListSpec(
@@ -361,6 +365,11 @@ def convert(rows: list[list[str]], spec: ListSpec, source: str = "") -> SheetLis
     Raises :class:`SheetError` when the tab as a whole cannot be read.
     """
     where = source or spec.name
+    if not spec.instrument:
+        raise SheetError(
+            f"list {spec.name!r}: no instrument (the spectrograph's instrument_type in the "
+            "site's dispatch config; --instrument, or 'instrument' in the sheet config)"
+        )
     out = SheetList(spec.name, spec.kind)
     if not rows:
         raise SheetError(f"{where}: empty (no header row)")
@@ -793,8 +802,15 @@ def _sources(args: argparse.Namespace) -> tuple[dict[str, SheetList], str, bool]
     """(converted lists, provenance, whether :func:`load` already logged
     the refusals) from the CLI's inputs."""
     config = SheetConfig.load(args.config) if args.config else None
+    if args.instrument:
+        base = config.lists if config else DEFAULT_LISTS
+        lists = {k: replace(v, instrument=args.instrument) for k, v in base.items()}
+        config = replace(config, lists=lists) if config else None
+        defaults = lists
+    else:
+        defaults = DEFAULT_LISTS
     if args.csv:
-        specs = config.lists if config else DEFAULT_LISTS
+        specs = config.lists if config else defaults
         out = {}
         for item in args.csv:
             name, sep, path = item.partition("=")
@@ -803,7 +819,7 @@ def _sources(args: argparse.Namespace) -> tuple[dict[str, SheetList], str, bool]
             out[name] = convert(read_csv_text(Path(path).read_text()), specs[name], path)
         return out, "CSV exports " + ", ".join(args.csv), False
     if args.snapshot:
-        specs = config.enabled() if config else DEFAULT_LISTS
+        specs = config.enabled() if config else defaults
         fetched, tables = read_snapshot(Path(args.snapshot))
         specs = {k: v for k, v in specs.items() if k in tables}
         out = convert_tables(tables, specs, args.snapshot)
@@ -885,6 +901,10 @@ def main(argv: list[str] | None = None) -> int:
         p.add_argument("--offline", action="store_true", help="newest snapshot, no fetch")
         p.add_argument("--snapshot", help="this snapshot directory")
         p.add_argument("--csv", action="append", metavar="LIST=PATH", help="a CSV export of a tab")
+        p.add_argument(
+            "--instrument",
+            help="the spectrograph's instrument_type (required without --config)",
+        )
         if name == "export":
             p.add_argument("-o", "--output")
             p.add_argument("--strict", action="store_true", help="fail if any row is refused")

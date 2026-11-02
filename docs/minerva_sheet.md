@@ -22,15 +22,16 @@ row that legacy would misread, or that robofast cannot honour, is
 python -m robofast_core.catalogs.minerva_sheet fetch  --config target_sheet.json   # live -> snapshot
 python -m robofast_core.catalogs.minerva_sheet check  --config target_sheet.json   # validate, list refusals
 python -m robofast_core.catalogs.minerva_sheet export --config target_sheet.json -o minerva-requests.json
-python -m robofast_core.catalogs.minerva_sheet check  --csv targets=targets.csv --csv bstars=bstars.csv
-python -m robofast_core.catalogs.minerva_sheet export --snapshot /var/lib/robofast/data/minerva_sheet/20261101T120000Z
+python -m robofast_core.catalogs.minerva_sheet check  --instrument spectrograph --csv targets=targets.csv --csv bstars=bstars.csv
+python -m robofast_core.catalogs.minerva_sheet export --config target_sheet.json --snapshot /var/lib/robofast/data/minerva_sheet/20261101T120000Z
 ```
 
 `check` and `export` take one source: `--config` (fetch live; if the Sheet
 cannot be read, fall back to the newest snapshot; `--offline` skips the
 fetch), `--snapshot DIR` (that snapshot), or `--csv LIST=PATH` (a CSV
 export of a tab, "File > Download > CSV" in the Sheet, or legacy's
-`targets.csv` / `bstar.csv`). `check` exits 2 if any row is refused.
+`targets.csv` / `bstar.csv`); without `--config`, `--instrument` names
+the spectrograph's `instrument_type`. `check` exits 2 if any row is refused.
 `export` writes the accepted rows (`{"groups": [...]}`, validated by the
 request model) and lists the refused ones on stderr; `--strict` makes any
 refusal an error. `fetch` only fetches; it never falls back. Errors exit 2.
@@ -46,7 +47,8 @@ filled in there:
 | `lists.<name>.sheet` | the spreadsheet key (the id in the Sheet's URL). **Site config only**, never in a repository; the example has placeholders, and `fetch` refuses them |
 | `lists.<name>.tab` | the worksheet: `targets`, `B stars` |
 | `lists.<name>.kind` | `targets` (RV stars) or `bstars` |
-| `lists.<name>.proposal`, `id_prefix`, `instrument` | the requests' `proposal`, id prefix (`RV-`, `BSTAR-`) and `instrument_type` (default `spectrograph`) |
+| `lists.<name>.instrument` | the spectrograph's `instrument_type` in the site's dispatch config (`spectrograph` for MINERVA). Required: a site value, no default (design.md 3.10) |
+| `lists.<name>.proposal`, `id_prefix` | the requests' `proposal` and id prefix (`RV-`, `BSTAR-`) |
 | `lists.<name>.pool`, `per_night` | B stars: the cadence pool and how many of it a night (default the list's name, 1) |
 | `lists.<name>.enabled` | `false` skips the list (the red-side list, until it is confirmed wanted) |
 | `snapshot_dir`, `keep` | where snapshots go (default `$ROBOFAST_DATA_DIR/minerva_sheet`, see `robofast_core.zenodo.data_dir`) and how many are kept (30) |
@@ -117,7 +119,7 @@ its reason.
 Every accepted row becomes one group with one standing request
 (`extra_params.cadence`) and one `SPECTRUM` configuration: guided, iodine
 in (`extra_params.iodine: true`), fed by every free telescope with the
-`spectrograph` (no `location.telescope`, as legacy's `doSpectra` used the
+configured instrument (no `location.telescope`, as legacy's `doSpectra` used the
 telescopes it had), no constraints of its own beyond the telescope's and
 site's limits (legacy had none).
 

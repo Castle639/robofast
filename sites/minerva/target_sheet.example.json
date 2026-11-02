@@ -8,6 +8,7 @@
     "sheet: each list's spreadsheet key (the long id in the Sheet's URL; legacy minerva-control has it in",
     "minerva_library/targetlist.py downloadList). The red-side list is a sheet of its own; it is disabled",
     "here until it is confirmed to be wanted and an instrument_type exists for it.",
+    "instrument: the spectrograph's instrument_type in dispatch.example.json (required).",
     "snapshot_dir: omitted, snapshots go to $ROBOFAST_DATA_DIR/minerva_sheet (robofast_core.zenodo.data_dir); keep: how many."
   ],
   "key_file": "/etc/robofast/secrets/minerva_sheets.json",
@@ -17,6 +18,7 @@
       "sheet": "<spreadsheet key of the MINERVA target list>",
       "tab": "targets",
       "kind": "targets",
+      "instrument": "spectrograph",
       "proposal": "minerva-rv",
       "id_prefix": "RV"
     },
@@ -24,6 +26,7 @@
       "sheet": "<spreadsheet key of the MINERVA target list>",
       "tab": "B stars",
       "kind": "bstars",
+      "instrument": "spectrograph",
       "proposal": "iodine-calibration",
       "id_prefix": "BSTAR",
       "pool": "bstars",
