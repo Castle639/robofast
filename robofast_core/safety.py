@@ -115,6 +115,12 @@ log = logging.getLogger(__name__)
 #: Alpaca action; ``ClearFaults`` is for an operator, through the supervisor).
 ENCLOSURE_MEMBERS = frozenset({"OpenShutter", "CloseShutter", "Action:ClearFaults"})
 
+
+def enclosure_members(config: SafetyConfig) -> frozenset[str]:
+    """:data:`ENCLOSURE_MEMBERS` with the configured clear-faults action."""
+    return frozenset({"OpenShutter", "CloseShutter", f"Action:{config.clear_faults_action}"})
+
+
 #: A ``ClearFaults`` note starting with this is the supervisor's automatic
 #: clear (the Aqawan server then also refuses an E-stop or a latch itself).
 AUTO_CLEAR_PREFIX = "auto:"
@@ -181,6 +187,12 @@ class SafetyConfig:
     #: with booleans ``fault`` and ``error`` (the Aqawan server's
     #: ``"Faults"``); ``None`` for a dome without one.
     fault_action: str | None = None
+    #: The dome's Alpaca action that clears its faults (privileged: only
+    #: the supervisor sends it), and the heartbeat device's ping action.
+    #: The defaults are robofast's own servers' names (the Aqawan server,
+    #: the heartbeat watchdog).
+    clear_faults_action: str = "ClearFaults"
+    heartbeat_action: str = "Heartbeat"
     #: Clear a fault automatically (module doc): only with both shutters
     #: confirmed closed, never an E-stop, at most once per
     #: ``fault_auto_clear_interval``; a recurrence within that interval stops
@@ -207,6 +219,9 @@ class SafetyConfig:
     duty_grace: float = 300.0
 
     def __post_init__(self) -> None:
+        for key in ("clear_faults_action", "heartbeat_action"):
+            if not isinstance(getattr(self, key), str) or not getattr(self, key):
+                raise ValueError(f"{key}: an Alpaca action name")
         if self.attended_only is None:
             self.attended_only = self.heartbeat_interval is None
         if self.duty_ttl <= 0 or self.duty_grace < 0:
@@ -873,7 +888,7 @@ class SafetySupervisor:
         try:
             reply = await self._dome.call(
                 "Action",
-                "ClearFaults",
+                cfg.clear_faults_action,
                 f"{AUTO_CLEAR_PREFIX} {self.name} automatic clear #{n}: {fault}",
                 timeout=cfg.dome_timeout,
             )
@@ -902,7 +917,7 @@ class SafetySupervisor:
         log.warning("%s: ClearFaults by %s", self.name, note)
         try:
             reply = await self._dome.call(
-                "Action", "ClearFaults", note, timeout=self.config.dome_timeout
+                "Action", self.config.clear_faults_action, note, timeout=self.config.dome_timeout
             )
         except DeviceError as exc:
             self._alarm(f"ClearFaults by {operator} failed: {exc}")
@@ -1108,7 +1123,9 @@ class SafetySupervisor:
             age = None if enforced is None else time.monotonic() - enforced
             if age is not None and age <= cfg.heartbeat_max_loop_age:
                 try:
-                    await self._hb.call("Action", "Heartbeat", "", timeout=cfg.dome_timeout)
+                    await self._hb.call(
+                        "Action", cfg.heartbeat_action, "", timeout=cfg.dome_timeout
+                    )
                     self._pinged_at = time.monotonic()
                 except DeviceError as exc:
                     self._alarm(f"heartbeat ping failed: {exc}")

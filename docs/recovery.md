@@ -18,7 +18,8 @@ rungs listed in `steps`, in order:
    telescope's Windows PC over ssh) or `{"url": ..., "method": "POST"}`;
    then `settle` s and reconnect.
 3. `powercycle` -- `Action("PowerCycle", "<switch>")` on the PDU's Alpaca
-   Switch server (below), `boot_time` s, reconnect.
+   Switch server (below), `boot_time` s, reconnect. A PDU server whose
+   action is named differently: `powercycle.action`.
 
 After each rung the device must answer (`AtPark`, `CameraState`, `Position`
 read within `verify_timeout`), else the next rung is tried. Every rung is

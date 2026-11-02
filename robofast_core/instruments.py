@@ -17,7 +17,9 @@ declaration). The type is an :class:`InstrumentType` in
 * for a spectrograph service the sequencer drives: the calibration frames
   it takes (:attr:`~InstrumentType.calibration_kinds`) and how its client
   is built from an enclosure config's ``spectrograph`` entry
-  (:meth:`~InstrumentType.client`; ``"type"`` names the handler).
+  (:meth:`~InstrumentType.client`; ``"type"`` names the handler), and the
+  readings the observer console shows for it
+  (:attr:`~InstrumentType.status_fields`).
 
 Built-in types: ``imager`` (the telescope's camera; lamp frames too, where
 the telescope has lamps) and
@@ -137,6 +139,10 @@ class InstrumentType:
     #: generic ones, :attr:`client_keys`); None: not a service.
     client_factory: Callable[..., Any] | None = None
     client_keys: frozenset[str] = frozenset()
+    #: The observer console's spectrograph panel: ``(label, reading, digits,
+    #: unit)`` for each of its service's ``GET /status`` ``readings`` to
+    #: show (digits None: as is). Empty: every reading, by its name.
+    status_fields: tuple[tuple[str, str, int | None, str], ...] = ()
 
     def listed(self, lamps: bool) -> list[str]:
         """The configuration types ``/instruments`` lists."""

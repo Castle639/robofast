@@ -71,16 +71,8 @@ EXEMPT_DIRS = ("sites/", "testing/", "devices/")
 #: removed by a later step of the site-configuration plan (docs/design.md
 #: 3.10) and is tagged with it; delete the entry with the code it covers.
 ALLOWLIST: dict[tuple[str, str], tuple[int, str]] = {
-    # -- step 2b: the console's spectrograph panel, described by its handler.
-    ("console/page.py", "iodine"): (1, "step 2b: the console's KiwiSpec panel"),
     # -- step 2b: the MINERVA legacy CSV importer moves under sites/minerva.
     ("request_model.py", '"spectrograph"'): (2, "step 2b: from_legacy_csv's default instrument"),
-    # -- step 2b: ADC switch ids from config or the ADC server.
-    ("imaging.py", "ADC switch id"): (2, "step 2b: the ADC server's switch ids in core"),
-    ("sequencer.py", "ADC switch id"): (5, "step 2b: the ADC server's switch ids in core"),
-    # -- step 2b: guider hardware registry.
-    ("guider/loop.py", "kiwispec"): (1, "step 2b: the KiwiSpec backlight in the guide loop"),
-    ("guider/service.py", "kiwispec"): (4, "step 2b: the KiwiSpec backlight in the guider"),
     # -- step 2b: legacy importers move under robofast_core/sites/<site>/.
     ("catalogs/__init__.py", "tres"): (1, "step 2b: the TRES catalog format importer"),
     ("catalogs/__main__.py", "tres"): (7, "step 2b: the TRES catalog format importer"),

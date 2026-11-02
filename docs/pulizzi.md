@@ -85,6 +85,10 @@ config (`sites/flwo60/pulizzi.json`), in order.
   the unit's other status lines, the monitor's last error, and the
   lamp-hours file and its last error (`hours_file`, `hours_error`).
 * `Action("LampsOff")`: every lamp off. Anyone may call it.
+
+The sequencer's `lamps` entry may rename the two actions it uses
+(`status_action`, default `"Status"`; `off_action`, default `"LampsOff"`)
+for a lamp switch other than this server.
 * `Action("LampReplaced", '{"lamp": "ThAr1", "by": "who", "note": "...",
   "hours": 0}')`: an **operator** records a new lamp (below). It switches
   nothing. `lamp` and `by` are required; `hours` is what the new lamp has

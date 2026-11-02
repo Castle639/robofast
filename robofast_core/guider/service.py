@@ -52,10 +52,16 @@ Config (JSON; every key optional except as noted)::
      "mount": null | {"kind": "alpaca" | "sim", "address", "method": "offset" | "pulseguide",
                "guide_rate": arcsec/s (required with "pulseguide"), ...},
      "offload": null | {"threshold", "period", "min_pixels", "window", "settle"},
-     "backlight": null | {"kiwispec": "http://host:port"} | {"sim": true},
+     "backlight": null | {"kind": "sim"} | {"kind": <a plug-in's kind>, ...},
      "guide": {...GuideConfig...},
      "sim": {...the simulated sky, when camera.kind is "sim"...},
      "redis": null | {"host", "port", "channel"}}
+
+Each ``kind`` is a backend registered in :mod:`robofast_core.guider.hardware`
+(a plug-in adds more: docs/plugins.md). MINERVA's FAU backlight is
+KiwiSpec's, ``{"kind": "kiwispec", "url": "http://host:port"}``, registered
+by the built-in :mod:`robofast_core.devices` plug-in; the earlier form
+``{"<kind>": url}`` still works.
 
 Safety
 ------
@@ -99,6 +105,7 @@ import numpy as np
 from robofast_core.cancel import isolated
 from robofast_core.frameview import bin_to, encode_array
 from robofast_core.guider import calibration as calib
+from robofast_core.guider import hardware as hw
 from robofast_core.guider.base import (
     ROI,
     Camera,
@@ -110,13 +117,11 @@ from robofast_core.guider.base import (
     TipTilt,
     TipTiltError,
 )
-from robofast_core.guider.camera import AlpacaCamera, FrameGrabberCamera, ZWOCamera
 from robofast_core.guider.centroid import WindowedCOM
 from robofast_core.guider.loop import (
     Backlight,
     GuideConfig,
     Guider,
-    kiwispec_backlight,
     publish_values,
 )
 from robofast_core.guider.offload import OffloadConfig, Offloader
@@ -124,21 +129,10 @@ from robofast_core.guider.redis_pub import TrackingPublisher
 from robofast_core.guider.sim import (
     Fiber,
     Jitter,
-    PlantView,
-    SimCamera,
-    SimMount,
-    SimTipTilt,
     SimWorld,
 )
 from robofast_core.guider.tiptilt import (
-    PIGCS,
-    SXAO,
     MountOffset,
-    SerialTransport,
-    SimGCS,
-    SXAOSim,
-    alpaca_telescope,
-    open_pi_gcs,
 )
 from robofast_core.registry import ValueRegistry
 
@@ -194,12 +188,6 @@ class GuiderServiceConfig:
 # -- building the parts ------------------------------------------------------------------
 
 
-def _limits(v: Any) -> Any:
-    return (
-        None if v is None else ((float(v[0][0]), float(v[0][1])), (float(v[1][0]), float(v[1][1])))
-    )
-
-
 def build_world(spec: dict[str, Any], clock: Clock) -> SimWorld:
     """The simulated sky from the ``sim`` section (:class:`SimWorld`
     fields; ``jitter`` and ``fiber`` as dicts of their fields)."""
@@ -232,101 +220,22 @@ class Parts:
 
 
 def build_parts(cfg: GuiderServiceConfig, *, allowed: bool, clock: Clock) -> Parts:
-    """Every part, with the hardware gate applied (module doc)."""
-    cam_spec = dict(cfg.camera)
-    kind = cam_spec.pop("kind", "sim")
-    world: SimWorld | None = None
-    camera: Camera
-    if kind == "sim":
-        world = build_world(cfg.sim, clock)
-        camera = SimCamera(world, readout=float(cam_spec.get("readout", 0.0)))
-    elif kind == "alpaca":
-        camera = AlpacaCamera.at(
-            cam_spec["address"], int(cam_spec.get("number", 0)), allow_hardware=allowed, clock=clock
-        )
-    elif kind == "zwo":
-        camera = ZWOCamera(
-            index=int(cam_spec.get("index", 0)),
-            library=cam_spec.get("library"),
-            allow_hardware=allowed,
-            clock=clock,
-        )
-    elif kind == "framegrabber":
-        camera = FrameGrabberCamera(device=str(cam_spec.get("device", "")), allow_hardware=allowed)
-    else:
-        raise ValueError(f"camera kind {kind!r}")
+    """Every part, each from its registered backend
+    (:mod:`robofast_core.guider.hardware`), with the hardware gate applied
+    (module doc). The camera first: a simulated one makes the simulated sky
+    the other parts join."""
+    ctx = hw.BuildContext(allowed=allowed, clock=clock, sim=cfg.sim)
 
-    tiptilt: TipTilt | None = None
-    if cfg.tiptilt:
-        t = dict(cfg.tiptilt)
-        tk = t.pop("kind")
-        if tk == "sim":
-            tt = SimTipTilt(
-                limits=_limits(t.get("limits", [[-100, 100], [-100, 100]])),
-                tau=float(t.get("tau", 2e-3)),
-                delay=float(t.get("delay", 0.0)),
-                latency=float(t.get("latency", 0.0)),
-                clock=clock,
-            )
-            if world is not None:
-                world.tiptilt = tt
-            tiptilt = tt
-        elif tk in ("sxao", "sxao-sim"):
-            term = str(t.get("terminator", "")).encode().decode("unicode_escape").encode("latin-1")
-            if tk == "sxao":
-                transport: Any = SerialTransport(
-                    t["port"], baudrate=int(t.get("baudrate", 9600)), allow_hardware=allowed
-                )
-            else:
-                sim = SXAOSim(travel=int(t.get("travel", 1000)), terminator=term, clock=clock)
-                transport = sim
-                if world is not None:
-                    world.tiptilt = PlantView(lambda _t, s=sim: s.position)
-            sx = SXAO(
-                transport,
-                limits=_limits(t.get("limits", [[-500, 500], [-500, 500]])),
-                terminator=term,
-                timeout=float(t.get("timeout", 0.5)),
-            )
-            sx.clock = clock
-            tiptilt = sx
-        elif tk in ("pi", "pi-sim"):
-            if tk == "pi":
-                gcs: Any = open_pi_gcs(
-                    usb_serial=t.get("usb_serial"),
-                    host=t.get("host"),
-                    port=int(t.get("tcp_port", 50000)),
-                    allow_hardware=allowed,
-                )
-            else:
-                gcs = SimGCS(tau=float(t.get("tau", 1e-3)), clock=clock)
-                gcs.ConnectUSB("simulated")
-                if world is not None:
-                    world.tiptilt = PlantView(gcs.position_at)
-            pi = PIGCS(gcs, margin=float(t.get("margin", 0.0)), in_thread=(tk == "pi"))
-            pi.clock = clock
-            tiptilt = pi
-        else:
-            raise ValueError(f"tiptilt kind {tk!r}")
+    def build(registry: Any, part: str, spec: Any, default: str | None = None) -> Any:
+        kind, rest = hw.spec_kind(spec, part, default)
+        return registry.lookup(kind, f"guider config: {part}.kind")(rest, ctx)
 
+    camera: Camera = build(hw.CAMERAS, "camera", cfg.camera, "sim")
+    tiptilt: TipTilt | None = build(hw.TIPTILTS, "tiptilt", cfg.tiptilt) if cfg.tiptilt else None
     mount: MountOffset | None = None
     if cfg.mount:
-        m = dict(cfg.mount)
-        mk = m.pop("kind", "alpaca")
-        if mk == "sim":
-            m.setdefault("guide_rate", 7.5)  # the simulator's own rate
-            driver: Any = SimMount(
-                tau=float(m.get("tau", 0.5)),
-                delay=float(m.get("delay", 0.1)),
-                guide_rate=float(m["guide_rate"]),
-                clock=clock,
-            )
-            if world is not None:
-                world.mount = driver
-        elif mk == "alpaca":
-            driver = alpaca_telescope(m["address"], int(m.get("number", 0)), allow_hardware=allowed)
-        else:
-            raise ValueError(f"mount kind {mk!r}")
+        mk, m = hw.spec_kind(cfg.mount, "mount", "alpaca")
+        driver = hw.MOUNTS.lookup(mk, "guider config: mount.kind")(m, ctx)
         mount = MountOffset(
             driver,
             method=str(m.get("method", "offset")),
@@ -336,19 +245,10 @@ def build_parts(cfg: GuiderServiceConfig, *, allowed: bool, clock: Clock) -> Par
             timeout=float(m.get("timeout", 5.0)),
         )
         mount.clock = clock
-
-    backlight: Backlight | None = None
-    if cfg.backlight:
-        if cfg.backlight.get("kiwispec"):
-            backlight = kiwispec_backlight(str(cfg.backlight["kiwispec"]))
-        elif cfg.backlight.get("sim") and world is not None:
-            w = world
-
-            async def _set(on: bool) -> None:
-                w.backlit = on
-
-            backlight = Backlight(_set)
-    return Parts(camera, tiptilt, mount, world, backlight)
+    backlight: Backlight | None = (
+        build(hw.BACKLIGHTS, "backlight", cfg.backlight) if cfg.backlight else None
+    )
+    return Parts(camera, tiptilt, mount, ctx.world, backlight)
 
 
 # -- the service ------------------------------------------------------------------------

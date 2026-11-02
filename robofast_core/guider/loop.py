@@ -52,7 +52,7 @@ from typing import Any
 
 import numpy as np
 
-from robofast_core.cancel import isolated, stop_task
+from robofast_core.cancel import stop_task
 from robofast_core.guider.base import (
     ROI,
     Alarm,
@@ -168,27 +168,14 @@ class FrameRecord:
 
 
 class Backlight:
-    """Turns the fiber backlight on/off (``set(on)``)."""
+    """Turns the fiber backlight on/off (``set(on)``); built by a backend in
+    :data:`robofast_core.guider.hardware.BACKLIGHTS`."""
 
     def __init__(self, set_fn: Callable[[bool], Awaitable[None]]) -> None:
         self._set = set_fn
 
     async def set(self, on: bool) -> None:
         await self._set(on)
-
-
-def kiwispec_backlight(url: str, timeout: float = 15.0) -> Backlight:
-    """The KiwiSpec service's ``POST /backlight`` (docs/kiwispec.md)."""
-
-    async def _set(on: bool) -> None:
-        import httpx
-
-        async with httpx.AsyncClient(timeout=timeout, trust_env=False) as client:
-            r = await isolated(client.post(url.rstrip("/") + "/backlight", json={"on": on}))
-        if r.status_code >= 400:
-            raise GuiderError(f"backlight {on}: {r.status_code} {r.text[:200]}")
-
-    return Backlight(_set)
 
 
 class Guider:

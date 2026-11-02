@@ -261,6 +261,7 @@ from typing import Any, Protocol
 import numpy as np
 
 from robofast_core import pointmodel
+from robofast_core.adc import ADCSwitches
 from robofast_core.alpaca_client import InvalidOperationException
 from robofast_core.autofocus import (
     FOCUS_CONTEXT,
@@ -311,9 +312,6 @@ __all__ = [
 log = logging.getLogger(__name__)
 
 CAMERA_IDLE = 0  # ASCOM CameraState.cameraIdle
-#: The ADC server's switch ids (robofast_core.devices.adc_server, docs/adc.md).
-ADC_TRACKING, ADC_SETTLED = 0, 1
-
 #: A pointing run's settings (docs/pointing_model.md): the telescope's
 #: ``pointing.run`` entry and an observation's ``pointing`` override them.
 POINTING_RUN_DEFAULTS: dict[str, Any] = {
@@ -550,6 +548,9 @@ class TelescopeUnit:
     #: Switch, robofast's ADC server: docs/adc.md); optional. Tracking on
     #: once on target for light frames, off (prisms neutral) at cleanup.
     adc: DeviceOwner | None = None
+    #: Its switches by name (robofast_core/adc.py; the telescope's ``adc``
+    #: entry may rename them).
+    adc_switches: ADCSwitches = field(default_factory=ADCSwitches)
     #: How the guider identified the last target (docs/acquisition.md).
     acquisition: dict[str, Any] | None = field(default=None, init=False)
 
@@ -2029,7 +2030,7 @@ class Sequencer:
         if spec is None:
             raise Unsupported(f"{unit.name}: no lamp {name!r} (it has {sorted(setup.lamps)})")
         timeout = setup.switch_timeout
-        outlets = await switch_status(grant, timeout)
+        outlets = await switch_status(grant, timeout, setup.status_action)
         outlet = outlets.get(name)
         if outlet is None or not outlet.get("lamp"):
             raise Unsupported(f"{unit.name}: its lamp switch has no lamp {name!r}")
@@ -2054,7 +2055,7 @@ class Sequencer:
         off_grant = unit.lamps.grant(f"{self.name}/lamp-off#{state.gen}")
 
         async def still_on() -> None:
-            now = (await switch_status(grant, timeout)).get(name) or {}
+            now = (await switch_status(grant, timeout, setup.status_action)).get(name) or {}
             if not now.get("on"):
                 raise LampOff(f"lamp {name} went off (its max_on, or switched off by hand)")
 
@@ -2116,9 +2117,11 @@ class Sequencer:
         grant = unit.adc.grant(f"{self.name}/adc#{state.gen}")
         t0 = time.monotonic()
         try:
-            await grant.call("SetSwitch", ADC_TRACKING, True)
+            sw = unit.adc_switches
+            await grant.call("SetSwitch", await sw.id(grant, "tracking"), True)
+            settled = await sw.id(grant, "settled")
             await self._wait_for(
-                lambda: grant.call("GetSwitch", ADC_SETTLED), bool, cfg.adc_settle_timeout
+                lambda: grant.call("GetSwitch", settled), bool, cfg.adc_settle_timeout
             )
         except (DeviceError, TimeoutError) as exc:
             why = "not settled in time" if isinstance(exc, TimeoutError) else repr(exc)
@@ -2148,7 +2151,7 @@ class Sequencer:
             return
         grant = unit.adc.grant(f"{self.name}/cleanup-adc#{report.generation}")
         try:
-            await grant.call("SetSwitch", ADC_TRACKING, False)
+            await grant.call("SetSwitch", await unit.adc_switches.id(grant, "tracking"), False)
         except DeviceError as exc:
             report.errors.append(f"{name}: ADC tracking off: {exc!r}")
         finally:
@@ -2162,7 +2165,7 @@ class Sequencer:
             return
         grant = unit.lamps.grant(f"{self.name}/cleanup-lamps#{report.generation}")
         try:
-            off = await lamps_off(grant, unit.lamp_setup.switch_timeout)
+            off = await lamps_off(grant, unit.lamp_setup.switch_timeout, unit.lamp_setup.off_action)
         except Exception as exc:
             report.errors.append(f"{name}: lamps off: {exc!r}")
             self._event(

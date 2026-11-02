@@ -574,8 +574,9 @@ function render(doc) {
         ["exposure", fmt(j.elapsed, 0) + " / " + fmt(j.exptime, 0) + " s" + (j.target_counts ? ", target " + fmt(j.target_counts, 0) + " counts" : "")],
         j.error ? ["error", h("span", {class: "bad"}, j.error)] : null,
       ]), bar) : null,
-      kv([["exp. meter", fmt(s.expmeter_total, 0)], ["CCD", fmt(s.ccd_temp, 1) + " C"],
-          ["iodine stage", fmt(s.stage)], ["pressure", fmt(s.spec_pressure, 4)]]));
+      // The readings the spectrograph's instrument type describes.
+      kv((s.fields || []).map(([label, v, digits, unit]) =>
+        [label, (digits === null ? fmt(v) : fmt(v, digits)) + (unit && v !== null && v !== undefined ? " " + unit : "")])));
   }));
 
   fill("plan-body", encs.map(([name, e]) => {

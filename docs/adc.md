@@ -220,10 +220,17 @@ because both motors share one serial line.
 ## 6. Sequencer and headers
 
 A telescope entry's `adc` (the switch's address, `host:port/0`) gives the
-sequencer an ADC:
+sequencer an ADC. Core finds the switches **by name** (`MaxSwitch`,
+`GetSwitchName`; `robofast_core/adc.py`), never by id: `Tracking`,
+`Settled`, `Deflection`, `PrismA` and `PrismB`, this server's names. An ADC
+that names them differently says so in the entry,
+`"adc": {"device": "host:port/0", "switches": {"tracking": "...",
+"settled": "...", "deflection": "...", "motor_a": "...", "motor_b": "..."}}`
+(any subset); a name the device does not publish is an error for the step
+that needs it (a warning; the frames go ahead).
 
-* After every slew for light frames, once on target: `SetSwitch(0, true)`,
-  then wait for `GetSwitch(1)` (`Settled`), bounded by
+* After every slew for light frames, once on target: `Tracking` true,
+  then wait for `Settled`, bounded by
   `adc_settle_timeout` (60 s). If it fails or times out the event
   `adc_not_settled` is a warning and the frames go ahead: the ADC sharpens
   a spectrum, it does not make it possible.

@@ -343,7 +343,8 @@ async def test_aggregation_from_fake_services(make_console):
     assert t2["hold"]["action"] == "pause" and "guider" not in t2
     sp = s["spectrograph"]
     assert sp["job"]["exptime"] == 1200.0 and sp["job"]["frames"] == 1
-    assert sp["expmeter_total"] == 123456.0
+    # No spectrograph type in this config: every reading, by its name.
+    assert ["expmeter_total", 123456.0, None, ""] in sp["fields"]
     p = s["plan"]
     assert p["record"] == "aqawan1-2026-11-14.jsonl"
     assert [d["kind"] for d in p["recent"]] == ["decision", "outcome"]  # no snapshot
@@ -1073,3 +1074,12 @@ def test_the_hold_wrapper_parks_and_clears_through_the_sequencer_hooks(tmp_path)
     assert clear["ok"] is True and clears == [("bob", "fixed")]
     with pytest.raises(ValueError):
         send_command(tmp_path, "park", [], operator="bob", reason="x")
+
+
+def test_the_spectrograph_panel_is_described_by_its_instrument_type(tmp_path):
+    from robofast_core.console.aggregate import _spectrograph_fields
+
+    fields = _spectrograph_fields({"spectrograph": {"type": "kiwispec"}}, tmp_path)
+    assert fields is not None and ("iodine stage", "stage", None, "") in fields
+    assert _spectrograph_fields({"spectrograph": {"type": "camera_spectrograph"}}, tmp_path) is None
+    assert _spectrograph_fields({}, tmp_path) is None

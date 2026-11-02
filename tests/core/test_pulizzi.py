@@ -645,6 +645,28 @@ def test_lamp_setup_validation():
         LampSetup.from_dict({"switch": "h:1/0", "lamps": {"a": {"warmup": -1}}})
     with pytest.raises(ValueError, match="unknown keys"):
         LampSetup.from_dict({"switch": "h:1/0", "lamps": {"a": {"max_on": 5}}})
+    with pytest.raises(ValueError, match="off_action"):
+        LampSetup.from_dict({"switch": "h:1/0", "lamps": {"a": {}}, "off_action": ""})
+
+
+async def test_the_lamp_switchs_action_names_are_configurable():
+    from robofast_core.lamps import lamps_off, switch_status
+
+    default = LampSetup.from_dict({"switch": "h:1/0", "lamps": {"a": {}}})
+    assert (default.status_action, default.off_action) == ("Status", "LampsOff")
+    setup = LampSetup.from_dict(
+        {"switch": "h:1/0", "lamps": {"a": {}}, "status_action": "Get", "off_action": "AllOff"}
+    )
+    sent = []
+
+    class Grant:
+        async def call(self, member, action, params, timeout):
+            sent.append((member, action))
+            return {"outlets": [{"name": "a", "on": False}], "off": ["a"]}
+
+    assert "a" in await switch_status(Grant(), 1.0, setup.status_action)
+    assert await lamps_off(Grant(), 1.0, setup.off_action) == ["a"]
+    assert sent == [("Action", "Get"), ("Action", "AllOff")]
 
 
 async def test_instruments_lists_a_camera_spectrograph_with_its_lamp_types(make_api):  # noqa: F811

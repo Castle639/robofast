@@ -19,6 +19,7 @@ import time
 import erfa
 import pytest
 
+from robofast_core.adc import DEFAULT_NAMES, HEADER, ADCSwitches, adc_entry
 from robofast_core.alpaca import alpaca_owner
 from robofast_core.alpaca_client import (
     AlpacaDevice,
@@ -41,8 +42,8 @@ from robofast_core.devices.adc_server import (
 from robofast_core.devices.adc_sim import ADCMotorsSim
 from robofast_core.devices.mearth_roof_port import HardwareNotAllowed
 from robofast_core.imaging import Imaging, ImagingConfig
+from robofast_core.owner import DeviceError
 from robofast_core.plan import StaticPlan
-from robofast_core.sequencer import ADC_SETTLED, ADC_TRACKING
 from robofast_core.sequencer_service import build_units
 from robofast_core.testing.checks import wait_until
 from robofast_core.testing.processes import ROOT
@@ -631,7 +632,42 @@ def test_shipped_site_configs():
     assert device_address(entry["adc"]) == (cfg.listen, 0)
     units = build_units(site, Timeline(), 5.0)
     assert units[0].adc is not None
-    assert (ADC_TRACKING, ADC_SETTLED) == (SWITCH_IDS["Tracking"], SWITCH_IDS["Settled"])
+    # Core finds the switches by the names robofast's server publishes.
+    assert set(DEFAULT_NAMES.values()) <= set(SWITCH_IDS)
+    assert set(HEADER) <= set(DEFAULT_NAMES)
+
+
+def test_an_adc_entry_may_rename_its_switches():
+    address, sw = adc_entry({"device": "127.0.0.1:1/0", "switches": {"settled": "Ready"}}, "x")
+    assert address == "127.0.0.1:1/0" and sw.names["settled"] == "Ready"
+    assert sw.names["tracking"] == "Tracking"
+    assert adc_entry("127.0.0.1:1/0", "x")[1].names == DEFAULT_NAMES
+    with pytest.raises(ValueError, match="unknown roles"):
+        adc_entry({"device": "h:1", "switches": {"wobble": "W"}}, "x")
+    with pytest.raises(ValueError, match="unknown keys"):
+        adc_entry({"device": "h:1", "speed": 3}, "x")
+
+
+async def test_switch_ids_come_from_the_servers_names(serve):
+    s = serve(FakeFeed())
+    sw = await connected(AlpacaDevice(s.address, "switch"))
+
+    class G:  # a grant's call()/get() over the bare client
+        async def get(self, member):
+            return await sw.get(member, timeout=3)
+
+        async def call(self, member, *args):
+            return await sw.call(member, *args, timeout=3)
+
+    try:
+        ids = ADCSwitches()
+        for role, name in DEFAULT_NAMES.items():
+            assert await ids.id(G(), role) == SWITCH_IDS[name]
+        missing = ADCSwitches({"settled": "NoSuchSwitch"})
+        with pytest.raises(DeviceError, match="NoSuchSwitch"):
+            await missing.id(G(), "settled")
+    finally:
+        await sw.aclose()
 
 
 def test_the_command_line_refuses_hardware_and_runs_the_simulator(tmp_path):

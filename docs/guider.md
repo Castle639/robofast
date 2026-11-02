@@ -189,7 +189,7 @@ rotation: calibrate per port, and recalibrate if the rotator angle changes.
 ## Fiber acquisition
 
 1. **Locate the fiber**: `POST /locate` turns the backlight on (MINERVA:
-   the KiwiSpec service's `POST /backlight`), takes one frame, turns it
+   the KiwiSpec service's `POST /backlight`, backlight kind `kiwispec`), takes one frame, turns it
    off, and centroids the brightest blob; that pixel becomes the target.
    Or configure `guide.target`.
 2. **Acquire**: a wide frame (`acq_roi`, `acq_exposure`); the star nearest
@@ -273,7 +273,12 @@ mount is the fine device: the same loop at ~1 Hz with long exposures.
 backends' packages are the `guider-hardware` dependency group
 (`pip install --group guider-hardware`: pyserial, pipython, zwoasi, redis),
 needed only on a guide computer with real devices. The API and the config
-are in the module docstring. In short:
+are in the module docstring. Each part's `kind` (`camera`, `tiptilt`,
+`mount`, `backlight`) is a backend registered in
+`robofast_core/guider/hardware.py` (`CAMERAS`, `TIPTILTS`, `MOUNTS`,
+`BACKLIGHTS`); a plug-in adds more (docs/plugins.md). MINERVA's fiber
+backlight is `{"kind": "kiwispec", "url": ...}`, registered by the
+built-in `robofast_core.devices` plug-in. In short:
 
 - `GET /status`, `GET /telemetry?n=`, `GET /values`;
 - `GET /frame?max=N`: the last frame the camera took (the guide window, or

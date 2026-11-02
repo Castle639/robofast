@@ -286,3 +286,19 @@ async def test_one_unreadable_shutter_read_is_tolerated(make_rig):
         lease.renew()
         await asyncio.sleep(0.1)
     assert lease.live and rig.dome_open()
+
+
+async def test_the_clear_faults_action_is_configurable(make_rig):
+    from robofast_core.safety import ENCLOSURE_MEMBERS, SafetyConfig, enclosure_members
+
+    assert enclosure_members(SafetyConfig()) == ENCLOSURE_MEMBERS
+    cfg = SafetyConfig(clear_faults_action="ResetFaults")
+    assert "Action:ResetFaults" in enclosure_members(cfg)
+    assert "Action:ClearFaults" not in enclosure_members(cfg)
+    with pytest.raises(ValueError, match="heartbeat_action"):
+        SafetyConfig(heartbeat_action="")
+    rig = make_rig(safety={"clear_faults_action": "ResetFaults"})
+    sent = []
+    rig.dome.Action = lambda action, parameters="": sent.append((action, parameters)) or "ok"
+    await rig.supervisor.clear_faults("jde", "testing")
+    assert sent == [("ResetFaults", "jde: testing")]

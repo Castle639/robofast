@@ -50,6 +50,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from robofast_core.adc import HEADER as ADC_HEADER
+from robofast_core.adc import ADCSwitches
 from robofast_core.fits_writer import FrameInfo, FrameStore, Optics, WrittenFrame, imagetyp
 from robofast_core.imagebytes import ImageArray, wire_bytes_per_pixel
 from robofast_core.owner import DeviceError, DeviceOwner, Grant, GrantRevoked
@@ -196,15 +198,6 @@ ROTATOR_MEMBERS = {
     "Position": ("rotator.position", "ROTPOS", "deg", "Rotator sky position angle"),
     "MechanicalPosition": ("rotator.mechanical", "ROTMECH", "deg", "Rotator mechanical angle"),
 }
-#: The ADC server's switches read for light frames (docs/adc.md): switch
-#: id -> (method, name, keyword, unit, comment).
-ADC_SWITCHES = {
-    0: ("GetSwitch", "adc.tracking", "ADCTRACK", "", "ADC tracking"),
-    1: ("GetSwitch", "adc.settled", "ADCSETTL", "", "ADC settled on this target"),
-    7: ("GetSwitchValue", "adc.deflection", "ADCDEFL", "deg", "ADC prism deflection from null"),
-    8: ("GetSwitchValue", "adc.motor_a", "ADCANGA", "deg", "ADC motor A angle from home"),
-    9: ("GetSwitchValue", "adc.motor_b", "ADCANGB", "deg", "ADC motor B angle from home"),
-}
 #: Camera members read after each exposure (``camera.`` names).
 CAMERA_MEMBERS = {
     "LastExposureStartTime": ("last_start", None, "", "Camera exposure start (UTC)"),
@@ -256,6 +249,7 @@ class Imaging:
         focusers: dict[str, DeviceOwner] | None = None,
         rotators: dict[str, DeviceOwner] | None = None,
         adcs: dict[str, DeviceOwner] | None = None,
+        adc_switches: dict[str, ADCSwitches] | None = None,
         weather: DeviceOwner | None = None,
         supervisor: Any = None,
         version: str | None = None,
@@ -301,7 +295,11 @@ class Imaging:
             for name in {*(focusers or {}), *(rotators or {})}
         }
         self._adcs = {
-            name: owner.grant(f"telemetry/{name}.adc") for name, owner in (adcs or {}).items()
+            name: (
+                owner.grant(f"telemetry/{name}.adc"),
+                (adc_switches or {}).get(name) or ADCSwitches(),
+            )
+            for name, owner in (adcs or {}).items()
         }
         #: Owners only the pipeline uses (closed by the service at exit).
         self.owners: list[DeviceOwner] = []
@@ -354,7 +352,7 @@ class Imaging:
             reads += [(grant, members, "") for grant, members, _ in self._aux.get(telescope, [])]
             await self._read_batch(telescope, reads, self.config.pointing_max_age)
             if telescope in self._adcs:
-                await self._read_adc(telescope, self._adcs[telescope])
+                await self._read_adc(telescope, *self._adcs[telescope])
             if telescope in self.pointing:
                 self._correct_pointing(telescope)
         optics = Optics.from_dict(self.config.telescopes.get(telescope))
@@ -541,16 +539,17 @@ class Imaging:
                 "%s: telemetry reads exceeded %s s", telescope, self.config.telemetry_timeout
             )
 
-    async def _read_adc(self, telescope: str, grant: Grant) -> None:
-        """The ADC's state for the header (:data:`ADC_SWITCHES`), bounded by
-        ``telemetry_timeout``; a failed read marks the value failed."""
+    async def _read_adc(self, telescope: str, grant: Grant, switches: ADCSwitches) -> None:
+        """The ADC's state for the header (:data:`robofast_core.adc.HEADER`,
+        its switches found by name), bounded by ``telemetry_timeout``; a
+        failed read marks the value failed."""
         max_age = self.config.pointing_max_age
         try:
             async with asyncio.timeout(self.config.telemetry_timeout):
-                for sid, (method, name, kw, unit, comment) in ADC_SWITCHES.items():
+                for role, (method, name, kw, unit, comment) in ADC_HEADER.items():
                     full = f"{telescope}.{name}"
                     try:
-                        value = await grant.call(method, sid)
+                        value = await grant.call(method, await switches.id(grant, role))
                     except GrantRevoked:
                         raise
                     except DeviceError as exc:
@@ -790,6 +789,7 @@ def imaging_from_config(
     focusers: dict[str, DeviceOwner] | None = None,
     rotators: dict[str, DeviceOwner] | None = None,
     adcs: dict[str, DeviceOwner] | None = None,
+    adc_switches: dict[str, ADCSwitches] | None = None,
     base: Path | None = None,
 ) -> Imaging | None:
     """An :class:`Imaging` from the enclosure config's ``images`` entry
@@ -809,6 +809,7 @@ def imaging_from_config(
         focusers=focusers,
         rotators=rotators,
         adcs=adcs,
+        adc_switches=adc_switches,
         weather=weather,
         supervisor=supervisor,
         base=base,

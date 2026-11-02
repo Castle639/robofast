@@ -24,7 +24,7 @@
   "calibration_dir": "/var/lib/robofast/guider-calibrations/t2",
   "camera": {"kind": "zwo", "index": 0},
   "mount": {"kind": "alpaca", "address": "127.0.0.1:11122", "number": 0, "method": "offset", "max_offset": 30},
-  "backlight": {"kiwispec": "http://127.0.0.1:8130"},
+  "backlight": {"kind": "kiwispec", "url": "http://127.0.0.1:8130"},
   "guide": {
     "exposure": 1.0,
     "acq_exposure": 1.0,

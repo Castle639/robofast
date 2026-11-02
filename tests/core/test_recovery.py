@@ -45,13 +45,15 @@ class Device:
 class FakePDU:
     def __init__(self, device: Device | None = None) -> None:
         self.cycled: list[int] = []
+        self.actions: list[str] = []
         self.device = device
 
     def __call__(self, address: str) -> FakePDU:
         return self
 
-    async def cycle(self, switch: int) -> None:
+    async def cycle(self, switch: int, action: str = "PowerCycle") -> None:
         self.cycled.append(switch)
+        self.actions.append(action)
         if self.device is not None:
             self.device.event("powercycle")
 
@@ -131,7 +133,7 @@ async def test_power_cycle_then_exhausted_then_reset():
 
     r = await lad.recover("camera", reconnect=dev.reconnect, probe=dev.probe, others=read)
     assert [o.split(":")[0] for _, o in r.tried] == ["failed", "failed", "ok"] and r.recovered
-    assert pdu.cycled == [0]
+    assert pdu.cycled == [0] and pdu.actions == ["PowerCycle"]  # robofast's PDU server's
     # It fails again soon after: the ladder starts above the rung that worked,
     # finds none left, and gives up for the night.
     dev.broken = True
@@ -317,3 +319,20 @@ async def test_sequencer_gives_up_when_the_ladder_is_exhausted(make_rig):
     # The other telescope observes on.
     t2 = rig.cams[1].exposures_started
     await wait_until(lambda: rig.cams[1].exposures_started > t2 + 1, timeout=20)
+
+
+async def test_the_power_cycle_action_is_configurable():
+    dev = Device(fixed_by="powercycle")
+    pdu = FakePDU(dev)
+    policy = {**FULL, "steps": ["powercycle"]}
+    policy["powercycle"] = {**FULL["powercycle"], "action": "CycleOutlet"}
+
+    async def read(device, member):
+        return {"AtPark": True, "CameraState": 0}[member]
+
+    r = await ladder(policy, pdu=pdu).recover(
+        "camera", reconnect=dev.reconnect, probe=dev.probe, others=read
+    )
+    assert r.recovered and pdu.actions == ["CycleOutlet"]
+    with pytest.raises(ValueError, match=r"powercycle\.action"):
+        DevicePolicy.from_dict({**policy, "powercycle": {**policy["powercycle"], "action": ""}})
