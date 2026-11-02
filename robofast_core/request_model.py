@@ -564,7 +564,9 @@ class Configuration:
     #: ``guiding_config.extra_params.guide`` (docs/offset_guiding.md): what
     #: the guider guides on -- ``"annulus"`` (the target itself; on a fiber,
     #: its light spilling round the hole; the default), ``"offset"`` (a
-    #: guide star nearby, held where the target falls on the fiber).
+    #: guide star nearby, held where the target falls on the fiber) or
+    #: ``"auto"`` (the dispatch scheduler chooses, from the instrument's
+    #: guiding model and ``guide_mag``: robofast_core.guider.recommend).
     guide_on: str = "annulus"
     #: ``guiding_config.extra_params.offset_star``: the guide star for
     #: ``offset`` (and ``auto``, if it chooses offset): ``"auto"`` (the
@@ -572,9 +574,12 @@ class Configuration:
     #: (arcsec, the guide star relative to the target) or ``{"ra", "dec",
     #: "pmra"?, "pmdec"?, "epoch"?, "g"?}`` (deg ICRS, mas/yr).
     offset_star: Any = None
+    #: ``guiding_config.extra_params.target_mag``: the target's magnitude
+    #: in the guide camera's band (Gaia G or V), for ``guide: "auto"``.
+    guide_mag: float | None = None
 
     GUIDE_MODES: ClassVar[tuple[str, ...]] = ("", "ON", "OFF")
-    GUIDE_ON: ClassVar[tuple[str, ...]] = ("annulus", "offset")
+    GUIDE_ON: ClassVar[tuple[str, ...]] = ("annulus", "offset", "auto")
 
     @classmethod
     def from_dict(cls, d: Any, what: str) -> Configuration:
@@ -600,7 +605,7 @@ class Configuration:
                 f"{what}.guiding_config.mode: {gmode!r}; expected one of {cls.GUIDE_MODES[1:]}"
             )
         guide = gmode == "ON"
-        guide_on, offset_star = _guide_on(guiding, f"{what}.guiding_config")
+        guide_on, offset_star, guide_mag = _guide_on(guiding, f"{what}.guiding_config")
         acquisition = _acquisition(d.get("acquisition_config"), f"{what}.acquisition_config")
         ics = d["instrument_configs"]
         if not isinstance(ics, list) or not ics:
@@ -645,6 +650,7 @@ class Configuration:
             acquisition,
             guide_on,
             offset_star,
+            guide_mag,
         )
 
     @property
@@ -673,6 +679,8 @@ class Configuration:
             gx["guide"] = self.guide_on
         if self.offset_star is not None:
             gx["offset_star"] = self.offset_star
+        if self.guide_mag is not None:
+            gx["target_mag"] = self.guide_mag
         if gx:
             d["guiding_config"]["extra_params"] = gx
         if self.instrument is None:
@@ -1285,12 +1293,13 @@ def import_requests(
 ACQUISITION_MODES = ("AUTO", "BRIGHTEST", "GEOMETRY", "SOLVE", "COORDINATES", "WCS", "OFF")
 
 
-def _guide_on(guiding: dict[str, Any], what: str) -> tuple[str, Any]:
-    """``guiding_config.extra_params``: ``guide`` and ``offset_star``
-    (:attr:`Configuration.guide_on`, :attr:`Configuration.offset_star`)."""
+def _guide_on(guiding: dict[str, Any], what: str) -> tuple[str, Any, float | None]:
+    """``guiding_config.extra_params``: ``guide``, ``offset_star`` and
+    ``target_mag`` (:attr:`Configuration.guide_on`, ``offset_star``,
+    ``guide_mag``)."""
     from robofast_core.guider.offset import guide_star_from_spec
 
-    extra = _extra(guiding, {"guide", "offset_star"}, what)
+    extra = _extra(guiding, {"guide", "offset_star", "target_mag"}, what)
     on = extra.get("guide") or "annulus"
     if on not in Configuration.GUIDE_ON:
         raise ValueError(
@@ -1299,12 +1308,15 @@ def _guide_on(guiding: dict[str, Any], what: str) -> tuple[str, Any]:
     star = extra.get("offset_star")
     if star is not None:
         if on == "annulus":
-            raise ValueError(f"{what}.extra_params.offset_star: only with guide 'offset'")
+            raise ValueError(f"{what}.extra_params.offset_star: only with guide 'offset' or 'auto'")
         try:
             guide_star_from_spec(star)
         except (ValueError, TypeError, KeyError) as exc:
             raise ValueError(f"{what}.extra_params.offset_star: {exc}") from None
-    return on, star
+    mag = extra.get("target_mag")
+    if mag is not None:
+        mag = _number(mag, f"{what}.extra_params.target_mag", -2.0, 30.0)
+    return on, star, mag
 
 
 def _acquisition(d: Any, what: str) -> dict[str, Any]:

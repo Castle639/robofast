@@ -14,7 +14,23 @@
   "site": {"latitude": 31.6809, "longitude": -110.8781, "elevation": 2344.0},
   "requests": "requests.example.json",
   "state": "dispatch-state.json",
-  "instruments": {"tres": {"type": "camera_spectrograph"}},
+  "instruments": {
+    "tres": {
+      "type": "camera_spectrograph",
+      "guiding": {
+        "_note": [
+          "When to offset guide (robofast_core/guider/recommend.py; docs/offset_guiding.md): guide 'auto'.",
+          "1.5 m Tillinghast; TRES's 2.3 arcsec fiber in a reflective plate seen by the tres-guider Andor Zyla.",
+          "ASSUMED, to measure: plate_scale, throughput, read_noise, exposure, obscuration.",
+          "Thresholds: max_error (arcsec rms), min_snr, prefer_annulus."
+        ],
+        "aperture": 1.5, "obscuration": 0.1, "fiber_diameter": 2.3, "plate_scale": 0.12,
+        "read_noise": 1.4, "throughput": 0.1, "exposure": 1.0,
+        "sky": 21.0, "seeing": 1.5, "star_g": 11.0, "separation": 60.0,
+        "max_error": 0.25, "min_snr": 5.0, "prefer_annulus": 1.5
+      }
+    }
+  },
   "telescopes": {
     "tillinghast": {"instruments": ["tres"], "min_alt": 20, "max_alt": 90,
                     "calstage": ["out", "sky", "science", "in", "block_sky", "block_science"],

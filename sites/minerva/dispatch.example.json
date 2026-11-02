@@ -19,7 +19,23 @@
   "requests": "requests.example.json",
   "state": "dispatch-state.json",
   "too_dropbox": "too-dropbox",
-  "instruments": {"spectrograph": {"type": "kiwispec"}},
+  "instruments": {
+    "spectrograph": {
+      "type": "kiwispec",
+      "guiding": {
+        "_note": [
+          "When to offset guide (robofast_core/guider/recommend.py; docs/offset_guiding.md): guide 'auto'.",
+          "CDK700 0.7 m; FAU plate scale 0.265 arcsec/px (legacy config/fau_t1.ini); the FAU sees ~2 % of",
+          "the light (docs/acquisition.md). ASSUMED, to measure: fiber_diameter, read_noise, obscuration,",
+          "throughput, exposure. Thresholds: max_error (arcsec rms), min_snr, prefer_annulus."
+        ],
+        "aperture": 0.7, "obscuration": 0.25, "fiber_diameter": 2.0, "plate_scale": 0.265,
+        "read_noise": 3.0, "throughput": 0.02, "exposure": 1.0,
+        "sky": 21.0, "seeing": 1.8, "star_g": 10.5, "separation": 60.0,
+        "max_error": 0.3, "min_snr": 5.0, "prefer_annulus": 1.5
+      }
+    }
+  },
   "telescopes": {
     "t1": {"instruments": ["spectrograph", "imager"], "min_alt": 21, "max_alt": 83,
            "filters": ["air", "V", "R", "gp", "rp", "zp", "ip"]},

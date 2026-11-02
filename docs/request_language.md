@@ -68,7 +68,8 @@ acted on.
 | `target` | below | | |
 | `constraints` | below | | |
 | `guiding_config.mode` | `ON`, `OFF` | `guide` | ON: guide on the target. A SPECTRUM is always guided. `optional`, `exposure_time`, ... accepted, not used. Previously `guide` |
-| `guiding_config.extra_params.guide`* | `annulus` (default), `offset` | `guide_on` | what the guider holds: the target itself (on a fiber, its spill ring), or an offset star placed so the target falls on the fiber (docs/offset_guiding.md) |
+| `guiding_config.extra_params.guide`* | `annulus` (default), `offset`, `auto` | `guide_on` | what the guider holds: the target itself (on a fiber, its spill ring), or an offset star placed so the target falls on the fiber; `auto`: the dispatch scheduler's choice from the instrument's guiding model (docs/offset_guiding.md) |
+| `guiding_config.extra_params.target_mag`* | number | `guide_mag` | the target's magnitude in the guide camera's band, for `guide: "auto"` |
 | `guiding_config.extra_params.offset_star`* | `"auto"` (default), `{"east", "north"}` arcsec (the guide star relative to the target), or `{"ra", "dec", "pmra", "pmdec", "epoch", "g"}` | `offset_star` | the guide star for `guide: "offset"`; `auto`: the guider picks it from its catalog |
 | `acquisition_config` | `mode`: `AUTO` (default), `BRIGHTEST`, `GEOMETRY`, `SOLVE` (= OCS `WCS`), `COORDINATES` (= OCS `OFF`); `extra_params`: `fallback`, `companions` `[{ra, dec, g}]`, `tolerance` (px) | | how the guider tells the target from its neighbours (docs/acquisition.md); `exposure_time` accepted, not used |
 | `extra_params.allow_partial`* | bool | | keep frames of an interrupted visit. Previously top level |

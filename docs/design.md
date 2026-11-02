@@ -340,7 +340,12 @@ star (given, or chosen from Gaia) at the fiber plus that star's offset
 from the target, with proper motion, differential refraction and field
 rotation folded in, so a target too faint for annulus guiding still sits
 on the fiber; the guide mode and star go into the FITS headers
-(`GUIDMODE`, `GS*`) and the decision record.
+(`GUIDMODE`, `GS*`) and the decision record. With `guide: "auto"` the
+dispatch scheduler chooses annulus or offset guiding from the instrument's
+guiding model (`instruments.<name>.guiding`:
+`robofast_core/guider/recommend.py`, a photon-noise prediction of each
+method's error checked against the guide loop in the simulator), and
+records the recommendation and its reason.
 
 **Saving frames.** With an `images` entry in the enclosure config, every
 frame is saved (`robofast_core/imaging.py`, `docs/data.md`). The image is
