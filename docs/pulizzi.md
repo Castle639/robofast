@@ -197,6 +197,11 @@ label, and the Sun, altitude and Moon limits do not apply.
   a rapidly rotating B star through the iodine cell). An enclosure without
   `help.no_lamps` (MEarth South) gets the neutral reason alone. A lamp asked for in `extra_params` is
   refused everywhere, with the right way to ask.
+* **A site sequence instead of a lamp:** an `ARC` or `LAMP_FLAT` may name
+  one of the enclosure's sequences made from a template
+  (`extra_params.sequence`, e.g. the 60-inch's `tres_thar`), listed in the
+  telescope's dispatch `sequences`; it runs with the request's exposure
+  time and count (docs/sequences.md, "Requests").
 
 **Sequencer.** The telescope's `lamps` entry in the enclosure config
 (`sites/flwo60/flwo60.json`; `robofast_core/lamps.py`) gives the switch's

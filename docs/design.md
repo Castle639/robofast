@@ -832,8 +832,8 @@ operator-duty checks (needed or not, whether an expired duty closes or only
 alarms, its ttl and grace) and automatic fault clearing; the weather,
 fault, shutter, lease, park and heartbeat checks are enforced in every mode
 that may open. The supervisor holds the mode (saved across restarts; a
-missing or unreadable file means the config's default, which the shipped
-sites make `attended`, the safe one) and the sequencer, the observer console
+missing or unreadable file means the config's default: `robotic` at
+MINERVA, `attended` at the 60-inch and MEarth South) and the sequencer, the observer console
 and the request API read it from its status; every switch (console or
 `python -m robofast_core.modes`) is logged with who, when and why and
 raised as a notice, never opens by itself (a less safe mode takes effect
@@ -841,7 +841,13 @@ through the normal lease path), and closes at once when the live lease may
 not go on under the new mode. The active mode is in the FITS headers
 (`OBSMODE`) and the plan record. `safety.attended_only` (section 3.3) is
 now the enclosure's floor (no mode lowers it: the built-in `robotic` is not
-offered without a heartbeat); the enclosure's `shadow` mode is the
+offered without a heartbeat). Running unattended with no watchdog anyway is
+the site's explicit choice (JDE 2026-11-02;
+`safety.allow_unattended_without_watchdog`, docs/modes.md): it lifts the
+floor and robofast warns loudly wherever the enclosure shows (the log at
+start, on every switch and periodically, the switch notice, the status,
+the console's enclosure panel and alarm list, the morning report). MEarth
+South opts in; the 60-inch does not. The enclosure's `shadow` mode is the
 documented way to shadow a legacy system with all of robofast (the weather
 bridge's `--shadow` stays the bridge's own flag).
 
@@ -863,9 +869,19 @@ and 4, done).** Two mechanisms, for two kinds of difference:
   when the config is loaded (unknown steps, devices and lamps the
   telescope lacks, frame types the instrument does not take, lamp frames
   with no lamp on, a lamp left on or kept on past its `max_on`) and again
-  against the devices before the first step. OCS requests keep their
-  parametric `arc` and `lamp_flat` kinds; mapping a request to a site's
-  sequence is an open question. MINERVA's iodine B-star calibration stays
+  against the devices before the first step. A small library of generic
+  **templates** (`arc_set`, `lamp_flat_set`, `bias_set`, `dark_set`; a
+  registry, `SEQUENCE_TEMPLATES`) is instantiated by a site with its lamp,
+  exposure time, count, warm-up and stage positions, and a site's own
+  `sequence_templates` override them by name (JDE: "lamp calibrations are
+  general enough we may want to offer a handful of generic sequences"; the
+  observers' lamp scripts become site sequences later). OCS requests keep
+  their parametric `arc` and `lamp_flat` kinds, and an `ARC` or `LAMP_FLAT`
+  may instead name a site sequence made from a template
+  (`extra_params.sequence`, listed in the telescope's dispatch
+  `sequences`): it runs with the request's exposure time and count
+  substituted, checked again (the lamps' `max_on`) at submission and
+  before anything moves. MINERVA's iodine B-star calibration stays
   a `SPECTRUM` with `extra_params.iodine` (it needs a target and guiding,
   which a sequence's steps do not add).
 - *Plug-ins* (step 2; docs/plugins.md): what a site needs that is new
@@ -1146,7 +1162,8 @@ Each step is a CI-tested deliverable.
 14. Guider (built, simulators only; `docs/guider.md`): a generic guide
     service next to the camera, with SX AO, PI E-518 and mount-offset
     backends and their simulators, measured calibrations, offloading, fiber
-    acquisition, offset guiding (`docs/offset_guiding.md`), and the
+    acquisition, offset guiding (`docs/offset_guiding.md`; MINERVA's sheet
+    offsets checked against the star catalog on import), and the
     sequencer hook. Next: the ZWO backend on a real
     FAU camera, then T2's AO unit commissioned (attended, with JDE's
     approval), then the TRES front end (an Andor Zyla backend).

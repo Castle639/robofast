@@ -389,7 +389,11 @@ FLWO 60-inch dome has no watchdog). Its supervisor has `attended_only`
 (automatic when no heartbeat device is configured; `sites/flwo60/flwo60.json`
 sets it) and grants no lease, so it never opens, unless an operator is **on
 duty**. MINERVA's Aqawan pings a hardware heartbeat and is unaffected: its
-enclosure panel says "not needed".
+enclosure panel says "not needed". A site may opt in to running such an
+enclosure unattended anyway (MEarth South;
+`safety.allow_unattended_without_watchdog`, docs/modes.md): then, in a mode
+that needs no operator, the enclosure panel shows a red **NO WATCHDOG**
+banner and the alarm list a warning for as long as it lasts.
 
 * **On duty**: the enclosure panel's *on duty* button (`duty`, `op: "on"`,
   with a reason; audited). Another observer pressing it takes over.

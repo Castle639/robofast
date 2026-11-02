@@ -157,6 +157,10 @@ class ObservationKind:
         """Check instrument config ``i`` of configuration ``what`` (``raw``:
         as given); set its ``light`` where the type decides it."""
         at = f"{what}.instrument_configs[{i}]"
+        if ic.sequence is not None:
+            raise ValueError(
+                f"{at}.extra_params.sequence: only for {' and '.join(LAMP_TYPES)} configurations"
+            )
         if ic.lamp is not None:
             raise ValueError(
                 f"{at}.optical_elements.lamp: only for {' and '.join(LAMP_TYPES)} configurations"
@@ -491,7 +495,12 @@ class LampFrames(ObservationKind):
     def check_instrument_config(
         self, ctype: str, i: int, ic: InstrumentConfig, raw: dict[str, Any], what: str
     ) -> None:
-        if ic.lamp is None:
+        if ic.sequence is not None and ic.lamp is not None:
+            raise ValueError(
+                f"{what}.instrument_configs[{i}]: name the lamp (optical_elements.lamp) or a"
+                " site sequence (extra_params.sequence), not both: the sequence says its lamps"
+            )
+        if ic.lamp is None and ic.sequence is None:
             from robofast_core.request_model import LAMPS_HOW
 
             raise ValueError(
@@ -511,6 +520,20 @@ class LampFrames(ObservationKind):
 
     def observation(self, m: RequestMapping) -> dict[str, Any]:
         c, ic = m.config, m.ic
+        if ic.sequence is not None:
+            # A site sequence (docs/sequences.md, "Requests"): its template
+            # made again with the request's exposure time and the frames
+            # still to take; the sequence's own stage, lamp and cleanup.
+            return dict(
+                name=m.name(ic.sequence),
+                exptime=ic.exptime,
+                count=ic.count - m.done,
+                light=False,
+                object=c.target.name,
+                kind="sequence",
+                sequence=ic.sequence,
+                sequence_params={"exptime": ic.exptime, "count": ic.count - m.done},
+            )
         return dict(
             name=m.name(ic.lamp),
             exptime=ic.exptime,
@@ -533,15 +556,19 @@ class SequenceKind(ObservationKind):
     """A config-defined sequence (docs/sequences.md; robofast_core/sequences.py):
     the steps of the enclosure config's ``sequences`` entry the observation
     names, with its cleanup always run after them. Light or dark as its
-    definition says (the sequencer sets ``light`` from it). Plans only: a
-    request's lamp calibrations are ``arc`` and ``lamp_flat``."""
+    definition says (the sequencer sets ``light`` from it). Plans, and an
+    ARC or LAMP_FLAT request naming one (``extra_params.sequence``: made by
+    :class:`LampFrames`, with ``sequence_params``)."""
 
     name = "sequence"
-    fields = ("sequence",)
+    fields = ("sequence", "sequence_params")
 
     def validate(self, obs: Observation) -> None:
         if not isinstance(obs.sequence, str) or not obs.sequence:
             raise ValueError(f"observation {obs.name!r}: a sequence names its definition")
+        p = obs.sequence_params
+        if p is not None and (not isinstance(p, dict) or not all(isinstance(k, str) for k in p)):
+            raise ValueError(f"observation {obs.name!r}: sequence_params: {{param: value}}")
 
     async def run(self, r: KindRun) -> None:
         await r.sequencer._sequence(r.state, r.unit, r.tel, r.cam, r.obs, r.taken)

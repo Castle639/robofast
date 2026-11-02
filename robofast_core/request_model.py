@@ -447,9 +447,14 @@ class InstrumentConfig:
     #: telescope's lamp switch); only telescopes whose limits list it in
     #: ``lamps`` are eligible.
     lamp: str | None = None
+    #: ARC and LAMP_FLAT only, instead of ``lamp``: one of the site's
+    #: sequences (``extra_params.sequence``; docs/sequences.md, "Requests"),
+    #: run with this config's exposure time and count; only telescopes
+    #: whose limits list it in ``sequences`` are eligible.
+    sequence: str | None = None
 
     #: robofast's own ``extra_params`` (the instruments' are added).
-    EXTRA: ClassVar[set[str]] = {"port", "light"}
+    EXTRA: ClassVar[set[str]] = {"port", "light", "sequence"}
 
     @classmethod
     def from_dict(cls, d: Any, what: str) -> InstrumentConfig:
@@ -472,6 +477,9 @@ class InstrumentConfig:
             if k in declared and v is not None
         }
         mode = d.get("mode")
+        sequence = _text(extra.get("sequence"))
+        if sequence is not None and not sequence.replace("_", "").replace("-", "").isalnum():
+            raise ValueError(f"{what}.extra_params.sequence: a sequence name")
         return cls(
             _number(d["exposure_time"], f"{what}.exposure_time", 0.0, 86400.0),
             _count(d.get("exposure_count", 1), f"{what}.exposure_count"),
@@ -482,6 +490,7 @@ class InstrumentConfig:
             "" if mode is None else str(mode),
             _text(oe.get("calstage")),
             _text(oe.get("lamp")),
+            sequence,
         )
 
     def to_dict(self, *, light: bool = True) -> dict[str, Any]:
@@ -500,6 +509,8 @@ class InstrumentConfig:
             extra["light"] = self.light
         if self.port is not None:
             extra["port"] = self.port
+        if self.sequence is not None:
+            extra["sequence"] = self.sequence
         extra.update(self.params)
         if extra:
             d["extra_params"] = extra
