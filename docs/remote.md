@@ -95,14 +95,22 @@ sequencer, no Aqawan server.
    (enclosure closed, legacy users of PWI stopped, webcam watching, PDU
    outlet known, abort at hand).
 2. Open the tunnel (above); check the port with `ss -ltn`.
-3. Read the mount's status only: `robofast-pwi-jog` with the telescope's
-   remote config and `--hardware`, no move (pwi.md has the exact
-   commands). Compare with the webcam and the PWI window.
-4. Small bounded moves with `robofast-pwi-jog`, one at a time, each
-   confirmed, with its stop command ready.
-5. Optionally the PWI Alpaca server (`robofast-pwi-server --config
-   sites/minerva/remote/t1_pwi2.json --hardware`), read-only use first
-   (status through Alpaca), to check the mapping.
+3. Read the mount's status only, and leave a watch running:
+
+       C=sites/minerva/remote/t1_pwi2.json
+       robofast-pwi-jog --config $C --hardware status
+       robofast-pwi-jog --config $C --hardware status --watch 2
+
+   Compare with the webcam and the PWI window. In a second terminal, type
+   `robofast-pwi-jog --config $C --hardware stop` and leave it ready.
+4. Small bounded moves, one at a time, each confirmed (`yes`), watched on
+   the webcam: [pwi.md](pwi.md#first-hardware-session) has the exact
+   sequence (`connect`, `enable` and `tracking-off` only if the status says
+   they are needed; then `altaz --dalt 0.2` and back, `altaz --daz 0.2`
+   and back). Ctrl-C during a move sends stop.
+5. Only then, optionally, the PWI Alpaca server
+   (`robofast-pwi-server --config $C --hardware`), reading status through
+   Alpaca first, to check the mapping.
 
 Stop a move **before** closing the tunnel: when the tunnel drops, the mount
 carries on with whatever it was last told.
