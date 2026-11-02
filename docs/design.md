@@ -459,7 +459,10 @@ the plate solver's hint and the guider's mount matrix read it.
 
 Where a telescope really points is measured, not assumed (`docs/sky.md`):
 robofast has its own star catalog (Gaia DR3 tiles cached on disk, a
-bright-star list fetched once from Zenodo, the WDS), a near-blind plate solver that every
+bright-star list fetched once from Zenodo, the WDS; or, where Gaia's
+non-commercial licence does not fit, UCAC4 or 2MASS tiles from IRSA with an
+estimated G, chosen by `catalog.source`, and `catalog.allow_noncommercial:
+false` to refuse every non-commercial file), a near-blind plate solver that every
 light frame, acquisition and pointing-model run can use, and TPOINT-style
 pointing-error terms (`robofast_core/pointing.py`) that the sky simulator
 uses as the mount's "true" errors and that a pointing-model fit recovers.
@@ -1194,7 +1197,10 @@ Each step is a CI-tested deliverable.
 
 17. The sky (built; `docs/sky.md`): the Gaia DR3 tile cache and downloaded
     bright stars, a sky simulator with pointing errors, the near-blind
-    plate solver, solved WCS and zero points in every frame. Next: target
+    plate solver, solved WCS and zero points in every frame. Swappable
+    catalog source (`gaia`, `ucac4`, `2mass`; a registry) and a switch
+    that refuses non-commercial data, for commercial users (docs/sky.md,
+    "Licences"). Next: target
     vetting and catalog-based acquisition, the per-port zero points
     measured on real frames, a pointing-model builder.
 

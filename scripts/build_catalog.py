@@ -6,12 +6,16 @@ sources (docs/sky.md, docs/zenodo.md).
     python scripts/build_catalog.py tiles --cache ~/.cache/robofast/catalog \\
         --field 212.72 62.52 0.3 --field 285.79 25.29 0.3
 
+    # The same from another catalog source (docs/sky.md: ucac4, 2mass; from IRSA):
+    python scripts/build_catalog.py tiles --source ucac4 --cache DIR --field 212.72 62.52 0.3
+
     # ... or every target of a targets file (RA hours, Dec deg):
     python scripts/build_catalog.py tiles --cache DIR --targets sites/minerva/targets.example.json
 
     # The bright-star list (every Gaia DR3 star with G < 6.5) into a cache
     # directory (catalog_at() looks there before downloading it from Zenodo):
     python scripts/build_catalog.py bright --cache DIR
+    python scripts/build_catalog.py bright --source ucac4 --cache DIR
 
     # The Hipparcos stars Gaia lacks (fetched and cached, not bundled):
     python scripts/build_catalog.py hipparcos --cache DIR
@@ -58,8 +62,13 @@ def _fields(args: argparse.Namespace) -> list[tuple[float, float, float]]:
 
 
 def cmd_tiles(args: argparse.Namespace) -> int:
+    source = cat.catalog_source(args.source, "--source")
     tiles = cat.TileCache(
-        args.cache, level=args.level, mag_limit=args.mag_limit, fetch=cat.GaiaArchive()
+        args.cache,
+        level=args.level,
+        mag_limit=args.mag_limit,
+        fetch=source.fetcher(None),
+        source=source,
     )
     todo = cat.fill_cache(tiles, _fields(args), dry_run=True)
     print(f"{len(todo)} tiles to fetch into {tiles.directory}")
@@ -94,8 +103,17 @@ def build_bright(out: Path, mag_limit: float = 6.5) -> np.ndarray:
 
 
 def cmd_bright(args: argparse.Namespace) -> int:
-    out = Path(args.out) if args.out else Path(args.cache) / cat.BRIGHT_FILE
-    build_bright(out, args.mag_limit)
+    source = cat.catalog_source(args.source, "--source")
+    out = Path(args.out) if args.out else Path(args.cache) / source.bright_file
+    if source.name == "gaia":
+        build_bright(out, args.mag_limit)
+        return 0
+    assert source.bright is not None
+    rec = np.asarray(source.bright(args.mag_limit, None)).astype(cat.TILE_DTYPE)
+    rec = np.sort(rec, order=["g", "source_id"])
+    out.parent.mkdir(parents=True, exist_ok=True)
+    np.save(out, rec, allow_pickle=False)
+    print(f"{len(rec)} {source.name} stars (est. G < {args.mag_limit:g}) -> {out}")
     return 0
 
 
@@ -243,8 +261,9 @@ def cmd_wds(args: argparse.Namespace) -> int:
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
-    t = sub.add_parser("tiles", help="fetch Gaia DR3 tiles for fields")
+    t = sub.add_parser("tiles", help="fetch catalog tiles for fields (Gaia DR3 by default)")
     t.add_argument("--cache", required=True)
+    t.add_argument("--source", default="gaia", help="catalog source (docs/sky.md)")
     t.add_argument("--level", type=int, default=7)
     t.add_argument("--mag-limit", type=float, default=16.0)
     t.add_argument("--field", nargs=3, action="append", metavar=("RA", "DEC", "RADIUS"))
@@ -257,6 +276,7 @@ def main(argv: list[str] | None = None) -> int:
     where.add_argument("--cache", help="writes CACHE/bright_stars.npy")
     where.add_argument("--out", help="the file to write")
     b.add_argument("--mag-limit", type=float, default=6.5)
+    b.add_argument("--source", default="gaia", help="catalog source (docs/sky.md)")
     bu = sub.add_parser("bundle", help="build the Zenodo bundle of Gaia extracts")
     bu.add_argument("--out", required=True)
     bu.add_argument("--workers", type=int, default=6)

@@ -19,6 +19,7 @@ it names core's own.
 | `robofast_core.guider.hardware.CAMERAS`, `TIPTILTS`, `MOUNTS`, `BACKLIGHTS` | a guider config's `camera`, `tiptilt`, `mount`, `backlight` `kind` | cameras `sim`, `alpaca`, `zwo`, `framegrabber`; tip/tilts `sim`, `sxao`, `sxao-sim`, `pi`, `pi-sim`; mounts `sim`, `alpaca`; backlights `sim`, `kiwispec` (by `robofast_core.devices`) |
 | `robofast_core.notifier.sinks.SINK_TYPES` | a notifier sink's `type` | `email`, `webhook`, `command` |
 | `robofast_core.weather_sources.SOURCE_TYPES` | a weather source's `type` | `sun`, `redis`; MINERVA's `minerva.ridge`, `minerva.sky_temps`, `minerva.mearth` (a plug-in) |
+| `robofast_core.catalog.CATALOG_SOURCES` | a `catalog` entry's `source` (docs/sky.md) | `gaia`, `ucac4`, `2mass` |
 | `robofast_core.seeing.SEEING_SOURCES` | a dispatch plan's `seeing.source` (docs/seeing.md) | `guider`, `fixed` |
 | `robofast_core.request_model.REQUEST_IMPORTERS` | a dispatch plan's `imports`: `[{"type", "path", ...options}]` | none; MINERVA's `minerva.legacy_csv` (a plug-in) |
 
