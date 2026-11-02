@@ -847,9 +847,19 @@ and 4, done).** Two mechanisms, for two kinds of difference:
   when the config is loaded (unknown steps, devices and lamps the
   telescope lacks, frame types the instrument does not take, lamp frames
   with no lamp on, a lamp left on or kept on past its `max_on`) and again
-  against the devices before the first step. OCS requests keep their
-  parametric `arc` and `lamp_flat` kinds; mapping a request to a site's
-  sequence is an open question. MINERVA's iodine B-star calibration stays
+  against the devices before the first step. A small library of generic
+  **templates** (`arc_set`, `lamp_flat_set`, `bias_set`, `dark_set`; a
+  registry, `SEQUENCE_TEMPLATES`) is instantiated by a site with its lamp,
+  exposure time, count, warm-up and stage positions, and a site's own
+  `sequence_templates` override them by name (JDE: "lamp calibrations are
+  general enough we may want to offer a handful of generic sequences"; the
+  observers' lamp scripts become site sequences later). OCS requests keep
+  their parametric `arc` and `lamp_flat` kinds, and an `ARC` or `LAMP_FLAT`
+  may instead name a site sequence made from a template
+  (`extra_params.sequence`, listed in the telescope's dispatch
+  `sequences`): it runs with the request's exposure time and count
+  substituted, checked again (the lamps' `max_on`) at submission and
+  before anything moves. MINERVA's iodine B-star calibration stays
   a `SPECTRUM` with `extra_params.iodine` (it needs a target and guiding,
   which a sequence's steps do not add).
 - *Plug-ins* (step 2; docs/plugins.md): what a site needs that is new
@@ -1126,7 +1136,8 @@ Each step is a CI-tested deliverable.
 14. Guider (built, simulators only; `docs/guider.md`): a generic guide
     service next to the camera, with SX AO, PI E-518 and mount-offset
     backends and their simulators, measured calibrations, offloading, fiber
-    acquisition, offset guiding (`docs/offset_guiding.md`), and the
+    acquisition, offset guiding (`docs/offset_guiding.md`; MINERVA's sheet
+    offsets checked against the star catalog on import), and the
     sequencer hook. Next: the ZWO backend on a real
     FAU camera, then T2's AO unit commissioned (attended, with JDE's
     approval), then the TRES front end (an Andor Zyla backend).

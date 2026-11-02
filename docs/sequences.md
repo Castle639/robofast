@@ -38,9 +38,69 @@ In the enclosure config (the file the supervisor and the sequencer read):
 * `description` -- for people; keys starting with `_` are comments.
 
 `sites/flwo60/flwo60.json` has the TRES ThAr and flat sets
-(`tres_thar`, `tres_flat`; every value a placeholder, unconfirmed), and
+(`tres_thar`, `tres_flat`, made from the generic templates below; every
+value a placeholder, unconfirmed), and
 `sites/flwo60/calibration.example.json` runs them after the biases and
 darks.
+
+## Templates: generic sequences
+
+Lamp calibrations, biases and darks are much the same everywhere, so
+robofast ships a few generic sequences as **templates**: a step list with
+parameters. A site instantiates one with its own values instead of writing
+the steps out:
+
+```json
+"sequences": {
+  "tres_thar": {
+    "template": "arc_set", "instrument": "camera_spectrograph",
+    "lamp": "ThAr1", "warmup": 60, "exptime": 30, "count": 3, "object": "ThAr",
+    "calstage": "in", "calstage_after": "out"
+  },
+  "biases": {"template": "bias_set", "count": 10}
+}
+```
+
+| Template | Parameters (required in bold) | Steps |
+|---|---|---|
+| `arc_set` | **`lamp`**, **`exptime`**, **`count`**, `warmup`, `calstage`, `calstage_after`, `filter`, `object`, `instrument` | the stage to `calstage`, the filter, the lamp on (its `warmup`), `count` `ARC` frames, the lamp off, the stage to `calstage_after`; cleanup: the stage to `calstage_after` |
+| `lamp_flat_set` | the same | the same with `LAMP_FLAT` frames |
+| `bias_set` | **`count`**, `filter`, `object`, `instrument` | the filter, `count` `BIAS` frames |
+| `dark_set` | **`exptime`**, **`count`**, `filter`, `object`, `instrument` | the filter, `count` `DARK` frames |
+
+An optional parameter left out is null, and a null leaves out what it
+fills: a step whose step type's value is null (no `calstage`: the stage is
+not moved, and the cleanup is empty), or an option (no `warmup`: the lamps
+entry's). `instrument` defaults to `imager`. Besides the parameters, an
+instance may give `telescopes` and `description` (default: the
+template's). The sequence it makes is then loaded and checked exactly as
+one written out (below): a template adds no way around a check.
+
+**A site's own templates, or its version of a built-in.** The enclosure
+config's `sequence_templates` adds templates, and one named like a built-in
+replaces it for that enclosure:
+
+```json
+"sequence_templates": {
+  "arc_set": {
+    "params": {"lamp": {}, "exptime": {}, "count": {"default": 1}},
+    "steps": [
+      {"lamp": "$lamp", "on": true},
+      {"expose": {"type": "ARC", "exptime": "$exptime", "n": "$count"}},
+      {"lamp": "$lamp", "on": false}
+    ],
+    "cleanup": []
+  }
+}
+```
+
+`params`: each parameter `{}` (required) or `{"default": value}`. A string
+`"$name"` anywhere in `steps`, `cleanup`, `instrument` or `description`
+stands for parameter `name`'s value (the whole string only, so a number
+stays a number); a `$name` that is not a parameter is refused at load.
+Parameters may not be named `template` or `telescopes`. A plug-in registers
+a template in `robofast_core.sequences.SEQUENCE_TEMPLATES` (a
+`SequenceTemplate`; docs/plugins.md).
 
 ## The steps
 
@@ -132,17 +192,50 @@ sequence that fails here has moved and switched nothing.
 * **A calibration plan:** `"sequences": ["tres_thar", "tres_flat"]` (each on
   every telescope), or `{"sequence": name, "telescopes": [...]}`; taken
   after the biases and darks, with the enclosure closed.
-* **Requests: not in this step.** An OCS request is parametric: an `ARC`
-  or `LAMP_FLAT` configuration says which lamp, how long and how many, and
-  the `arc` and `lamp_flat` kinds (docs/pulizzi.md) already run exactly that
-  procedure with the same safety (the stage before the lamp, the warm-up,
-  `max_on` checked first, the lamp off in a `finally` and in every
-  cleanup). A sequence is the site's fixed procedure, so it belongs in the
-  site's plans. Mapping a request type to a site's sequence (with the
-  request's exposure time and count substituted) is a question for JDE
-  (docs/design.md 3.10).
+* **With other values:** an observation's `sequence_params` (`{"count":
+  5}`) makes a sequence from a template again with those parameters,
+  checked as at load (a static plan's when the sequencer starts; else
+  before the first step: a failure moves and switches nothing).
+* **Requests** (below).
 
-MINERVA defines no sequences: its calibrations (the calibration plan's
+## Requests naming a site sequence
+
+An OCS `ARC` or `LAMP_FLAT` configuration names its lamp
+(`optical_elements.lamp`; the `arc` and `lamp_flat` kinds,
+docs/pulizzi.md) -- or, instead, one of the site's sequences in
+`extra_params.sequence`:
+
+```json
+{"type": "ARC", "instrument_configs": [
+  {"exposure_time": 30, "exposure_count": 3, "extra_params": {"sequence": "tres_thar"}}]}
+```
+
+The sequence runs with the request's `exposure_time` and the frames still
+to take as its template's `exptime` and `count` (an observation of kind
+`sequence` with `sequence_params`); everything else (the lamp, the
+warm-up, the stage, the cleanup) is the site's. So the observers' own
+procedure runs for an outside request, with the same safety. The rules:
+
+* the dispatch limits list the sequences requests may name per telescope
+  (`telescopes.<name>.sequences`; `sites/flwo60/dispatch.example.json`
+  lists `tres_thar` and `tres_flat`), and only those telescopes take the
+  configuration;
+* each listed sequence must be in the enclosure config, run on that
+  telescope, be dark, be made from a template that takes `exptime` and
+  `count`, and its lamp frames must all be of one type: checked when the
+  sequencer and the request API start (each refuses to start otherwise);
+* at submission the request API refuses a sequence no telescope lists, one
+  whose lamp frames are not the configuration's type (an `ARC` naming a
+  flat set), and values that break its checks (`exposure_count` 40 that
+  would keep the lamp on past its `max_on`), each with the reason; an
+  enclosure with neither lamps nor sequences gets the no-lamps reason and
+  its `help.no_lamps`;
+* a configuration names the lamp or the sequence, not both.
+
+A fixed sequence (written out, not from a template) cannot be named by a
+request: it has no exposure time or count to substitute.
+
+MINERVA defines no sequences (and its dispatch limits list none): its calibrations (the calibration plan's
 biases and darks, and KiwiSpec's own frames) run as before.
 
 ## Events

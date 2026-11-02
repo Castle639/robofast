@@ -1233,7 +1233,10 @@ class Sequencer:
         sequence (docs/sequences.md) is light or dark as its definition
         says, whatever the plan set."""
         if isinstance(answer, Observation) and answer.kind == "sequence":
-            seq = self.sequences.get(answer.sequence or "")
+            try:
+                seq = self._sequence_for(answer)
+            except ValueError:
+                seq = None  # refused when it runs, before anything moves
             if seq is not None and answer.light != seq.light:
                 answer.light = seq.light
         return answer
@@ -2192,7 +2195,10 @@ class Sequencer:
         :mod:`robofast_core.sequences`)."""
         from robofast_core.sequences import SEQUENCE_STEPS, SequenceRun
 
-        seq = self.sequences.get(obs.sequence or "")
+        try:
+            seq = self._sequence_for(obs)
+        except ValueError as exc:
+            raise ObservationFailed(f"{obs.name}: {exc}") from None
         if seq is None:
             raise ObservationFailed(
                 f"{obs.name}: no sequence {obs.sequence!r} in this enclosure's config"
@@ -2221,6 +2227,21 @@ class Sequencer:
         finally:
             r.revoke("sequence over")
         r.event("sequence_done", frames=len(taken))
+
+    def _sequence_for(self, obs: Observation) -> Any:
+        """The definition ``obs`` names (None: none), made again from its
+        template with ``obs.sequence_params`` (an ARC or LAMP_FLAT request's
+        exposure time and count): checked as at load (the lamps' ``max_on``
+        too); ValueError if it cannot be."""
+        seq = self.sequences.get(obs.sequence or "")
+        if seq is None or not obs.sequence_params:
+            return seq
+        if seq.rebuild is None:
+            raise ValueError(
+                f"sequence {seq.name} is not made from a template: no parameters to set"
+                f" ({sorted(obs.sequence_params)})"
+            )
+        return seq.rebuild(dict(obs.sequence_params))
 
     async def _sequence_preflight_lamps(self, r: Any) -> None:
         """The lamp switch's outlets, and each lamp's time on in the
