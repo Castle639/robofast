@@ -106,6 +106,11 @@ and optionally:
   Observations of kind ``spectrum`` need it (the dispatch scheduler's
   ``SPECTRUM`` configurations), as do a calibration plan's ``spectrograph``
   frames.
+* ``sequences`` -- config-defined sequences (docs/sequences.md): named
+  step lists (the calibration stage, lamps, waits, frames, ...), each
+  checked here against the telescopes it may run on, run by observations
+  of kind ``sequence`` (a static plan's targets, a calibration plan's
+  ``sequences``).
 * ``operator_control`` -- a directory: the observer console's pause,
   resume and stop commands come in through it
   (:class:`~robofast_core.console.hold.OperatorHold`, which wraps the plan;
@@ -178,9 +183,10 @@ from robofast_core.imaging import imaging_from_config
 from robofast_core.instruments import INSTRUMENT_TYPES
 from robofast_core.lease_client import RemoteSupervisor
 from robofast_core.owner import DeviceOwner
-from robofast_core.plan import PlanProvider, StaticPlan, plan_from_config
+from robofast_core.plan import CalibrationPlan, PlanProvider, StaticPlan, plan_from_config
 from robofast_core.plugins import load_config_plugins
 from robofast_core.sequencer import Sequencer, SequencerConfig, TelescopeUnit
+from robofast_core.sequences import sequences_from_config
 from robofast_core.spectra import SpectrumRecorder
 from robofast_core.timeline import Timeline
 
@@ -393,10 +399,12 @@ def build(
         base=base,
     )
     names = [u.name for u in units]
+    sequences = sequences_from_config(config)
     if plan is None:
         if "plan" not in config:
             raise ValueError("no plan: give the config a 'plan' entry or use --plan")
         plan = plan_from_config(config["plan"], names, base=base, clock=clock)
+    check_plan_sequences(plan, sequences)
     triggers = None
     if config.get("autofocus_triggers") is not None:
         focusable = [u.name for u in units if u.autofocus is not None]
@@ -460,10 +468,38 @@ def build(
         spectrograph_names=spec_names,
         spectra=spectra,
         clock=clock,
+        sequences=sequences,
     )
     if triggers is not None:
         triggers.bind(seq.registry)
     return seq, remote
+
+
+def check_plan_sequences(plan: PlanProvider, sequences: dict[str, Any]) -> None:
+    """A static or calibration plan's sequence observations name sequences
+    of the config, for telescopes they run on; a calibration plan's are dark
+    (it never opens the enclosure). Other plans are checked as they run."""
+    queues = getattr(plan, "queues", None)
+    if not isinstance(queues, dict):
+        return
+    calibration = isinstance(plan, CalibrationPlan)
+    for tel, queue in queues.items():
+        for obs in queue:
+            if obs.kind != "sequence":
+                continue
+            seq = sequences.get(obs.sequence or "")
+            what = f"plan: {obs.name!r} on {tel}"
+            if seq is None:
+                raise ValueError(
+                    f"{what}: no sequence {obs.sequence!r} in the config's sequences"
+                    f" ({sorted(sequences) or 'none'})"
+                )
+            if not seq.runs_on(tel):
+                raise ValueError(f"{what}: sequence {seq.name} is for {list(seq.telescopes or ())}")
+            if calibration and seq.light:
+                raise ValueError(
+                    f"{what}: sequence {seq.name} takes sky light; a calibration plan never opens"
+                )
 
 
 #: A ``spectrograph`` entry's keys for any type (its type's client takes

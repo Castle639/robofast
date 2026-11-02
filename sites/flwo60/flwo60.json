@@ -16,7 +16,9 @@
     "So safety.attended_only (also the default without a heartbeat): no lease, and the dome never opens, unless an operator is on duty through the observer console ('on duty', renewed while the page is open). duty_ttl s without a renewal: a critical alarm; duty_grace s later the supervisor closes (docs/console.md, Operator duty).",
     "tillinghast.limits: the observer console's manual-slew altitude limits (deg); min_alt follows tcsgo.json (placeholder, unconfirmed).",
     "site: the 60-inch on Mt. Hopkins, approximate (public).",
-    "mode: attended (JDE 2026-10-31: the dome has no watchdog). The enclosure is attended_only, so the built-in robotic mode is not offered here and no mode may open without an operator on duty (docs/modes.md); engineering (manual control only) and shadow (log what it would do, command nothing) are."
+    "mode: attended (JDE 2026-10-31: the dome has no watchdog). The enclosure is attended_only, so the built-in robotic mode is not offered here and no mode may open without an operator on duty (docs/modes.md); engineering (manual control only) and shadow (log what it would do, command nothing) are.",
+    "lamps.lamps.*.max_on: repeats each outlet's max_on in pulizzi.json (placeholders there too), so the sequences below are checked against it when this file is loaded; the switch's own limit is checked again before a lamp goes on.",
+    "sequences (docs/sequences.md): the TRES calibration sets as step lists, run by observations of kind 'sequence' (calibration.example.json runs them with the dome closed). EVERY VALUE IS A PLACEHOLDER, UNCONFIRMED: the exposure times and counts, the warm-ups, the lamp choice, and the calibration stage's 'in' position (null in tres_frontend.json, so these fail before any lamp goes on until it is set). Each ends with its lamps off and the stage out, and its cleanup puts the stage out whatever happened (cancelled, failed); every lamp it switched on is switched off first."
   ],
   "name": "flwo60",
   "listen": "127.0.0.1:8160",
@@ -31,10 +33,10 @@
                     "limits": {"min_alt": 20.0, "max_alt": 90.0},
                     "calstage": "127.0.0.1:11160/0", "adc": "127.0.0.1:11180/0",
                     "lamps": {"switch": "127.0.0.1:11170/0", "frame_overhead": 30,
-                              "lamps": {"ThAr1": {"warmup": 60, "calstage": "in"},
-                                        "ThAr2": {"warmup": 60, "calstage": "in"},
-                                        "Incand": {"warmup": 30, "calstage": "in"},
-                                        "Incand2": {"warmup": 30, "calstage": "in"}}}}
+                              "lamps": {"ThAr1": {"warmup": 60, "calstage": "in", "max_on": 1800},
+                                        "ThAr2": {"warmup": 60, "calstage": "in", "max_on": 1800},
+                                        "Incand": {"warmup": 30, "calstage": "in", "max_on": 1800},
+                                        "Incand2": {"warmup": 30, "calstage": "in", "max_on": 1800}}}}
   },
   "mode": "attended",
   "safety": {
@@ -43,6 +45,32 @@
     "attended_only": true,
     "duty_ttl": 300,
     "duty_grace": 300
+  },
+  "sequences": {
+    "tres_thar": {
+      "description": "TRES ThAr arcs (placeholder values, unconfirmed)",
+      "instrument": "camera_spectrograph",
+      "steps": [
+        {"calstage": "in"},
+        {"lamp": "ThAr1", "on": true, "warmup": 60},
+        {"expose": {"type": "ARC", "exptime": 30, "n": 3, "object": "ThAr"}},
+        {"lamp": "ThAr1", "on": false},
+        {"calstage": "out"}
+      ],
+      "cleanup": [{"calstage": "out"}]
+    },
+    "tres_flat": {
+      "description": "TRES fiber flats on the incandescent lamp (placeholder values, unconfirmed)",
+      "instrument": "camera_spectrograph",
+      "steps": [
+        {"calstage": "in"},
+        {"lamp": "Incand", "on": true, "warmup": 30},
+        {"expose": {"type": "LAMP_FLAT", "exptime": 10, "n": 5, "object": "flat"}},
+        {"lamp": "Incand", "on": false},
+        {"calstage": "out"}
+      ],
+      "cleanup": [{"calstage": "out"}]
+    }
   },
   "sequencer_name": "flwo60-sequencer",
   "command_timeout": 10,

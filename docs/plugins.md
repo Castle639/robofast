@@ -12,7 +12,8 @@ it names core's own.
 | Registry | Key in a config | Core's entries |
 |---|---|---|
 | `robofast_core.plan.PLAN_TYPES` | a plan's `type` | `static`, `calibration`, `dispatch` |
-| `robofast_core.kinds.OBSERVATION_KINDS` | an observation's `kind`; each kind's `request_types` are OCS configuration `type`s | `expose` (EXPOSE, DARK, BIAS), `autofocus` (AUTO_FOCUS), `spectrum` (SPECTRUM), `spectrograph_calibration`, `manual`, `pointing_model` (POINTING_MODEL), `rotator_calibration` (ROTATOR_CALIBRATION), `sky_flat` (SKY_FLAT), `arc` (ARC), `lamp_flat` (LAMP_FLAT) |
+| `robofast_core.kinds.OBSERVATION_KINDS` | an observation's `kind`; each kind's `request_types` are OCS configuration `type`s | `expose` (EXPOSE, DARK, BIAS), `autofocus` (AUTO_FOCUS), `spectrum` (SPECTRUM), `spectrograph_calibration`, `manual`, `pointing_model` (POINTING_MODEL), `rotator_calibration` (ROTATOR_CALIBRATION), `sky_flat` (SKY_FLAT), `arc` (ARC), `lamp_flat` (LAMP_FLAT), `sequence` (a config-defined sequence; plans only) |
+| `robofast_core.sequences.SEQUENCE_STEPS` | a step of an enclosure config's `sequences` (docs/sequences.md) | `calstage`, `filter`, `port`, `adc`, `lamp`, `focus`, `wait`, `expose`, `spectrograph` |
 | `robofast_core.instruments.INSTRUMENT_TYPES` | a dispatch config's `instruments.<name>.type`; an enclosure config's `spectrograph.type` | `imager`, `camera_spectrograph`, `kiwispec` |
 | `robofast_core.guider.hardware.CAMERAS`, `TIPTILTS`, `MOUNTS`, `BACKLIGHTS` | a guider config's `camera`, `tiptilt`, `mount`, `backlight` `kind` | cameras `sim`, `alpaca`, `zwo`, `framegrabber`; tip/tilts `sim`, `sxao`, `sxao-sim`, `pi`, `pi-sim`; mounts `sim`, `alpaca`; backlights `sim`, `kiwispec` (by `robofast_core.devices`) |
 | `robofast_core.notifier.sinks.SINK_TYPES` | a notifier sink's `type` | `email`, `webhook`, `command` |

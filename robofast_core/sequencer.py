@@ -205,6 +205,17 @@ goes on. While down its status is checked every
 ``spectrograph_auto_recover``) or the operator's :meth:`Sequencer.clear_spectrograph`
 marks it up. docs/rv_night.md.
 
+Config-defined sequences
+------------------------
+An observation of ``kind="sequence"`` runs one of the enclosure config's
+``sequences`` (``sequences=``, from
+:func:`robofast_core.sequences.sequences_from_config`; docs/sequences.md):
+checked against the devices first (reads only), then its steps through the
+generation's grants, then its cleanup, always -- every lamp it switched on
+off at once, the rest (the calibration stage out, ...) with grants of its
+own, in the background after a cancellation, waited for by the
+generation's cleanup before it parks. Its ``light`` is its definition's.
+
 Operator park
 -------------
 :meth:`Sequencer.request_park` (the observer console's ``park``, through
@@ -626,6 +637,9 @@ class SequencerConfig:
     #: let the plan run (``manual``, ``shadow``), how long a telescope waits
     #: (Idle) before it asks again.
     mode_idle: float = 10.0
+    #: Config-defined sequences (docs/sequences.md): how long a sequence's
+    #: cleanup (lamps off, the calibration stage out, ...) may take.
+    sequence_cleanup_timeout: float = 120.0
 
 
 @dataclass
@@ -799,6 +813,7 @@ class Sequencer:
         spectrograph_names: dict[str, str] | None = None,
         spectra: SpectrumRecorder | None = None,
         clock: Clock | None = None,
+        sequences: dict[str, Any] | None = None,
     ) -> None:
         units = list(telescopes)
         if telescope is not None or camera is not None:
@@ -827,6 +842,11 @@ class Sequencer:
         #: :attr:`spectrum_records`).
         self.spectrograph = spectrograph
         self.spectrograph_names = dict(spectrograph_names or {})
+        #: The enclosure config's sequences, by name (docs/sequences.md;
+        #: robofast_core.sequences.sequences_from_config), and their
+        #: cleanups still running after a cancellation, per telescope.
+        self.sequences: dict[str, Any] = dict(sequences or {})
+        self._sequence_cleanups: dict[str, set[asyncio.Task]] = {}
         self.spectra = spectra
         #: The one clock every night name and time stamp comes from
         #: (robofast_core.clock): the frames, the sidecars, the spectrograph's
@@ -1205,8 +1225,18 @@ class Sequencer:
         Also returns whether the answer was taken from the plan (then an
         observation must be observed or given back)."""
         if getattr(self.plan, "peek", None) is not None:
-            return await self.modes.peek(unit.name), False
-        return await self.modes.next_observation(unit.name), True
+            return self._prepare(await self.modes.peek(unit.name)), False
+        return self._prepare(await self.modes.next_observation(unit.name)), True
+
+    def _prepare(self, answer: Any) -> Any:
+        """A plan's answer as the sequencer takes it: a config-defined
+        sequence (docs/sequences.md) is light or dark as its definition
+        says, whatever the plan set."""
+        if isinstance(answer, Observation) and answer.kind == "sequence":
+            seq = self.sequences.get(answer.sequence or "")
+            if seq is not None and answer.light != seq.light:
+                answer.light = seq.light
+        return answer
 
     def _give_back(self, unit: TelescopeUnit, obs: Observation) -> None:
         """Return an observation taken but not started (reported
@@ -1412,8 +1442,10 @@ class Sequencer:
                         if taken:
                             obs = nxt
                     if obs is None:
-                        obs = await asyncio.wait_for(
-                            self.modes.next_observation(unit.name), self.config.plan_timeout
+                        obs = self._prepare(
+                            await asyncio.wait_for(
+                                self.modes.next_observation(unit.name), self.config.plan_timeout
+                            )
                         )
                 except Exception as exc:
                     await self._telescope_failed(state, unit, tel, cam, f"planning: {exc!r}")
@@ -1854,6 +1886,13 @@ class Sequencer:
     ) -> None:
         cfg = self.config
         gen = state.gen
+        if self._sequence_cleanups.get(unit.name):
+            # A sequence cut short (a preemption) still cleaning up: let it
+            # finish (bounded) before anything else uses its devices.
+            report = CleanupReport(gen, [unit.name])
+            await self._cleanup_sequences(unit.name, report)
+            if report.errors:
+                raise ObservationFailed(f"{obs.name}: {'; '.join(report.errors)}")
         self._event("target_start", gen=gen, telescope=unit.name, target=obs.name)
         if obs.light and state.lease is None:
             raise RuntimeError(f"{obs.name}: light frames in a closed generation")
@@ -2136,6 +2175,156 @@ class Sequencer:
             return False
         self._event("lamp_off", gen=gen, telescope=telescope, lamp=name, why="frames over")
         return True
+
+    # -- config-defined sequences (docs/sequences.md) ----------------------------------
+
+    async def _sequence(
+        self,
+        state: _Generation,
+        unit: TelescopeUnit,
+        tel: Grant,
+        cam: Grant,
+        obs: Observation,
+        taken: list[Any],
+    ) -> None:
+        """Run the config-defined sequence ``obs.sequence``: check it against
+        the devices, run its steps, and always its cleanup (module doc of
+        :mod:`robofast_core.sequences`)."""
+        from robofast_core.sequences import SEQUENCE_STEPS, SequenceRun
+
+        seq = self.sequences.get(obs.sequence or "")
+        if seq is None:
+            raise ObservationFailed(
+                f"{obs.name}: no sequence {obs.sequence!r} in this enclosure's config"
+                f" (it has {sorted(self.sequences)})"
+            )
+        if not seq.runs_on(unit.name):
+            raise ObservationFailed(f"{obs.name}: sequence {seq.name} is not for {unit.name}")
+        r = SequenceRun(self, state, unit, tel, cam, obs, taken, seq)
+        if any(s.type == "lamp" for s in (*seq.steps, *seq.cleanup)):
+            await self._sequence_preflight_lamps(r)
+        for step in (*seq.steps, *seq.cleanup):
+            await SEQUENCE_STEPS[step.type].preflight(step.params, r)
+        r.event("sequence_start", steps=len(seq.steps))
+        try:
+            for i, step in enumerate(seq.steps):
+                r.event("sequence_step", index=i, step=step.type)
+                await SEQUENCE_STEPS[step.type].run(step.params, r)
+        except asyncio.CancelledError:
+            await self._sequence_cleanup(r, background=True)
+            raise
+        except BaseException:
+            await self._sequence_cleanup(r, background=False)
+            raise
+        else:
+            await self._sequence_cleanup(r, background=False, strict=True)
+        finally:
+            r.revoke("sequence over")
+        r.event("sequence_done", frames=len(taken))
+
+    async def _sequence_preflight_lamps(self, r: Any) -> None:
+        """The lamp switch's outlets, and each lamp's time on in the
+        sequence against the switch's own ``max_on``."""
+        unit, setup = r.unit, r.unit.lamp_setup
+        if unit.lamps is None or setup is None:
+            raise Unsupported(f"{unit.name} has no lamps (sequence {r.sequence.name})")
+        r.outlets = await switch_status(r.grant("lamps"), setup.switch_timeout, setup.status_action)
+        for lamp, seconds in r.sequence.lamp_time.get(unit.name, {}).items():
+            limit = (r.outlets.get(lamp) or {}).get("max_on")
+            if limit is not None and seconds > float(limit):
+                raise ObservationFailed(
+                    f"{r.obs.name}: sequence {r.sequence.name} keeps lamp {lamp} on for about"
+                    f" {seconds:.0f} s, more than its max_on {float(limit):g} s: split it"
+                )
+
+    def _lamps_still_on(self, r: Any) -> Callable[[], Awaitable[None]]:
+        """Before each lamp frame: every lamp the sequence has on still is."""
+        setup = r.unit.lamp_setup
+
+        async def check() -> None:
+            now = await switch_status(r.grant("lamps"), setup.switch_timeout, setup.status_action)
+            for lamp in r.lamps_on:
+                if not (now.get(lamp) or {}).get("on"):
+                    raise LampOff(f"lamp {lamp} went off (its max_on, or switched off by hand)")
+
+        return check
+
+    async def _sequence_lamp_off(self, r: Any, lamp: str, sid: int) -> None:
+        """One lamp off, with a grant of its own (never fenced: switching a
+        lamp off is never harmful); not abandoned if cancelled again."""
+        setup = r.unit.lamp_setup
+        grant = r.unit.lamps.grant(f"{self.name}/lamp-off#{r.gen}:{r.sequence.name}")
+        if not await self._lamp_off(r.gen, r.unit.name, grant, sid, lamp, setup.switch_timeout):
+            raise LampOff(f"lamp {lamp} did not confirm off (the cleanup tries again)")
+        r.lamps_on.pop(lamp, None)
+
+    async def _sequence_cleanup(self, r: Any, *, background: bool, strict: bool = False) -> None:
+        """Every lamp the sequence switched on off (now), then its cleanup
+        steps with grants of their own: awaited, or -- cancelled --
+        finished in the background and waited for by the generation's
+        cleanup. ``strict``: a cleanup that fails fails the observation."""
+        problems: list[str] = []
+        for lamp, sid in list(r.lamps_on.items()):
+            try:
+                await self._sequence_lamp_off(r, lamp, sid)
+            except LampOff as exc:
+                problems.append(str(exc))
+        task = asyncio.ensure_future(self._sequence_cleanup_steps(r))
+        if background:
+            tasks = self._sequence_cleanups.setdefault(r.unit.name, set())
+            tasks.add(task)
+            task.add_done_callback(tasks.discard)
+            return
+        try:
+            problems += await asyncio.shield(task)
+        except asyncio.CancelledError:
+            tasks = self._sequence_cleanups.setdefault(r.unit.name, set())
+            tasks.add(task)
+            task.add_done_callback(tasks.discard)
+            raise
+        if strict and problems:
+            raise ObservationFailed(f"sequence {r.sequence.name}: cleanup: {'; '.join(problems)}")
+
+    async def _sequence_cleanup_steps(self, r: Any) -> list[str]:
+        from robofast_core.sequences import SEQUENCE_STEPS
+
+        r.cleaning = True
+        problems: list[str] = []
+        try:
+            for step in r.sequence.cleanup:
+                try:
+                    await asyncio.wait_for(
+                        SEQUENCE_STEPS[step.type].run(step.params, r),
+                        self.config.sequence_cleanup_timeout,
+                    )
+                except Exception as exc:
+                    problems.append(f"{step.where}: {exc!r}")
+                    r.event(
+                        "sequence_cleanup_failed",
+                        step=step.where,
+                        error=repr(exc),
+                        level="critical",
+                    )
+                    log.critical(
+                        "%s: %s: sequence cleanup: %s: %r", self.name, r.unit.name, step.where, exc
+                    )
+        finally:
+            r.revoke("sequence cleanup over")
+        r.event("sequence_cleanup_done", ok=not problems)
+        return problems
+
+    async def _cleanup_sequences(self, name: str, report: CleanupReport) -> None:
+        """A cancelled sequence's cleanup still running (the calibration
+        stage on its way out): wait for it (bounded), then every lamp off."""
+        tasks = list(self._sequence_cleanups.get(name, ()))
+        if tasks:
+            done, pending = await asyncio.wait(tasks, timeout=self.config.sequence_cleanup_timeout)
+            for t in done:
+                if not t.cancelled() and t.exception() is None and t.result():
+                    report.errors.append(f"{name}: sequence cleanup: {'; '.join(t.result())}")
+            if pending:
+                report.errors.append(f"{name}: a sequence cleanup still running after the cleanup")
+        await self._cleanup_lamps(name, report)
 
     # -- the ADC (docs/adc.md) ------------------------------------------------------
 
@@ -3682,7 +3871,7 @@ class Sequencer:
             self._cleanup_camera(name, cam, report),
             self._stop_guider(name, report),
             self._abort_slew(name, tel, report),
-            self._cleanup_lamps(name, report),
+            self._cleanup_sequences(name, report),
             self._cleanup_adc(name, report),
         )
         if spectrograph is not None and not spectrograph.done():

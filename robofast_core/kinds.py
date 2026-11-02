@@ -529,6 +529,24 @@ class LampFrames(ObservationKind):
         await r.sequencer._lamp_frames(r.state, r.unit, r.tel, r.cam, r.obs, r.taken)
 
 
+class SequenceKind(ObservationKind):
+    """A config-defined sequence (docs/sequences.md; robofast_core/sequences.py):
+    the steps of the enclosure config's ``sequences`` entry the observation
+    names, with its cleanup always run after them. Light or dark as its
+    definition says (the sequencer sets ``light`` from it). Plans only: a
+    request's lamp calibrations are ``arc`` and ``lamp_flat``."""
+
+    name = "sequence"
+    fields = ("sequence",)
+
+    def validate(self, obs: Observation) -> None:
+        if not isinstance(obs.sequence, str) or not obs.sequence:
+            raise ValueError(f"observation {obs.name!r}: a sequence names its definition")
+
+    async def run(self, r: KindRun) -> None:
+        await r.sequencer._sequence(r.state, r.unit, r.tel, r.cam, r.obs, r.taken)
+
+
 for _kind in (
     Expose(),
     Autofocus(),
@@ -540,6 +558,7 @@ for _kind in (
     SkyFlat(),
     LampFrames("arc", "ARC"),
     LampFrames("lamp_flat", "LAMP_FLAT"),
+    SequenceKind(),
 ):
     OBSERVATION_KINDS.register(_kind.name, _kind)
 del _kind
