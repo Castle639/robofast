@@ -1,7 +1,7 @@
 {
   "_note": [
     "robofast PWI server (Alpaca Telescope + Focuser + Rotator) for MINERVA T1, through an SSH tunnel: docs/pwi.md, docs/remote.md.",
-    "PWI4 is NOT INSTALLED on the telescope PCs yet: this config is for after the cutover in minerva-control docs/pwi4.md.",
+    "PWI4 4.1.6 is installed on T1 (2026-11-02); its HTTP API listens on the PC's 127.0.0.1:8220 only, reached through the PC's own sshd (docs/remote.md). Only one of PWI2 and PWI4 may own the mount.",
     "PWI is reached on 127.0.0.1:7141 (PWI4); the tunnel's far end is the telescope's control PC, set up by the operator, not here.",
     "allow_hardware is true, but nothing talks to the real PWI without --hardware on the command line as well (robofast_core/hwgate.py).",
     "Limits (deg): min_alt = legacy telescope_N.ini HORIZON (21), max_alt = legacy scheduler.ini MAXALT (83); park = legacy control.telescope_park defaults (alt 25, az 0).",
@@ -9,7 +9,8 @@
     "max_jog_deg: robofast-pwi-jog's largest relative move per axis (first hardware session: keep it small).",
     "Only one of the PWI2 and PWI4 configs of a telescope runs at a time (same listen port); only one of PWI2 and PWI4 may own the mount.",
     "allow_find_home false: robofast never homes this mount through the Alpaca server. T1's home sensor was replaced and PWI2's home-direction setting changed then (PWI2 settingsMount.xml vs settingsMount.20161219.badhome.xml), so a home may drive the wrong way: home with robofast-pwi-jog home --axis 0|1, one axis at a time, after the checklist in docs/pwi.md.",
-    "allow_unhomed_moves true: the engineering override for the first session (small jogs before homing, to check axis directions). It does nothing without --allow-unhomed on the command line; set it false once the mount homes reliably."
+    "allow_unhomed_moves true: the engineering override for the first session (small jogs before homing, to check axis directions). It does nothing without --allow-unhomed on the command line; set it false once the mount homes reliably.",
+    "T1 live PWI2 settingsMount.xml (read 2026-11-02): homingMoveAzmCwWhenTrue=True, homingMoveAltUpWhenTrue=False (the 2016 badhome file had the opposite of both); azimuth home 4.90527 rad (281.05 deg), altitude home 0.81423 rad (46.65 deg); altitude limits hard 20-90, goto 20-86, track 20-87 deg; azimuth CW limit 510/450/480 and CCW -150/-90/-130 deg (hard/goto/track). PWI4's homing direction and limits must match these before any home (docs/pwi.md, checklist 7). T1 runs PWI4 4.1.6: per-axis homing needs 4.1.7+."
   ],
   "name": "t1",
   "backend": "pwi4",

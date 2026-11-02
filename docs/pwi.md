@@ -111,8 +111,10 @@ way. Therefore:
   first, prints the position while it runs, and sends stop on Ctrl-C, after
   `home_timeout` s, or (for one axis) if the other axis moves more than
   0.5 deg -- what a PWI4 that ignored the axis parameter would do.
-* One axis at a time needs PWI4 4.1.7 or later (by `pwi4.version`); PWI2
-  homes both together.
+* One axis at a time needs PWI4 4.1.7 or later (by `pwi4.version`; the
+  axis parameter arrived in 4.1.7 beta 3, and a 4.1.7 beta 1 or 2 that
+  ignored it would be caught by the other-axis watch). T1 runs PWI4 4.1.6:
+  per-axis homing needs a PWI4 upgrade there. PWI2 homes both together.
 * **Moves are refused while the mount is not homed**: slews, park,
   tracking on, offsets, pulses, and the jog's `altaz`/`radec`. Homed means
   PWI2 `encoders_have_been_set`, or PWI4 `axisN.is_homed` where reported;
@@ -200,17 +202,21 @@ logged to `$ROBOFAST_DATA_DIR/pwi-jog/<name>.log` (or `--log`).
 
 ## PWI4 on the network
 
-PWI4's HTTP API (port 8220) must be reachable from the site gateway, which
-carries the tunnel:
+PWI4's HTTP API (port 8220) listens on the telescope PC's own 127.0.0.1
+only (as on T1, PWI4 4.1.6). robofast reaches it without opening it to the
+LAN: a second SSH hop through the telescope PC's own sshd (gateway, then
+the telescope PC on port 22, forwarding to its 127.0.0.1:8220), with
+`ProxyJump`. The `ssh` lines are in
+[docs/remote.md](remote.md#pwi4-through-the-telescope-pcs-sshd).
 
-* In PWI4's HTTP server settings, allow connections from other machines
-  (PWI4 has a setting for it; by default it may listen on localhost only).
-* Add a Windows Defender Firewall inbound rule on the telescope PC: TCP
-  8220, allowed **only** from the gateway's address (Scope: remote IP
-  address), nothing else. No other machine needs PWI4's API.
-* Check from the gateway (`curl http://<telescope PC>:8220/status`), then
-  through the tunnel from the control machine
-  (`robofast-pwi-jog --config ... --hardware status`).
+The alternative: in PWI4's HTTP server settings allow connections from
+other machines, and add a Windows Defender Firewall inbound rule on the
+telescope PC for TCP 8220 allowing **only** the gateway's address (Scope:
+remote IP address).
+
+Either way, check through the tunnel from the control machine with
+`robofast-pwi-jog --config ... --hardware status` (it prints PWI4's
+version).
 
 ## First hardware session
 
@@ -229,8 +235,24 @@ Checklist (before any command that moves):
    network").
 7. **Before any home**: compare PWI2's two mount settings files on the
    telescope PC (`settingsMount.xml` vs
-   `settingsMount.20161219.badhome.xml`), find the home-sensor direction
-   key that changed, and set the matching PWI4 mount setting.
+   `settingsMount.20161219.badhome.xml`) and set PWI4's mount homing
+   direction and limits to match the live PWI2 file. For T1 the live
+   `settingsMount.xml` (read 2026-11-02) says:
+
+   | PWI2 setting | Live value | 2016 "badhome" file |
+   |---|---|---|
+   | `homingMoveAzmCwWhenTrue` | True (azimuth homes clockwise) | False |
+   | `homingMoveAltUpWhenTrue` | False (altitude homes down) | True |
+   | azimuth home (encoder) | 4.90527 rad (281.05 deg) | |
+   | altitude home (encoder) | 0.81423 rad (46.65 deg) | |
+   | altitude limits: hard / goto / track | 20-90 / 20-86 / 20-87 deg | |
+   | azimuth CW limit: hard / goto / track | 510 / 450 / 480 deg | |
+   | azimuth CCW limit: hard / goto / track | -150 / -90 / -130 deg | |
+
+   Which PWI4 setting each maps to is to be confirmed with PlaneWave.
+   robofast's own limits stay tighter: `min_alt` 21, `max_alt` 83 (legacy
+   scheduler); the jog refuses any azimuth move across 0/360 rather than
+   modelling the -90..450 deg wrap.
 
 Sequence (T1 on PWI4, through the 7141 tunnel):
 
@@ -248,9 +270,12 @@ Sequence (T1 on PWI4, through the 7141 tunnel):
     $J --allow-unhomed altaz --dalt -0.2    # back
     $J --allow-unhomed altaz --daz 0.2      # azimuth (away from 0/360)
     $J --allow-unhomed altaz --daz -0.2
-    # 4. Settings checked (checklist 7)? Home one axis at a time.
+    # 4. Settings checked (checklist 7)? Home one axis at a time (PWI4 4.1.7+):
     $J home --axis 1                   # altitude; asks yes; stop at hand
     $J home --axis 0                   # azimuth
+    #    On PWI4 4.1.6 (T1 today) per-axis homing is refused: upgrade PWI4,
+    #    or home both axes together with stop at hand:
+    #    $J home --axis both
     $J status                          # homed 1?
     # 5. Homed: jogs without the override.
     $J altaz --dalt 0.5

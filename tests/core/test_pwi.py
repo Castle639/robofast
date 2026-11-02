@@ -663,7 +663,7 @@ async def test_find_home_one_axis(make):
 
 
 async def test_find_home_one_axis_needs_pwi4_417(make):
-    _, server = make("pwi4", sim_kw={"version": "4.1.4.0"})
+    _, server = make("pwi4", sim_kw={"version": "4.1.6.0"})  # T1 today
     tel = await device(server)
     with pytest.raises(InvalidOperationException, match=r"4\.1\.7"):
         await tel.call("Action", "FindHome", "0", timeout=T)
