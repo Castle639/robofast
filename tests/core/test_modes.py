@@ -254,6 +254,80 @@ async def test_shadow_commands_nothing(make_rig):
     assert not {"Park", "AbortExposure", "CloseShutter", "OpenShutter"} & set(calls)
 
 
+# -- shadow intervenes on an active safety risk (JDE 2026-11-02) -----------------------
+
+
+async def test_shadow_closes_on_rain_while_someone_else_has_it_open(make_rig):
+    rig = make_rig(modes={"mode": "shadow"})
+    await rig.start(sequencer=False)
+    sup = rig.supervisor
+    await asyncio.sleep(0.3)  # weather read: safe
+    rig.dome._move(0)  # the legacy system opens
+    await wait_until(lambda: sup.critical(), 3, what="watch alarm")
+    await asyncio.sleep(0.5)
+    assert rig.dome_open() and not rig.timeline.events("close_commanded")  # safe: no
+    rig.weather.set_safe(False)  # rain
+    await wait_until(rig.dome_closed, 5, what="closed on rain")
+    (ev,) = rig.timeline.events("shadow_intervened")
+    assert "weather unsafe" in ev.detail["risk"] and ev.detail["shutter"] == "OPEN"
+    assert any("intervened" in a for a in sup.alarms)
+    await wait_until(
+        lambda: any(e.detail.get("after") for e in rig.timeline.events("watching")),
+        3,
+        what="watching again",
+    )
+    assert sup.status()["mode"]["intervening"] is None
+    # Safe again: shadow never opens.
+    rig.weather.set_safe(True)
+    await asyncio.sleep(1.0)
+    assert rig.dome_closed() and not rig.timeline.events("open_commanded")
+    assert not rig.timeline.events("lease_granted")
+
+
+async def test_shadow_closes_on_an_enclosure_fault(make_rig):
+    rig = make_rig(modes={"mode": "shadow"}, safety=dict(fault_action="Faults"))
+    state = {"fault": False}
+
+    def action(name, parameters=""):
+        assert name == "Faults"
+        return json.dumps({"fault": state["fault"], "error": False, "faults": "overcurrent"})
+
+    rig.dome.Action = action
+    await rig.start(sequencer=False)
+    rig.dome._move(0)
+    await asyncio.sleep(0.5)
+    assert rig.dome_open()
+    state["fault"] = True
+    await wait_until(rig.dome_closed, 5, what="closed on the fault")
+    (ev,) = rig.timeline.events("shadow_intervened")
+    assert "enclosure fault" in ev.detail["risk"]
+
+
+async def test_shadow_does_not_act_on_what_it_does_not_know(make_rig):
+    # No successful weather read (the feed is down): not an active risk, so
+    # a restarted supervisor in shadow leaves the other system's dome alone.
+    rig = make_rig(modes={"mode": "shadow"})
+    rig.sm.fail("weather bridge down")
+    rig.dome._move(0)
+    await rig.start(sequencer=False)
+    await asyncio.sleep(1.0)
+    assert not rig.supervisor.safe and rig.dome_open()
+    assert not rig.timeline.events("shadow_intervened")
+
+
+async def test_intervention_is_a_per_mode_knob(make_rig):
+    rig = make_rig(modes={"mode": "shadow", "modes": {"shadow": {"intervene": False}}})
+    await rig.start(sequencer=False)
+    rig.dome._move(0)
+    await asyncio.sleep(0.3)
+    rig.weather.set_safe(False)
+    await asyncio.sleep(1.0)
+    assert rig.dome_open() and not rig.timeline.events("close_commanded")
+    assert "commands nothing" in rig.supervisor.critical()[0]
+    with pytest.raises(ValueError, match="intervene: true or false"):
+        modes_from_config({"modes": {"shadow": {"intervene": "yes"}}})
+
+
 async def test_switching_to_shadow_while_open_closes_first_then_watches(make_rig):
     rig = make_rig(modes={"mode": "robotic"})
     await rig.start()
