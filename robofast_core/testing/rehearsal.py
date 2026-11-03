@@ -74,7 +74,13 @@ from robofast_core.request_model import Status
 from robofast_core.sequencer import Sequencer
 from robofast_core.testing.alpaca_server import FakeAlpacaServer
 from robofast_core.testing.focus_sim import SimFocuser, StarfieldCamera
-from robofast_core.testing.mount_guard import Endpoint, MountGuard, separation
+from robofast_core.testing.mount_guard import (
+    Endpoint,
+    MountGuard,
+    azimuth,
+    lst_hours,
+    separation,
+)
 from robofast_core.testing.rv_night import (
     AUTOFOCUS,
     MINERVA,
@@ -271,10 +277,14 @@ def observable(
     *,
     ignore_twilight: bool = False,
     step: float = 600.0,
+    az_window: tuple[float, float] | None = None,
 ) -> list[dict[str, Any]]:
     """``targets`` with ``"up"`` (seconds within the limits, with margin, from
     ``start`` to ``end``) and ``"up_now"`` and ``"alt_now"``; those never up
-    are left out. Best first: up now, then longest up."""
+    are left out. Best first: up now, then longest up. With ``az_window``
+    ``(lo, hi)`` a target also counts as up only inside that azimuth range,
+    and ``"windows"`` lists the ``(start, end)`` spans it is up (trimmed by
+    one ``step`` at each edge, so a slew commanded inside one stays inside)."""
     from astropy import units as u
     from astropy.coordinates import AltAz, SkyCoord, get_body
     from astropy.time import Time
@@ -296,15 +306,54 @@ def observable(
         frame = AltAz(obstime=tt, location=MINERVA.location)
         sep = coords.transform_to(frame).separation(sun).deg
         ok &= sep >= MIN_SUN_SEP
+    if az_window is not None:
+        lsts = [lst_hours(tm, MINERVA.longitude) for tm in times]
+        for i, (r_h, d) in enumerate(zip(ra, dec, strict=True)):
+            for k, lst in enumerate(lsts):
+                az = azimuth(r_h, d, lst, MINERVA.latitude)
+                ok[i, k] &= az_window[0] <= az <= az_window[1]
     dt = (end - start).total_seconds() / (n - 1)
     out = []
     for t, row, a in zip(targets, ok, alt, strict=True):
         if row.any():
-            out.append(
-                {**t, "up": float(row.sum() * dt), "up_now": bool(row[0]), "alt_now": float(a[0])}
-            )
+            entry = {
+                **t,
+                "up": float(row.sum() * dt),
+                "up_now": bool(row[0]),
+                "alt_now": float(a[0]),
+            }
+            if az_window is not None:
+                spans, k = [], 0
+                while k < n:
+                    if row[k]:
+                        j = k
+                        while j + 1 < n and row[j + 1]:
+                            j += 1
+                        lo, hi = times[k], times[j]
+                        if j < n - 1:  # it leaves after times[j]: stop starting well before
+                            hi -= timedelta(seconds=min(300.0, step / 2))
+                        spans.append((lo, hi))
+                        k = j + 1
+                    else:
+                        k += 1
+                entry["windows"] = [(a0, b0) for a0, b0 in spans if b0 > a0]
+                if not entry["windows"]:
+                    continue
+            out.append(entry)
     out.sort(key=lambda t: (not t["up_now"], -t["up"]))
     return out
+
+
+def _az_intersection(s: RehearsalSettings) -> tuple[float, float] | None:
+    """The azimuth range every ``--az-window`` allows (None: no window). A
+    simulated telescope observes the same plan, so it is restricted too."""
+    if not s.az_windows:
+        return None
+    lo = max(w[0] for w in s.az_windows.values())
+    hi = min(w[1] for w in s.az_windows.values())
+    if lo >= hi:
+        raise RehearsalRefused(f"the --az-window ranges do not overlap ({s.az_windows})")
+    return lo, hi
 
 
 def morning_twilight(start: datetime, limit: float = -12.0) -> datetime:
@@ -340,6 +389,11 @@ def make_requests(
     if n is None:
         n = max(3, math.ceil(real_seconds / (s.exptime + 60.0)) + 2)
     window = {"start": start.isoformat(), "end": end.isoformat()}
+
+    def windows(t: dict[str, Any]) -> list[dict[str, str]]:
+        if "windows" not in t:
+            return [window]
+        return [{"start": a.isoformat(), "end": b.isoformat()} for a, b in t["windows"]]
 
     def target(t: dict[str, Any]) -> dict[str, Any]:
         keep = ("proper_motion_ra", "proper_motion_dec", "epoch", "parallax")
@@ -377,7 +431,7 @@ def make_requests(
                     {
                         "id": f"{gid}-r",
                         "extra_params": {"telescopes": list(NAMES)},
-                        "windows": [window],
+                        "windows": windows(t),
                         "configurations": [
                             {
                                 "id": f"{gid}-spec",
@@ -399,7 +453,11 @@ def make_requests(
             w0, w1 = start + span * i / s.images, start + span * (i + 1) / s.images
             mid = w0 + (w1 - w0) / 2
             best = observable(
-                targets, mid, mid + timedelta(minutes=1), ignore_twilight=s.ignore_twilight
+                targets,
+                mid,
+                mid + timedelta(minutes=1),
+                ignore_twilight=s.ignore_twilight,
+                az_window=_az_intersection(s),
             )
             if not best:
                 continue
@@ -760,7 +818,9 @@ class Rehearsal(SimulatedNight):
                     f"the Sun is at {sun:.1f} deg: nothing is observed until it is below -12"
                     " (--ignore-twilight observes now; the enclosure is closed)"
                 )
-        targets = observable(catalog(), start, end, ignore_twilight=r.ignore_twilight)
+        targets = observable(
+            catalog(), start, end, ignore_twilight=r.ignore_twilight, az_window=_az_intersection(r)
+        )
         self.outcome.targets = targets
         entry = json.loads((SITES / "dispatch.example.json").read_text())
         entry.pop("_note", None)
