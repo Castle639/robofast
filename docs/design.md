@@ -448,7 +448,16 @@ can.
   parks every telescope in parallel; so does the startup recovery.
 - **Supervisor:** no lease unless every telescope reports `AtPark`
   (section 3.3); on a roll-off roof, `park_before_close` parks them all in
-  parallel within `park_wait`, then closes regardless.
+  parallel within `park_wait`, then closes regardless -- unless the
+  enclosure sets `require_park_before_close` (a roof that can hit a
+  telescope): then a *routine* close (lease released or expired, an
+  operator's stop, a mode switch, a duty expiry) waits until every
+  telescope reports `AtPark`, re-parking each pass, alarming, and raising a
+  critical alarm after `park_interlock_escalate`; it never closes on an
+  unparked telescope. An *emergency* close (weather unsafe or unknown, an
+  enclosure fault, a shutter error, the console's EMERGENCY CLOSE, the
+  supervisor stopping) still closes after `park_wait`, parked or not
+  (`robofast_core/safety.py`, "Closing on unparked telescopes").
 - **Collision checking hook.** Before every slew the telescope task asks a
   `SlewGuard` (default: allow). MEarth North's **collision checker** will be
   one: it vets each target and path against the other telescopes'
@@ -1055,6 +1064,8 @@ support is often worse. So:
 | `record_top_n` | 5 | runners-up and rejected candidates recorded per decision |
 | `park_before_close` | off | roll-off roofs: park every telescope (bounded, in parallel) before closing |
 | `park_wait` | 60 s | bound on that park |
+| `require_park_before_close` | off | the park-before-close interlock: a routine close waits until every telescope reports `AtPark`; emergencies still close after `park_wait` (needs `park_before_close`) |
+| `park_interlock_escalate` | 300 s | a routine close held back by the interlock this long raises a critical alarm (the enclosure stays open) |
 | `heartbeat_interval` | none | supervisor ping period; at most `heartbeat_timeout`/4, or the config is rejected |
 | `heartbeat_timeout` | none | the enclosure's own heartbeat timeout (Aqawan PAC: 60 s, confirmed); required with `heartbeat_interval` |
 | `fault_action` | none | the dome's read-only fault channel (Aqawan: `Faults`); any fault alarms and blocks opening, and a fault with the enclosure not closed closes it |
@@ -1088,10 +1099,13 @@ support is often worse. So:
 
 ## 7. Open decisions
 
-1. **Roll-off roof versus an unparked telescope.** If the telescope can't
-   be parked within `park_wait`, does the roof close anyway? The prototype
-   closes anyway: rain on the optics is worse than an unlikely roof contact.
-   Needs confirmation per enclosure (mechanical clearance).
+1. ~~**Roll-off roof versus an unparked telescope.**~~ **Answered** (JDE,
+   2026-11-02): an emergency close may close the roof on unparked
+   telescopes, but some roofs can hit some telescopes, so a routine close
+   there must wait for every telescope to park. Per enclosure:
+   `require_park_before_close` (section 3.5). Which enclosures need it is
+   still a per-site mechanical-clearance question; no shipped site config
+   sets it yet.
 2. The defaults in section 6.
 3. Where the legacy `robofast/` package's useful parts (YAML configs, HAL
    knowledge for Aqawan, APC PDU, IRF90, Paramount, DFM) move, and when
