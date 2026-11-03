@@ -168,6 +168,9 @@ class RehearsalSettings:
 
     real: dict[str, RealTelescope]
     end_action: EndAction = field(default_factory=EndAction)
+    #: ``{name: (lo, hi)}``: the mount guard refuses slews outside this
+    #: azimuth window (deg) for that real telescope (``--az-window``).
+    az_windows: dict[str, tuple[float, float]] = field(default_factory=dict)
     #: Real seconds of the scheduler's clock; the rehearsal ends after this
     #: or at morning twilight, whichever first.
     duration: float = 2 * 3600.0
@@ -631,6 +634,7 @@ class Rehearsal(SimulatedNight):
             site=(MINERVA.latitude, MINERVA.longitude),
             clock=self.clock,
             events=self.outcome.mount_events,
+            az_windows=self.r.az_windows,
         ).start()
         self._stack.callback(self.guard.stop)
         for name in self.r.real:
@@ -1161,6 +1165,23 @@ def _named(values: list[str], what: str) -> dict[str, str]:
     return out
 
 
+def _az_windows(specs: list[str], real: dict[str, Any]) -> dict[str, tuple[float, float]]:
+    """``NAME=LO,HI`` (deg) for real telescopes."""
+    out = {}
+    for spec in specs:
+        name, _, rng = spec.partition("=")
+        try:
+            lo, hi = (float(x) for x in rng.split(","))
+        except ValueError:
+            raise RehearsalRefused(f"--az-window {spec!r}: expected NAME=LO,HI") from None
+        if name not in real:
+            raise RehearsalRefused(f"--az-window {name}: not a real telescope (--telescope)")
+        if not 0 <= lo < hi <= 360:
+            raise RehearsalRefused(f"--az-window {spec!r}: need 0 <= LO < HI <= 360")
+        out[name] = (lo, hi)
+    return out
+
+
 def settings_from_args(args: argparse.Namespace) -> RehearsalSettings:
     if not args.i_know_the_enclosure_is_closed:
         raise RehearsalRefused(
@@ -1193,6 +1214,7 @@ def settings_from_args(args: argparse.Namespace) -> RehearsalSettings:
         return RehearsalSettings(
             real=real,
             end_action=EndAction.parse(args.end_action),
+            az_windows=_az_windows(args.az_window, real),
             duration=args.duration,
             exptime=args.exptime,
             images=args.images,
@@ -1239,6 +1261,13 @@ def main(argv: list[str] | None = None) -> int:
         default="leave",
         help="each real mount at the end (also on Ctrl-C or an error): 'leave' (tracking off,"
         " where it is; default) or 'altaz:ALT,AZ' (tracking off, slew there)",
+    )
+    ap.add_argument(
+        "--az-window",
+        action="append",
+        metavar="NAME=LO,HI",
+        default=[],
+        help="refuse a real mount's slews whose target azimuth is outside LO..HI deg",
     )
     ap.add_argument(
         "--duration", type=parse_duration, default="2h", help="e.g. 2h, 90m (default 2h)"

@@ -13,7 +13,7 @@ import pytest
 
 from robofast_core.testing.alpaca_server import FakeAlpacaServer
 from robofast_core.testing.fakes import FakeCamera, FakeFocuser, FakeTelescope
-from robofast_core.testing.mount_guard import Endpoint, MountGuard, lst_hours
+from robofast_core.testing.mount_guard import Endpoint, MountGuard, azimuth, lst_hours
 from robofast_core.testing.rehearsal import (
     MAX_ALT,
     MIN_ALT,
@@ -111,6 +111,31 @@ def test_the_guard_refuses_slews_outside_the_limits(mount, guard):
     assert slew["error_arcsec"] == 0.0 and 60 < slew["alt"] < 75 and "seconds" in slew
 
 
+def test_the_guard_refuses_slews_outside_the_azimuth_window(mount):
+    m, _, srv = mount
+    ep = Endpoint.parse(f"{srv.address}/0")
+    g = MountGuard(
+        {"t1": {"telescope": ep, "focuser": ep, "rotator": None}},
+        limits=(MIN_ALT, MAX_ALT),
+        site=(MINERVA.latitude, MINERVA.longitude),
+        clock=lambda: NIGHT,
+        az_windows={"t1": (117.0, 264.0)},
+    ).start()
+    try:
+        lst = lst_hours(NIGHT, MINERVA.longitude)
+        assert round(azimuth(lst, 0.0, lst, MINERVA.latitude)) == 180
+        put(g, "telescope/0/tracking", Tracking=True)
+        # Up but in the north (Dec 60 on the meridian, az 0) and low in the east-northeast.
+        for ra, dec in ((lst, 60.0), (lst + 4.0, 30.0)):
+            r = put(g, "telescope/0/slewtocoordinatesasync", RightAscension=ra, Declination=dec)
+            assert r["ErrorNumber"] == 0x401 and "window" in r["ErrorMessage"], r
+        assert (m.ra, m.dec) == (0.0, 0.0) and len(g.refused) == 2
+        r = put(g, "telescope/0/slewtocoordinatesasync", RightAscension=lst, Declination=10.0)
+        assert r["ErrorNumber"] == 0 and (m.ra, m.dec) == (lst, 10.0)
+    finally:
+        g.stop()
+
+
 def test_the_guard_refuses_everything_else(mount, guard):
     m, foc, _ = mount
     m.port_action = "SelectPort"
@@ -146,6 +171,7 @@ def args(**kw) -> argparse.Namespace:
         spectra=None,
         ignore_twilight=False,
         console_port=-1,
+        az_window=[],
     )
     base.update(kw)
     return argparse.Namespace(**base)
@@ -185,6 +211,11 @@ def test_settings_from_args():
     assert (s.end_action.alt, s.end_action.az) == (60.0, 180.0)
     assert parse_duration("2h") == 7200 and parse_duration("1h30m") == 5400
     assert parse_duration("90") == 90
+    s = settings_from_args(args(az_window=["t1=117,264"]))
+    assert s.az_windows == {"t1": (117.0, 264.0)}
+    for bad in (["t9=1,2"], ["t1=264,117"], ["t1=x"]):
+        with pytest.raises(RehearsalRefused):
+            settings_from_args(args(az_window=bad))
 
 
 def test_preflight_refuses_a_parked_mount_and_connects_the_camera(mount):
