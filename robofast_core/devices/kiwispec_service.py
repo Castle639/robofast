@@ -1034,6 +1034,8 @@ class KiwiSpec:
             + c.exposure_margin
             + c.save_timeout
             + c.abort_timeout
+            # the raw file's rewrite: its wait to appear, and the rewrite
+            + (float(c.raw_fits.get("wait", 30.0)) + 60.0 if c.raw_fits else 0.0)
         )
 
     async def _drop_camera(self) -> None:
@@ -1166,6 +1168,10 @@ class KiwiSpec:
         self._acquisition = acq
         t0 = time.monotonic()
         start_utc = self.clock()
+        # The FAU frames carry the guiders' wall-clock (Unix, NTP) times: the
+        # exposure window is matched against them in the same time, even
+        # when a simulation runs this service on a scaled clock.
+        start_unix = time.time()
         ended_by, samples, failures = "time", [(0.0, 0.0)], 0
         end = f.exptime
         try:
@@ -1183,8 +1189,7 @@ class KiwiSpec:
                     async with asyncio.timeout(wait):
                         await self._wake()
                 if fau and f.target_counts is not None and not self._abort.is_set():
-                    now = self.clock().timestamp()
-                    got = self._fau(f.telescopes, start_utc.timestamp(), now).counts
+                    got = self._fau(f.telescopes, start_unix, time.time()).counts
                     if got >= f.target_counts:
                         ended_by = "counts"
                         end = time.monotonic() - t0
@@ -1240,7 +1245,7 @@ class KiwiSpec:
             midpoint, counts = flux_weighted_midpoint(shifted, 0.0, end)
         if fau:
             # The readout gave the guiders time to report the last frames.
-            t_start = start_utc.timestamp()
+            t_start = start_unix
             res = self._fau(f.telescopes, t_start, t_start + end)
             fau_counts, fau_detail = res.counts, res.telescopes
             best = max((v["coverage"] for v in res.telescopes.values()), default=0.0)
@@ -1584,7 +1589,7 @@ class KiwiSpecServer:
                 if tel not in self.config.telescopes:
                     raise ValueError(f"unknown telescope {tel!r}; known: {self.config.telescopes}")
                 frames = parse_frames(args.get("frames"))
-                kept = k.flux.add(tel, frames, k.clock().timestamp())
+                kept = k.flux.add(tel, frames, time.time())
                 return 200, {"telescope": tel, "accepted": len(frames), "kept": kept}
             if method == "POST" and parts == ["restart_camera"]:
                 wait, client = queue_args(args)
