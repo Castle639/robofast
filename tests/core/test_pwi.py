@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import json
 import socket
+import tempfile
 import time
 from pathlib import Path
 
@@ -37,6 +38,7 @@ from robofast_core.devices.pwi_client import (
     parse_pwi2_status,
     parse_pwi4_status,
 )
+from robofast_core.devices.pwi_homed import HomeRecord, encoders_reset
 from robofast_core.devices.pwi_jog import Jog, JogRefused, plan_altaz, plan_radec
 from robofast_core.devices.pwi_jog import main as jog_main
 from robofast_core.devices.pwi_server import PWIConfig, PWIServer, target_altaz
@@ -71,6 +73,8 @@ def config(port: int, backend: str, **kw) -> PWIConfig:
         "m3_timeout": 5.0,
         "request_timeout": 5.0,
         "allow_find_home": True,
+        # Never the real data directory's record.
+        "home_record": str(Path(tempfile.mkdtemp(prefix="pwi-home-")) / "home.json"),
     }
     return PWIConfig.from_dict({**base, **kw})
 
@@ -184,7 +188,7 @@ def test_remote_configs_need_hardware_flag(name):
     d = json.loads(path.read_text())
     cfg = PWIConfig.from_dict(d)
     assert cfg.allow_hardware and cfg.pwi.host == "127.0.0.1"
-    assert cfg.min_alt == 21.0 and cfg.max_alt == 83.0 and cfg.max_jog_deg <= 1.0
+    assert cfg.min_alt == 21.0 and cfg.max_alt == 83.0 and cfg.max_jog_deg <= 10.0
     with FakeTunnel() as tunnel:  # the tunnel, on a free port
         d["pwi"]["port"] = tunnel.port
         with pytest.raises(hwgate.HardwareNotAllowed):
@@ -354,8 +358,14 @@ async def test_stop_action_needs_no_connection(make, backend):
 
 
 @pytest.mark.parametrize("backend", BACKENDS)
-async def test_limit_watch_stops_a_mount_going_low(make, backend):
-    sim, server = make(backend, sim_kw={"slew_rate": 5.0, "alt": 24.0})
+@pytest.mark.parametrize(
+    ("rate", "start", "low", "high"), [(5.0, 24.0, 19.0, 21.5), (15.0, 50.0, 26.0, 28.6)]
+)
+async def test_limit_watch_stops_a_mount_going_low(make, backend, rate, start, low, high):
+    """A stop coasts (stop_distance 8 deg from 15 deg/s): the watch stops a
+    mount heading for the limit early enough that it would come to rest
+    inside it. (The simulator stops dead, so it ends where the stop was sent.)"""
+    sim, server = make(backend, sim_kw={"slew_rate": rate, "alt": start})
     # Something else (not robofast) slews it toward the horizon.
     with sim.model.lock:
         sim.model.goto_altaz(5.0, 90.0)
@@ -363,7 +373,18 @@ async def test_limit_watch_stops_a_mount_going_low(make, backend):
     # The count goes up just before the stop is sent.
     await until(lambda: _async(not sim.model.state()["slewing"]), timeout=3, what="stopped")
     st = sim.model.state()
-    assert not st["slewing"] and 17.0 < st["alt"] < 19.0
+    assert not st["slewing"] and low < st["alt"] < high
+
+
+@pytest.mark.parametrize("backend", BACKENDS)
+async def test_limit_watch_leaves_a_fast_slew_to_a_target_inside_the_limits(make, backend):
+    sim, server = make(backend, sim_kw={"slew_rate": 15.0, "alt": 70.0})
+    tel = await device(server)
+    await tel.put("SlewToAltAzAsync", Altitude=21.0, Azimuth=90.0, timeout=T)
+    await until(lambda: _not(tel.get("Slewing", timeout=T)), timeout=10, what="slew end")
+    assert abs(sim.model.state()["alt"] - 21.0) < 0.01
+    assert server.mount.watch_stops == 0
+    await tel.aclose()
 
 
 async def _async(v):
@@ -736,3 +757,164 @@ async def test_jog_home_refusals():
     finally:
         await jog.pwi.aclose()
         sim.stop()
+
+
+# -- real-hardware behaviour of PWI4 4.1.6 (docs/pwi.md) --------------------------------------
+
+
+async def test_slew_beyond_pwi4s_own_limit_fails_and_stops(make):
+    """PWI4 takes a goto below its own altitude limit, stops at the limit and
+    reports slewing forever: the server stops it and Slewing says why."""
+    sim, server = make(
+        "pwi4", sim_kw={"pwi_min_alt": 25.0, "alt": 40.0}, stall_time=0.5, slew_report_min=0.1
+    )
+    tel = await device(server)
+    await tel.put("SlewToAltAzAsync", Altitude=22.0, Azimuth=90.0, timeout=T)
+    with pytest.raises(Exception, match="beyond PWI's own axis limits"):
+        await until(lambda: _not(tel.get("Slewing", timeout=T)), timeout=10, what="slew")
+    st = sim.model.state()
+    assert not st["slewing"] and abs(st["alt"] - 25.0) < 0.01
+    assert "/mount/stop" in sim.model.commands
+    # Sticky until the next command.
+    with pytest.raises(Exception, match="slew failed"):
+        await tel.get("Slewing", timeout=T)
+    await tel.put("SlewToAltAzAsync", Altitude=40.0, Azimuth=90.0, timeout=T)
+    await until(lambda: _not(tel.get("Slewing", timeout=T)), timeout=10, what="slew 2")
+    assert abs(sim.model.state()["alt"] - 40.0) < 0.01
+    await tel.aclose()
+
+
+async def test_jog_stops_a_slew_stuck_at_pwi4s_limit():
+    sim = PWISim(
+        "pwi4", ready=True, homed=True, report_homed=True, alt=30.0, az=100.0, pwi_min_alt=29.5
+    ).start()
+    jog, out, _ = jog_for(sim, "pwi4", stall_time=0.5)
+    try:
+        assert not await jog.altaz(-1.0, 0.0)
+        assert any("beyond PWI's own axis limits" in line for line in out)
+        assert not sim.model.state()["slewing"]
+    finally:
+        await jog.pwi.aclose()
+        sim.stop()
+
+
+@pytest.mark.parametrize("backend", BACKENDS)
+async def test_select_port_resends_an_ignored_m3_goto(make, backend):
+    sim, server = make(backend, m3_resend_after=0.5)
+    tel = await device(server)
+    sim.model.m3_drops = 1
+    out = json.loads(await tel.call("Action", "SelectPort", "2", timeout=10))
+    assert out == {"port": 2, "moved": True}
+    assert server.mount.m3_resends == 1
+    assert "m3_goto" in sim.model.state()["ignored"]
+    # Every goto ignored: bounded retries, then an error and m3 stop.
+    sim.model.m3_drops = 10
+    with pytest.raises(Exception, match="M3 not at port 1"):
+        await tel.call("Action", "SelectPort", "1", timeout=20)
+    gotos = [c for c in sim.model.commands if "m3" in c and ("goto" in c or "select" in c)]
+    assert len(gotos) == 2 + 3  # two for port 2, then 1 + m3_retries (2) for port 1
+    assert any("m3" in c and "stop" in c for c in sim.model.commands)
+    await tel.aclose()
+
+
+def test_pwi4_m3_port_minus_one_is_moving():
+    st = parse_pwi4_status(
+        "pwi4.version=4.1.6.0\nmount.is_connected=true\nmount.altitude_degs=40\n"
+        "mount.azimuth_degs=100\nmount.ra_apparent_hours=1\nmount.dec_apparent_degs=2\n"
+        "m3.exists=1\nm3.port=-1\n"
+    )
+    assert st.m3_port == 0 and st.m3_moving
+
+
+HOME = {"home_alt": 60.0, "home_az": 180.0}  # the simulator's home
+
+
+async def test_pwi4_home_is_recorded_and_survives_a_server_restart(make):
+    sim, server = make("pwi4", sim_kw={"report_homed": False, "homed": False}, **HOME)
+    path = server.config.home_record
+    tel = await device(server)
+    await tel.put("FindHome", timeout=T)
+    await until(lambda: tel.get("AtHome", timeout=T), what="home")
+    assert HomeRecord(path).axes(await server.mount.pwi.status()) == {0, 1}
+    await tel.aclose()
+    server.stop()
+    # A new server (same record) may move at once.
+    server2 = PWIServer(config(sim.port, "pwi4", home_record=path, **HOME)).start()
+    try:
+        tel2 = await device(server2)
+        await tel2.put("SlewToAltAzAsync", Altitude=40.0, Azimuth=100.0, timeout=T)
+        await until(lambda: _not(tel2.get("Slewing", timeout=T)), what="slew")
+        # A controller power cycle: encoders read 0, PWI disconnected.
+        sim.model.power_cycle()
+        await until(lambda: _async(not Path(path).exists()), what="record dropped")
+        sim.model.connect()
+        sim.model.enable()
+        with sim.model.lock:
+            sim.model.alt, sim.model.az = 40.0, 100.0  # even if moved away since
+        with pytest.raises(InvalidOperationException, match="homed state unknown"):
+            await tel2.put("SlewToAltAzAsync", Altitude=45.0, Azimuth=100.0, timeout=T)
+        await tel2.aclose()
+    finally:
+        server2.stop()
+
+
+async def test_pwi4_home_ending_elsewhere_is_not_counted(make):
+    """PWI4 can abort its fine search and stop away from home."""
+    _, server = make(
+        "pwi4", sim_kw={"report_homed": False, "homed": False}, home_alt=50.0, home_az=180.0
+    )
+    tel = await device(server)
+    await tel.put("FindHome", timeout=T)
+    await until(lambda: tel.get("AtHome", timeout=T), what="home")
+    with pytest.raises(InvalidOperationException, match="homed state unknown"):
+        await tel.put("SlewToAltAzAsync", Altitude=40.0, Azimuth=100.0, timeout=T)
+    assert HomeRecord(server.config.home_record).load() is None
+    await tel.aclose()
+
+
+async def test_jog_home_records_and_forget_home():
+    sim = PWISim("pwi4", ready=True, slew_rate=20.0, home_time=0.2, version="4.1.6.0").start()
+    jog, out, cfg = jog_for(sim, "pwi4", **HOME)
+    try:
+        with pytest.raises(JogRefused, match="NOT REPORTED"):
+            await jog.altaz(0.5, 0.0)
+        assert await jog.home(None)
+        assert any("home recorded" in line for line in out)
+        assert await jog.altaz(-0.5, 0.0)  # no override needed now
+        # A second jog process sees the same record.
+        jog2, _, _ = jog_for(sim, "pwi4", home_record=cfg.home_record, **HOME)
+        assert await jog2.altaz(0.5, 0.0)
+        await jog2.pwi.aclose()
+        jog.forget_home()
+        with pytest.raises(JogRefused, match="NOT REPORTED"):
+            await jog.altaz(0.5, 0.0)
+        # A record from another PWI version does not count.
+        await jog.home(None)
+        sim.model.version = "4.1.7.0"
+        with pytest.raises(JogRefused, match="NOT REPORTED"):
+            await jog.altaz(0.5, 0.0)
+    finally:
+        await jog.pwi.aclose()
+        sim.stop()
+
+
+async def test_jog_home_without_configured_home_is_not_recorded():
+    sim = PWISim("pwi4", ready=True, slew_rate=20.0, home_time=0.2).start()
+    jog, out, cfg = jog_for(sim, "pwi4")
+    try:
+        assert not await jog.home(None)
+        assert any("home NOT recorded" in line and "home_alt" in line for line in out)
+        assert HomeRecord(cfg.home_record).load() is None
+    finally:
+        await jog.pwi.aclose()
+        sim.stop()
+
+
+def test_encoders_reset_needs_both_axes_near_zero():
+    st = parse_pwi4_status(
+        "pwi4.version=4.1.6.0\nmount.is_connected=true\nmount.altitude_degs=0.01\n"
+        "mount.azimuth_degs=359.9\nmount.ra_apparent_hours=1\nmount.dec_apparent_degs=2\n"
+    )
+    assert encoders_reset(st)
+    st.alt_deg = 25.0  # parked at az 0 is not a reset
+    assert not encoders_reset(st)

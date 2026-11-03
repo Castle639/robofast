@@ -39,7 +39,7 @@ Actions on the telescope:
 
 | Action | Parameters | Does |
 |---|---|---|
-| `SelectPort` | `"1"`, `"2"` or a `ports` name (`"imager"`, `"fau"`) | M3 to that port; waits until PWI reports it (`m3_timeout`; then `m3 stop` and an error). The sequencer's `port_action`. |
+| `SelectPort` | `"1"`, `"2"` or a `ports` name (`"imager"`, `"fau"`) | M3 to that port; waits until PWI reports it (`m3_timeout` in all; then `m3 stop` and an error). A goto PWI ignored (the reported port unchanged after `m3_resend_after` s) is sent again, at most `m3_retries` times. The sequencer's `port_action`. |
 | `Offset` | `{"east": E, "north": N}` arcsec on the sky | RA/Dec offset (RA `E / cos Dec`); tracking; at most `max_offset` |
 | `MountConnect` | | PWI connects to the mount controller (moves nothing) |
 | `MotorsEnable` / `MotorsDisable` | | both axis motors |
@@ -83,7 +83,7 @@ Status fields read (`PWIStatus`): PWI4 `mount.is_connected`,
 PWI4 also: `pwi4.version`, and `mount.axisN.is_homed` where present (PWI4
 4.1.4 had none, and the changelog documents no homed status key; PWI4
 4.1.2+ "remembers if [a CDK700 has] been homed since the last power
-cycle" but how it reports that over HTTP is to be seen on T1).
+cycle", but 4.1.6 reports nothing of it over HTTP: see "The home record").
 
 Quirks handled:
 
@@ -94,14 +94,37 @@ Quirks handled:
 * **PWI4 reports only the GUI-selected focuser and rotator** ("Select from
   M3" must be ticked in PWI4; nothing in the API can check it), and
   `rotator.mech_position_degs` is always Rotator index 0's.
+* **PWI4 accepts a goto beyond its own axis limits** (HTTP 200, no error),
+  decelerates to exactly the limit, and then reports `mount.is_slewing`
+  (and `is_tracking`) true forever. The server watches every slew it sent:
+  slewing while the mount moves less than `stall_move` deg in `stall_time`
+  s is a failed slew. It sends stop, and `Slewing` raises the reason (the
+  target is probably beyond PWI's own limit) until the next slew or
+  `AbortSlew`. The jog tool stops such a move too.
+* **PWI4 can ignore an M3 goto**: `/m3/goto?port=1` sent about 3 s after the
+  M3 had arrived at port 2 answered 200, and the M3 never moved (still port 2
+  after 120 s); sent again later it took 6 s. `SelectPort` re-sends a goto
+  the M3 has not started on (see Actions). `m3.port` reads -1 while the M3
+  moves, and may read -1 or stale just after PWI4 starts.
+* **PWI4 configuration keys are dotted** (`Axis0.HomePositionDegs`,
+  `Axis1.NegativeSoftwareLimitDegs`); an undotted name is silently ignored.
 
 ## Homing
 
-Homing drives each axis to its home sensor. On T1 the home sensor was
-replaced years ago and a PWI2 setting for the home-sensor direction was
-changed then (PWI2 kept `settingsMount.20161219.badhome.xml` next to
-`settingsMount.xml`), so a PWI4 configured from defaults may home the wrong
-way. Therefore:
+`/mount/find_home` under PWI4 4.1.6 homed both CDK700s from every start
+position tried (17 of 17 runs on one, 11 of 11 on the other), in 33-58 s:
+
+* The altitude home sensor is a single edge; its state tells the controller
+  which way to go.
+* Azimuth first drives to the NoWrap sensor (66 deg above home on one
+  mount, 93 deg below on the other), then back to home, so expect up to
+  about 100 deg of azimuth travel.
+* PWI4 aborts an axis after 30 s of its own fine search if the sensor's
+  hysteresis is wide (seen once): the axis stops away from home.
+* Until the first home after a controller power cycle the encoder positions
+  mean nothing (both axes read about 0 deg).
+
+What robofast does:
 
 * **Nothing homes implicitly**: not starting, not connecting, not enabling,
   not before a slew. The server's `FindHome` (Alpaca, and the `FindHome`
@@ -113,17 +136,44 @@ way. Therefore:
   0.5 deg -- what a PWI4 that ignored the axis parameter would do.
 * One axis at a time needs PWI4 4.1.7 or later (by `pwi4.version`; the
   axis parameter arrived in 4.1.7 beta 3, and a 4.1.7 beta 1 or 2 that
-  ignored it would be caught by the other-axis watch). T1 runs PWI4 4.1.6:
-  per-axis homing needs a PWI4 upgrade there. PWI2 homes both together.
+  ignored it would be caught by the other-axis watch). On PWI4 4.1.6 home
+  both axes together. PWI2 homes both together.
 * **Moves are refused while the mount is not homed**: slews, park,
   tracking on, offsets, pulses, and the jog's `altaz`/`radec`. Homed means
-  PWI2 `encoders_have_been_set`, or PWI4 `axisN.is_homed` where reported;
-  a PWI4 that reports nothing counts as not homed until robofast's server
-  has homed both axes itself. The engineering override is
+  PWI2 `encoders_have_been_set`, PWI4 `axisN.is_homed` where reported, or
+  robofast's **home record** (below). The engineering override is
   `"allow_unhomed_moves": true` in the config **and** `--allow-unhomed` on
-  the command line (server or jog); every such move is logged as a
-  warning. The MINERVA remote configs set the config half for the first
-  session (small jogs before homing, to see which way each axis goes).
+  the command line (server or jog); every such move is logged as a warning.
+
+### The home record (PWI4)
+
+PWI4 4.1.6's `/status` has no homed flag, so robofast keeps its own
+evidence (`robofast_core/devices/pwi_homed.py`): a JSON file per telescope,
+`$ROBOFAST_DATA_DIR/pwi-homed/<name>.json` (or `home_record` in the
+config), shared by the server and the jog tool.
+
+* **Written** only when a home robofast commanded (`robofast-pwi-jog home`,
+  or the server's `FindHome`) ends with the mount still and each homed axis
+  within `home_tolerance` (deg) of the config's `home_alt` / `home_az`:
+  where PWI4 reports the mount after a good home. A home that ends
+  elsewhere (an aborted fine search) is not recorded, and the jog prints
+  where it ended. Without `home_alt`/`home_az` nothing is recorded (the
+  server counts its own home until it stops, as before).
+* **Dropped** (the file removed) as soon as the server or the jog sees PWI
+  not connected to the mount (a PWI4 restart or a controller power cycle),
+  both axes reading within 1 deg of 0 (the encoders after a power cycle), or
+  a PWI version other than the one that homed. Reconnecting does not bring
+  it back: home again.
+* `robofast-pwi-jog forget-home` drops it by hand. What it cannot see: a
+  controller power cycle while nothing of robofast's reads PWI, followed by
+  a move away from 0 by another client. After any power cycle, home again
+  or run `forget-home`.
+
+So the operator's path after a power cycle is: `connect`, `enable`,
+`home --axis both` (watching the webcam), and the record lets the server
+and jogs move without any override. To set `home_alt`/`home_az` for a
+mount, home it once, check it on the webcam, and copy the position the jog
+prints.
 
 The PWI version (PWI4 `pwi4.version`; PWI2 reports none) is logged by the
 server at start and on any change, by the jog at its first read, and is in
@@ -144,13 +194,27 @@ source there (a later step).
   goto (RA/Dec targets via PWI's sidereal time and the configured
   latitude, J2000 precessed to date). Motion also needs the mount connected,
   both motors enabled and no PWI2 drive error.
-* **Limit watch**: every `watch_interval` s, if the mount is outside the
-  limits by more than `limit_margin` and still moving further out (a
-  tracked target setting, motion commanded by something else), the server
-  sends `stop`. It never commands motion.
+* **A stop is not instant**: from full slew speed (15 deg/s, with
+  15 deg/s^2 deceleration configured in PWI4) a CDK700 coasted 6-8 deg after
+  `/mount/stop` (measured 5.9 and 7.4 deg in azimuth and altitude on one
+  mount, 7.2 and 8.1 on the other, PWI4 4.1.6). Anything that stops the
+  mount at a limit must act that far before it. The config's
+  `stop_distance` (default 8 deg) at `slew_speed` (default 15 deg/s) is that
+  coast; at speed v robofast assumes `stop_distance * (v / slew_speed)^2`
+  (constant deceleration) plus one `watch_interval` of travel.
+* **Limit watch**: every `watch_interval` s the server sends `stop` if the
+  mount is outside the limits by more than `limit_margin` and still moving
+  further out (a tracked target setting), or if it is heading out fast
+  enough that it would coast past `limit_margin` after a stop (motion
+  commanded by something else). A slew the server itself sent to a target
+  inside the limits is left to PWI's own deceleration unless the mount
+  passes that target by more than `limit_margin`. It never commands motion.
+  The jog tool applies the same coast to its own limit check.
+* **Stalled slews**: see "Quirks handled" (PWI4 at its own limit).
 * **Stop** is always reachable: Alpaca `AbortSlew`, Action `Stop` (no
   connection needed), `robofast-pwi-jog stop`, and PWI's own GUI.
-* Every PWI request has a timeout (`pwi.timeout`); nothing is retried.
+* Every PWI request has a timeout (`pwi.timeout`); nothing is retried,
+  except an M3 goto PWI visibly did not start on (bounded, `m3_retries`).
 
 ## Config
 
@@ -160,11 +224,14 @@ source there (a later step).
 3.10); with a focuser also `focus_min`, `focus_max`. Optional: `pwi`
 (`host`, `port`, `timeout`, `connect_timeout`), `allow_hardware`, `listen`,
 `focuser`, `rotator`, `rotator_status_port`, `ports`, `m3_timeout`,
-`max_offset`, `guide_rate`, `max_pulse_ms`, `limit_margin`,
-`watch_interval`, `moving_speed`, `slew_report_min`, `park_tolerance`,
-`status_max_age`, `request_timeout`, `aperture_diameter`, `focal_length`,
-`max_jog_deg`, `jog_timeout`, `home_timeout`, `allow_find_home`,
-`allow_unhomed_moves`, `discovery_port`.
+`m3_resend_after`, `m3_retries`, `max_offset`, `guide_rate`,
+`max_pulse_ms`, `limit_margin`, `watch_interval`, `stop_distance`,
+`slew_speed`, `stall_time`, `stall_move`, `moving_speed`,
+`slew_report_min`, `park_tolerance`, `status_max_age`, `request_timeout`,
+`aperture_diameter`, `focal_length`, `max_jog_deg` (at most 10),
+`jog_timeout`, `home_timeout`, `home_alt`, `home_az`, `home_tolerance`,
+`home_record`, `allow_find_home`, `allow_unhomed_moves`,
+`discovery_port`.
 
     robofast-pwi-server --config sites/minerva/remote/t1_pwi4.json --hardware [--allow-unhomed]
 
@@ -176,8 +243,12 @@ One CDK700 model behind either API. Motion needs connect + enable (start
 with `--ready` for connected, enabled and homed); slews at `--slew-rate`;
 the azimuth never crosses 0/360, so a goto from 359 to 1 deg goes the long
 way (as a mount's cable wrap might). Fault modes (`/robofast-sim/mode?mode=`):
-`hang`, `slow`, `garble`, `http500`. Loopback only, registered with
-`hwgate` while serving.
+`hang`, `slow`, `garble`, `http500`. The PWI4 behaviour seen on hardware is
+modelled too: `--pwi-min-alt` (a goto below PWI's own limit stops there and
+reports slewing forever), `m3.port` -1 while the M3 moves, dropped M3
+gotos (`CDK700Model.m3_drops`), and a controller power cycle
+(`CDK700Model.power_cycle`: disconnected, not homed, both axes at 0).
+Loopback only, registered with `hwgate` while serving.
 
 ## The jog tool
 
@@ -190,14 +261,17 @@ way (as a mount's cable wrap might). Fault modes (`/robofast-sim/mode?mode=`):
 | `connect` | PWI connects to the mount controller |
 | `enable` / `disable` | both axis motors (`enable` asks first) |
 | `tracking-off` | tracking off |
-| `home --axis 0\|1\|both` | find home (asks first; see "Homing") |
+| `home --axis 0\|1\|both` | find home (asks first; see "Homing"); records a home that ends at `home_alt`/`home_az` |
+| `forget-home` | drop robofast's home record |
 | `altaz --dalt D --daz D` | relative alt/az goto, each at most `max_jog_deg`; target inside the limits; tracking off; no azimuth move across 0/360; homed (or `--allow-unhomed`) |
 | `radec --dra A --ddec A` | relative RA/Dec offset in arcsec while tracking, each at most `max_jog_deg` x 3600 |
 
 A move prints its plan and waits for `yes` (or `--yes`), then prints the
 position every `--poll` s. It sends **stop** on Ctrl-C, after
 `jog_timeout`, if the mount moves more than planned + `--slack` deg from
-where it started, or if the altitude leaves the limits. Everything is
+where it started, if the altitude leaves the limits or heads out of them
+fast enough to coast past them, or if PWI reports slewing while the mount
+does not move (`stall_time`). Everything is
 logged to `$ROBOFAST_DATA_DIR/pwi-jog/<name>.log` (or `--log`).
 
 ## PWI4 on the network
@@ -249,8 +323,13 @@ Checklist (before any command that moves):
    | azimuth CW limit: hard / goto / track | 510 / 450 / 480 deg | |
    | azimuth CCW limit: hard / goto / track | -150 / -90 / -130 deg | |
 
-   Which PWI4 setting each maps to is to be confirmed with PlaneWave.
-   robofast's own limits stay tighter: `min_alt` 21, `max_alt` 83 (legacy
+   PWI4 was set to match (its keys are dotted: `Axis0.HomePositionDegs`,
+   `Axis1.NegativeSoftwareLimitDegs`; an undotted key is silently
+   ignored), and homing then worked from every start position ("Homing").
+   With PWI4's home positions equal to PWI2's (the same encoder frame) PWI4
+   loads PWI2's `.PXP` pointing-model files directly
+   (`/mount/model/load?filename=`, from PWI4's own GUI or by hand: robofast
+   does not send it). robofast's own limits stay tighter: `min_alt` 21, `max_alt` 83 (legacy
    scheduler); the jog refuses any azimuth move across 0/360 rather than
    modelling the -90..450 deg wrap.
 
@@ -270,14 +349,12 @@ Sequence (T1 on PWI4, through the 7141 tunnel):
     $J --allow-unhomed altaz --dalt -0.2    # back
     $J --allow-unhomed altaz --daz 0.2      # azimuth (away from 0/360)
     $J --allow-unhomed altaz --daz -0.2
-    # 4. Settings checked (checklist 7)? Home one axis at a time (PWI4 4.1.7+):
-    $J home --axis 1                   # altitude; asks yes; stop at hand
-    $J home --axis 0                   # azimuth
-    #    On PWI4 4.1.6 (T1 today) per-axis homing is refused: upgrade PWI4,
-    #    or home both axes together with stop at hand:
-    #    $J home --axis both
-    $J status                          # homed 1?
-    # 5. Homed: jogs without the override.
+    # 4. Settings checked (checklist 7)? Home (33-58 s; azimuth may first
+    #    travel ~100 deg to its NoWrap sensor). Both axes on PWI4 4.1.6;
+    #    one at a time (--axis 1, then --axis 0) needs PWI4 4.1.7+.
+    $J home --axis both                # asks yes; stop at hand
+    $J status                          # "home record: axes [0, 1]"
+    # 5. Homed (recorded): jogs without the override.
     $J altaz --dalt 0.5
     $J stop                            # any time
 
@@ -286,6 +363,21 @@ right amount, and that each home goes toward its sensor. Only then the
 server (`robofast-pwi-server --config $C --hardware`) and Alpaca clients.
 On PWI2 (T1 config `t1_pwi2.json`, tunnel 7101) the steps are the same
 except that `home --axis both` is the only home.
+
+## Measured on hardware
+
+Two CDK700s under PWI4 4.1.6 (2026-11):
+
+| What | Measured |
+|---|---|
+| Slew of 10-40 deg | 6-10 s; final error at most 2 arcsec |
+| Repeatability (returning to a position) | 0.1-0.3 arcsec |
+| Tracking servo error | 0.06-0.12 arcsec rms |
+| Stop from full slew speed (15 deg/s, 15 deg/s^2) | coasts 6-8 deg ("Safety") |
+| Home (`/mount/find_home`) | 33-58 s, from any start ("Homing") |
+| M3 port 1 to 2 / 2 to 1 | 5.7-10.7 s / 6-41 s |
+| Rotator (`/rotator/goto_mech?degs=`; the parameter is `degs`) | about 2.3 deg/s; ends 2-6 arcsec short of the target |
+| `/status` latency | about 2 ms on the telescope PC (an SSH tunnel adds its round trip) |
 
 ## To check on hardware
 
@@ -299,8 +391,8 @@ except that `home --axis both` is the only home.
 * Whether PWI4's `/mount/find_home` reports `is_slewing` while homing.
 * The per-axis home request: `/mount/findhome?axis=0|1` (changelog
   spelling; the older both-axes command is `/mount/find_home`), axis 0 =
-  azimuth, 1 = altitude; and whether PWI4 reports homed state over HTTP.
-* T1's home-sensor direction in PWI4 (checklist 7).
+  azimuth, 1 = altitude (PWI4 4.1.7+). PWI4 4.1.6 reports no homed state
+  over HTTP (hence the home record); whether a later PWI4 does.
 * The azimuth cable wrap: which way PWI takes for a goto near the wrap
   limits (the jog refuses azimuth moves across 0/360 meanwhile).
 * Focuser positions (microns) and rotator mechanical angles match legacy.

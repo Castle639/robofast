@@ -20,7 +20,8 @@ Devices
   ``CanFindHome`` false); ``AtHome`` is true after it until the mount moves.
   Every slew, park, tracking-on, offset and pulse is **refused while the
   mount is not homed** (PWI2 ``encoders_have_been_set``; PWI4
-  ``axisN.is_homed`` where reported, else a home done by this server),
+  ``axisN.is_homed`` where reported, else a home robofast commanded that
+  ended at ``home_alt``/``home_az``: :mod:`~robofast_core.devices.pwi_homed`),
   unless ``"allow_unhomed_moves": true`` **and** ``--allow-unhomed``
   (engineering; every such move is logged as a warning). ``PulseGuide`` is a PWI RA/Dec offset of
   ``guide_rate`` (RA coordinate or Dec) arcsec/s times the duration (needs tracking). No sync, no
@@ -41,7 +42,9 @@ Actions (telescope)
 * ``SelectPort`` (:data:`PORT_ACTION`, the sequencer's ``port_action``):
   parameter ``"1"``/``"2"`` or a name from ``ports`` (e.g. ``"imager"``).
   Moves the M3 and waits until PWI reports the port (``m3_timeout``;
-  on a timeout it sends ``m3 stop`` and fails).
+  on a timeout it sends ``m3 stop`` and fails). A goto PWI ignored (the
+  port unchanged after ``m3_resend_after`` s) is sent again, at most
+  ``m3_retries`` times.
 * ``Offset``: ``{"east": E, "north": N}`` arcsec on the sky; RA offset
   ``E / cos(Dec)``. Needs tracking; refused beyond ``max_offset``.
 * ``MountConnect``: PWI connects to the mount controller (moves nothing).
@@ -61,7 +64,14 @@ Safety
 * A limit watch reads PWI every ``watch_interval`` s and sends ``stop`` if
   the mount is moving further outside [``min_alt`` - ``limit_margin``,
   ``max_alt`` + ``limit_margin``] (a tracked target setting, a slew the
-  limits did not foresee). It only ever stops.
+  limits did not foresee), or is heading out fast enough that it would
+  coast past them after a stop (``stop_distance``: 6-8 deg from full slew
+  speed on a CDK700). It only ever stops.
+* A slew this server sent that PWI reports slewing but that does not move
+  (``stall_time``, ``stall_move``) has failed -- PWI4 accepts a goto beyond
+  its own axis limits, stops at the limit and reports slewing forever: the
+  server stops the mount and ``Slewing`` raises the reason until the next
+  slew or ``AbortSlew``.
 * Every request to PWI has a timeout; every Alpaca request is bounded by
   ``request_timeout``.
 
@@ -89,6 +99,7 @@ import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from http.server import ThreadingHTTPServer
+from pathlib import Path
 from typing import Any
 
 from robofast_core import hwgate
@@ -118,6 +129,8 @@ from robofast_core.devices.pwi_client import (
     make_client,
     version_at_least,
 )
+from robofast_core.devices.pwi_homed import HomeRecord, not_at_home
+from robofast_core.devices.pwi_homed import default_path as default_home_path
 from robofast_core.devices.tcsgo_server import (
     COMMON_NAMES,
     _float_param,
@@ -201,7 +214,15 @@ class PWIConfig:
     rotator_status_port: int = 1
     #: Port names for SelectPort (``{"imager": 1, "fau": 2}``); "1"/"2" always work.
     ports: dict[str, int] = field(default_factory=dict)
-    m3_timeout: float = 30.0
+    #: SelectPort: give up (``m3 stop``) after this long in all (s). A
+    #: CDK700's M3 took 6-41 s from port 2 to 1 under PWI4 4.1.6. Keep it
+    #: below the sequencer's ``port_timeout`` (60 s).
+    m3_timeout: float = 50.0
+    #: PWI4 can accept an M3 goto and never move: if the reported port has
+    #: not changed this long (s) after a goto, send it again, at most
+    #: ``m3_retries`` times.
+    m3_resend_after: float = 10.0
+    m3_retries: int = 2
     #: Offset action bound, arcsec per axis.
     max_offset: float = 600.0
     #: PulseGuide: arcsec/s applied as a PWI offset, and the longest pulse.
@@ -210,6 +231,16 @@ class PWIConfig:
     #: The limit watch: margin (deg) and interval (s); interval 0 turns it off.
     limit_margin: float = 1.0
     watch_interval: float = 0.5
+    #: How far the mount coasts after a stop from ``slew_speed`` (deg/s): a
+    #: CDK700 under PWI4 (15 deg/s, 15 deg/s^2) coasted 6-8 deg. The limit
+    #: watch scales it with the square of the speed (docs/pwi.md, "Safety").
+    stop_distance: float = 8.0
+    slew_speed: float = 15.0
+    #: A slew robofast sent that PWI reports slewing but that has moved less
+    #: than ``stall_move`` deg in ``stall_time`` s has failed (PWI4 stops at
+    #: its own axis limits and reports slewing forever): stop, report.
+    stall_time: float = 3.0
+    stall_move: float = 0.001
     #: PWI2 cannot say whether an untracked mount moves: faster than this
     #: (deg/s, between two reads) counts as slewing.
     moving_speed: float = 0.02
@@ -226,6 +257,15 @@ class PWIConfig:
     #: homing drives the axes to their home sensors, which on a mount whose
     #: home sensor or its direction setting changed can mean the wrong way.
     allow_find_home: bool = False
+    #: Where PWI4 reports the mount (deg) at the end of a home. A home robofast
+    #: commanded that ends within ``home_tolerance`` of it is recorded in
+    #: ``home_record`` (default ``$ROBOFAST_DATA_DIR/pwi-homed/<name>.json``),
+    #: which is how robofast knows a PWI4 without a homed flag is homed
+    #: (:mod:`robofast_core.devices.pwi_homed`).
+    home_alt: float | None = None
+    home_az: float | None = None
+    home_tolerance: float = 1.0
+    home_record: str | None = None
     #: Moves while PWI does not report the mount homed are refused unless
     #: this is true AND the command line says --allow-unhomed (engineering).
     allow_unhomed_moves: bool = False
@@ -273,7 +313,26 @@ class PWIConfig:
                 raise ValueError(f"ports.{name}: {port} is not 1 or 2")
         if not 0 < cfg.max_jog_deg <= 10.0:
             raise ValueError("max_jog_deg must be in (0, 10]")
+        if cfg.stop_distance < 0 or cfg.slew_speed <= 0:
+            raise ValueError("need stop_distance >= 0 and slew_speed > 0")
+        if cfg.stall_time <= 0 or cfg.stall_move <= 0:
+            raise ValueError("need stall_time > 0 and stall_move > 0")
+        if cfg.m3_retries < 0 or cfg.m3_resend_after <= 0:
+            raise ValueError("need m3_retries >= 0 and m3_resend_after > 0")
+        if cfg.home_tolerance <= 0:
+            raise ValueError("home_tolerance must be > 0")
         return cfg
+
+    def home_record_path(self) -> Path:
+        return Path(self.home_record) if self.home_record else default_home_path(self.name)
+
+
+def coast_deg(config: PWIConfig, speed: float) -> float:
+    """How far (deg) a mount moving at ``speed`` (deg/s) goes before a stop
+    sent now takes hold: ``stop_distance`` scaled as the square of the
+    speed (constant deceleration), plus one ``watch_interval`` of travel."""
+    s = abs(speed)
+    return config.stop_distance * (s / config.slew_speed) ** 2 + s * config.watch_interval
 
 
 def _sep_deg(alt1: float, az1: float, alt2: float, az2: float) -> float:
@@ -337,6 +396,15 @@ class PWIMount:
         self.pulse_until = 0.0
         self._watch_latched = False
         self._park_task: asyncio.Task | None = None
+        #: The record of homes robofast commanded (a PWI4 without a homed flag).
+        self.home_record = HomeRecord(config.home_record_path())
+        #: A slew this server sent is under way: its target altitude (deg).
+        self._slew_active = False
+        self._goto_alt: float | None = None
+        self._stall_ref: tuple[float, float, float] | None = None  # (t, alt, az)
+        #: Why the last slew failed (Slewing raises it until the next command).
+        self.slew_error: str | None = None
+        self.m3_resends = 0
 
     # -- reads ----------------------------------------------------------------------
 
@@ -359,8 +427,16 @@ class PWIMount:
             self._prev = (t, st.alt_deg, st.az_deg)
         self._st, self._st_at = st, t
         if st.version != self.version:
+            if self.version is not None and self.homed_here:
+                self.homed_here.clear()
+                log.warning("PWI version changed: homes seen earlier no longer count")
             self.version = st.version
             log.warning("PWI (%s) version %s", st.backend, st.version or "not reported")
+        if st.homed is None:
+            why = self.home_record.observe(st)
+            if why is not None and self.homed_here:
+                self.homed_here.clear()
+                log.warning("homes seen earlier no longer count: %s", why)
 
     def _invalidate(self) -> None:
         self._st_at = -1e9
@@ -373,10 +449,61 @@ class PWIMount:
             self._invalidate()
         return st
 
+    def _arm_slew(self, target_alt: float) -> None:
+        """A slew this server sends: watch it for a stall (:meth:`_check_stall`)."""
+        self._slew_active = True
+        self._goto_alt = target_alt
+        self._stall_ref = None
+        self.slew_error = None
+
+    def _disarm_slew(self) -> None:
+        self._slew_active = False
+        self._goto_alt = None
+        self._stall_ref = None
+
+    async def _check_stall(self, st: PWIStatus) -> None:
+        """PWI4 accepts a goto beyond its own axis limits, stops at the limit
+        and reports slewing (and tracking) forever. A slew of ours that PWI
+        reports slewing but that has not moved ``stall_move`` deg in
+        ``stall_time`` s has failed: stop the mount and keep the reason in
+        :attr:`slew_error` (raised by Slewing)."""
+        if not self._slew_active:
+            return
+        cfg = self.config
+        now = time.monotonic()
+        if st.slewing is not True:
+            if now - self._moving_since > cfg.slew_report_min and self.speed < cfg.moving_speed:
+                self._disarm_slew()
+            self._stall_ref = None
+            return
+        ref = self._stall_ref
+        if ref is None or _sep_deg(st.alt_deg, st.az_deg, ref[1], ref[2]) > cfg.stall_move:
+            self._stall_ref = (now, st.alt_deg, st.az_deg)
+            return
+        if now - ref[0] < cfg.stall_time:
+            return
+        self._disarm_slew()
+        if self.park_state == "parking":
+            self.park_state = "unknown"
+        self.slew_error = (
+            f"slew failed: PWI reports slewing but the mount has not moved for"
+            f" {now - ref[0]:.1f} s (alt {st.alt_deg:.3f}, az {st.az_deg:.3f}); the target is"
+            " probably beyond PWI's own axis limits (PWI4 accepts such a goto, stops at its"
+            " limit and reports slewing forever). Mount stopped."
+        )
+        log.error("%s", self.slew_error)
+        with contextlib.suppress(PWIError):
+            await self._send(self.pwi.stop, "stop (slew stalled)")
+
     async def slewing(self) -> bool:
+        if self.slew_error is not None:
+            raise AlpacaException(DRIVER_ERROR, self.slew_error)
         if time.monotonic() - self._moving_since < self.config.slew_report_min:
             return True
         st = await self.status()
+        await self._check_stall(st)
+        if self.slew_error is not None:
+            raise AlpacaException(DRIVER_ERROR, self.slew_error)
         if await self.homing(st):
             return True
         if st.slewing:
@@ -405,17 +532,41 @@ class PWIMount:
             return True
         self._homing_since = None
         self._home_at = (st.alt_deg, st.az_deg)
-        if st.homed is not False and st.axes_homed is None:
-            self.homed_here |= set(self._homing_axes)
         log.info("homing done (axes %s); PWI homed: %s", self._homing_axes, st.homed)
+        if st.homed is None:
+            self._homed_without_flag(st, self._homing_axes, "robofast-pwi-server FindHome")
         return False
 
+    def _homed_without_flag(self, st: PWIStatus, axes: tuple[int, ...], how: str) -> None:
+        """A home this server commanded ended and PWI has no homed flag: count
+        it (and record it) only if the mount ended at the configured home."""
+        cfg = self.config
+        if cfg.home_alt is None and cfg.home_az is None:
+            # No home position to check against: counts for this process only.
+            self.homed_here |= set(axes)
+            log.warning(
+                "home not recorded (no home_alt/home_az in the config): counts until this"
+                " server stops; it ended at alt %.3f az %.3f",
+                st.alt_deg,
+                st.az_deg,
+            )
+            return
+        why = not_at_home(st, axes, cfg.home_alt, cfg.home_az, cfg.home_tolerance)
+        if why is not None:
+            log.error("home NOT counted: %s", why)
+            return
+        self.homed_here |= set(axes)
+        self.home_record.record(axes, st, how)
+
     def is_homed(self, st: PWIStatus) -> bool | None:
-        """PWI's homed flag; without one, whether this process homed both
-        axes; None: unknown (treated as not homed)."""
+        """PWI's homed flag; without one, whether robofast homed both axes
+        (this process, or the home record, :mod:`~robofast_core.devices.pwi_homed`);
+        None: unknown (treated as not homed)."""
         if st.homed is not None:
             return st.homed
         if self.homed_here >= {0, 1}:
+            return True
+        if self.homed_here | self.home_record.axes(st) >= {0, 1}:
             return True
         return None
 
@@ -496,6 +647,7 @@ class PWIMount:
         self.target_ra, self.target_dec = ra, dec
         self.park_state = "unparked"
         self._watch_latched = False
+        self._arm_slew(alt)
         self._moving_since = time.monotonic()
         await self._send(
             lambda: self.pwi.goto_radec_j2000(ra, dec), f"goto J2000 {ra:.5f} h {dec:.4f}"
@@ -510,11 +662,14 @@ class PWIMount:
             raise AlpacaException(INVALID_OPERATION, f"{what}: tracking is on")
         self._check_alt(alt, what)
         self._watch_latched = False
+        self._arm_slew(alt)
         self._moving_since = time.monotonic()
         await self._send(lambda: self.pwi.goto_altaz(alt, az), f"goto alt {alt:.4f} az {az:.4f}")
 
     async def abort(self) -> None:
         self._moving_since = -1e9
+        self._disarm_slew()
+        self.slew_error = None
         if self.park_state == "parking":
             self.park_state = "unknown"
         if self._park_task is not None:
@@ -546,6 +701,7 @@ class PWIMount:
             await self._send(lambda: self.pwi.tracking(False), "tracking off (park)")
         self.park_state = "parking"
         self._watch_latched = False
+        self._arm_slew(cfg.park_alt)
         self._moving_since = time.monotonic()
         await self._send(lambda: self.pwi.goto_altaz(cfg.park_alt, cfg.park_az), "goto park")
         self._park_task = asyncio.get_running_loop().create_task(self._finish_park())
@@ -597,6 +753,8 @@ class PWIMount:
         self.homed_here -= set(self._homing_axes)
         self._homing_since = time.monotonic()
         self._home_at = None
+        self._disarm_slew()
+        self.slew_error = None
         self._moving_since = time.monotonic()
         self._watch_latched = True  # homing may cross the limits
         await self._send(lambda: self.pwi.find_home(axis), f"find home {axis}")
@@ -627,17 +785,46 @@ class PWIMount:
         st = await self.status(0)
         if st.m3_port == port:
             return json.dumps({"port": port, "moved": False})
-        await self._send(lambda: self.pwi.m3_select(port), f"m3 port {port}")
-        deadline = time.monotonic() + self.config.m3_timeout
-        while time.monotonic() < deadline:
-            await asyncio.sleep(0.25)
-            st = await self.status(0)
-            if st.m3_port == port and not st.m3_moving:
-                return json.dumps({"port": port, "moved": True})
+        cfg = self.config
+        # PWI4 sometimes answers an M3 goto and never moves (seen ~3 s after
+        # the M3 arrived at the other port). A goto counts as taken once the
+        # reported port changes (PWI4 reads -1 while moving); one not taken
+        # after m3_resend_after s is sent again, at most m3_retries times.
+        deadline = time.monotonic() + cfg.m3_timeout
+        sends = 0
+        while True:
+            await self._send(lambda: self.pwi.m3_select(port), f"m3 port {port}")
+            sends += 1
+            sent_at, before, taken = time.monotonic(), st.m3_port, False
+            while time.monotonic() < deadline:
+                await asyncio.sleep(0.25)
+                st = await self.status(0)
+                if st.m3_port == port and not st.m3_moving:
+                    return json.dumps({"port": port, "moved": True})
+                taken = taken or st.m3_port != before
+                if not taken and time.monotonic() - sent_at >= cfg.m3_resend_after:
+                    break
+            if time.monotonic() >= deadline or sends > cfg.m3_retries:
+                break
+            self.m3_resends += 1
+            log.warning(
+                "M3: goto port %d not taken after %.0f s (port reads %s): sending it again",
+                port,
+                cfg.m3_resend_after,
+                st.m3_port or "moving/unknown",
+            )
+        if not taken:
+            # The last goto was not taken either: let it run out the clock.
+            while time.monotonic() < deadline:
+                await asyncio.sleep(0.25)
+                st = await self.status(0)
+                if st.m3_port == port and not st.m3_moving:
+                    return json.dumps({"port": port, "moved": True})
         with contextlib.suppress(PWIError):
             await self._send(self.pwi.m3_stop, "m3 stop (timeout)")
         raise AlpacaException(
-            DRIVER_ERROR, f"{PORT_ACTION}: M3 not at port {port} after {self.config.m3_timeout} s"
+            DRIVER_ERROR,
+            f"{PORT_ACTION}: M3 not at port {port} after {cfg.m3_timeout} s ({sends} goto(s))",
         )
 
     async def offset(self, parameters: str) -> str:
@@ -696,40 +883,63 @@ class PWIMount:
             "watch_stops": self.watch_stops,
             "homed": self.is_homed(st),
             "homed_here": sorted(self.homed_here),
+            "home_record": sorted(self.home_record.axes(st)),
             "unhomed_override": self.unhomed_ok,
+            "slew_error": self.slew_error,
+            "m3_resends": self.m3_resends,
         }
 
     # -- the limit watch -----------------------------------------------------------------
 
     async def watch(self) -> None:
         cfg = self.config
-        last_alt: float | None = None
+        last: tuple[float, float] | None = None  # (t, alt)
         while True:
             await asyncio.sleep(cfg.watch_interval)
             try:
                 st = await self.status(cfg.watch_interval / 2)
             except PWIError:
-                last_alt = None
+                last = None
                 continue
-            alt = st.alt_deg
-            low = alt < cfg.min_alt - cfg.limit_margin
-            high = alt > cfg.max_alt + cfg.limit_margin
-            if not (low or high):
+            await self._check_stall(st)
+            t, alt = self._st_at, st.alt_deg
+            lo, hi = cfg.min_alt - cfg.limit_margin, cfg.max_alt + cfg.limit_margin
+            v = 0.0
+            if last is not None and t - last[0] > 1e-3:
+                v = (alt - last[1]) / (t - last[0])
+            # Where the mount would come to rest if stopped now: a stop
+            # coasts up to stop_distance (6-8 deg from full speed).
+            rest = alt + math.copysign(coast_deg(cfg, v), v)
+            low, high = alt < lo, alt > hi
+            out_now = (low and v < -1e-4) or (high and v > 1e-4)
+            # Heading out fast enough to coast past a limit. A slew this server
+            # sent to a target inside the limits is left to PWI's own
+            # deceleration while the mount has not passed that target.
+            heading = (v < -1e-4 and rest < lo) or (v > 1e-4 and rest > hi)
+            if heading and self._goto_alt is not None and lo <= self._goto_alt <= hi:
+                heading = (v < 0 and alt < self._goto_alt - cfg.limit_margin) or (
+                    v > 0 and alt > self._goto_alt + cfg.limit_margin
+                )
+            if self._homing_since is not None:
+                heading = False  # homing may cross the limits
+            if not (low or high or heading):
                 self._watch_latched = False
-            elif not self._watch_latched and last_alt is not None:
-                worse = (low and alt < last_alt - 1e-4) or (high and alt > last_alt + 1e-4)
-                if worse:
-                    self._watch_latched = True
-                    self.watch_stops += 1
-                    log.error(
-                        "LIMIT: altitude %.2f deg outside [%s, %s] and moving away: stop",
-                        alt,
-                        cfg.min_alt,
-                        cfg.max_alt,
-                    )
-                    with contextlib.suppress(PWIError):
-                        await self._send(self.pwi.stop, "stop (limit watch)")
-            last_alt = alt
+            elif (out_now or heading) and not self._watch_latched and last is not None:
+                self._watch_latched = True
+                self.watch_stops += 1
+                self._disarm_slew()
+                log.error(
+                    "LIMIT: altitude %.2f deg at %.2f deg/s (would coast to %.2f) against"
+                    " [%s, %s]: stop",
+                    alt,
+                    v,
+                    rest,
+                    cfg.min_alt,
+                    cfg.max_alt,
+                )
+                with contextlib.suppress(PWIError):
+                    await self._send(self.pwi.stop, "stop (limit watch)")
+            last = (t, alt)
 
     # -- focuser ----------------------------------------------------------------------
 
@@ -1172,7 +1382,7 @@ class PWIServer(ThreadingHTTPServer):
         t = self.mount
         key = name.lower()
         if key == PORT_ACTION.lower():
-            timeout = self.config.m3_timeout + 5.0
+            timeout = self.config.m3_timeout + 10.0
             fut = asyncio.run_coroutine_threadsafe(t.select_port(parameters), self._loop)
             try:
                 return fut.result(timeout)

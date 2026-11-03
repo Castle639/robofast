@@ -29,7 +29,14 @@ The model, from the legacy driver's use of PWI (``docs/pwi.md``):
   ``/mount/findhome?axis=0|1`` (4.1.7 beta 3+) homes one axis. PWI4 reports
   ``mount.axisN.is_homed`` only with ``report_homed`` (PWI4 4.1.4 did not);
   PWI2 reports ``encoders_have_been_set``.
-* the M3 takes ``m3_time`` s between ports (``m3.port`` 0 meanwhile); one
+* PWI4's own altitude limit (``pwi_min_alt``, off by default): a goto
+  below it is accepted, the mount stops at the limit and then reports
+  slewing *and* tracking until stopped -- what PWI4 4.1.6 does on a CDK700.
+* :meth:`CDK700Model.power_cycle`: the controller loses power (disconnected,
+  disabled, not homed, both axes reading 0 deg, as a CDK700's encoders do).
+* the M3 takes ``m3_time`` s between ports (PWI4 ``m3.port`` -1, PWI2 0
+  meanwhile); ``m3_drops`` gotos are answered but ignored, as PWI4
+  sometimes does; one
   focuser (microns) and one rotator (mechanical deg) per port. PWI4
   commands act on the current port's; PWI4's ``rotator.mech_position_degs``
   always reports port 1's rotator (PWI4 4.1.4 reports Rotator index 0).
@@ -112,6 +119,7 @@ class CDK700Model:
         home_alt: float = 60.0,
         home_az: float = 180.0,
         version: str = "4.1.8.0",
+        pwi_min_alt: float | None = None,
     ) -> None:
         self.lat, self.lon = latitude, longitude
         self.slew_rate = slew_rate
@@ -124,6 +132,9 @@ class CDK700Model:
         self.report_homed = report_homed
         self.home_pos = (home_alt, home_az)
         self.version = version
+        self.pwi_min_alt = pwi_min_alt
+        #: The next this many M3 gotos are answered and ignored.
+        self.m3_drops = 0
         self.homing_axes: tuple[int, ...] = ()
         self.alt, self.az = alt, az
         self.tracking = False
@@ -177,12 +188,19 @@ class CDK700Model:
                 else:
                     assert self.altaz is not None
                     t_alt, t_az = self.altaz
+                stuck = self.pwi_min_alt is not None and t_alt < self.pwi_min_alt
+                if stuck:
+                    t_alt = self.pwi_min_alt
                 step = self.slew_rate * dt
                 d_alt, d_az = t_alt - self.alt, t_az % 360.0 - self.az
                 self.alt += max(-step, min(step, d_alt))
                 self.az = (self.az + max(-step, min(step, d_az))) % 360.0
                 if abs(d_alt) <= step and abs(d_az) <= step:
-                    self.slewing = False
+                    if stuck:
+                        # At PWI's limit: still "slewing", and "tracking", forever.
+                        self.tracking = True
+                    else:
+                        self.slewing = False
             elif self.tracking:
                 if self.radec is None:
                     self.radec = self.radec_now()
@@ -264,7 +282,19 @@ class CDK700Model:
             if self.slewing and self.altaz is None:
                 self.slewing = False
 
+    def power_cycle(self) -> None:
+        """The mount controller loses power and comes back."""
+        self.stop()
+        self.connected = False
+        self.enabled = [False, False]
+        self.axes_homed = [False, False]
+        self.alt = self.az = 0.0
+
     def m3_goto(self, port: int) -> None:
+        if self.m3_drops > 0:
+            self.m3_drops -= 1
+            self.ignored.append("m3_goto")
+            return
         if port != self.m3_port or self.m3_until:
             self.m3_target = port
             self.m3_until = time.monotonic() + self.m3_time
@@ -356,7 +386,7 @@ def pwi4_status(m: CDK700Model) -> str:
         ("rotator.is_moving", _b4(rot.moving)),
         ("rotator.is_slewing", _b4(rot.moving)),
         ("m3.exists", "1"),
-        ("m3.port", str(port)),
+        ("m3.port", str(port or -1)),  # PWI4 reads -1 while the M3 moves
     ]
     return "".join(f"{k}={v}\n" for k, v in lines)
 
@@ -733,6 +763,7 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("--homed", action="store_true", help="start homed")
     ap.add_argument("--report-homed", action="store_true", help="PWI4: report mount.axisN.is_homed")
     ap.add_argument("--version", default="4.1.8.0", help="PWI4 version to report")
+    ap.add_argument("--pwi-min-alt", type=float, help="PWI's own altitude limit (deg)")
     args = ap.parse_args(argv)
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
@@ -750,6 +781,7 @@ def main(argv: list[str] | None = None) -> None:
         homed=args.homed,
         report_homed=args.report_homed,
         version=args.version,
+        pwi_min_alt=args.pwi_min_alt,
     ).start()
     print(f"{args.api} simulator on {sim.address}", flush=True)
     try:
