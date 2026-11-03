@@ -221,6 +221,14 @@ async def test_slew_refusals(make_rig):
     with pytest.raises(InvalidOperationException, match="stale"):
         await tel.call("SlewToCoordinatesAsync", *(await target_above(tel)))
     rig.sim.set_stale(False)
+    # A tripped travel limit (a trip wire) locks the mount out: refuse, never clear it.
+    rig.sim.hit_limit("west")  # the mount holds (tracking off)
+    with pytest.raises(InvalidOperationException, match=r"travel limit tripped.*west_limit"):
+        await tel.set("Tracking", True)
+    with pytest.raises(InvalidOperationException, match="travel limit"):
+        await tel.call("Park")
+    assert rig.sim.hard_limits == {"west"}
+    rig.sim.clear_limit()
     assert 12 not in rig.sim.numbers()  # no slew was ever started
 
 
