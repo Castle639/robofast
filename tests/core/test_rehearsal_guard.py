@@ -274,3 +274,28 @@ def test_the_plan_is_what_is_up():
     noon = datetime(2026, 11, 10, 19, 0, tzinfo=UTC)
     day = observable(catalog(), noon, noon + timedelta(hours=1), ignore_twilight=True)
     assert day and len(day) < len(observable(catalog(), noon, noon + timedelta(hours=1)))
+
+
+def test_imaging_requests_wait_for_the_azimuth_window():
+    # The second T2 rehearsal: HD 50692 was picked for the second half (it is in
+    # the window at the middle) but is still rising below az 117 at the start.
+    start = datetime(2026, 11, 3, 9, 25, tzinfo=UTC)
+    end = start + timedelta(hours=2)
+    ep = Endpoint("127.0.0.1", 1, 0)
+    s = RehearsalSettings(
+        real={"t2": RealTelescope(ep, Endpoint("127.0.0.1", 2, 0), ep, ep)},
+        az_windows={"t2": (117.0, 264.0)},
+    )
+    targets = observable(catalog(), start, end, az_window=(117.0, 264.0))
+    images = [g for g in make_requests(s, start, end, targets) if g["id"].startswith("IMG-")]
+    assert images
+    for g in images:
+        req = g["requests"][0]
+        tgt = req["configurations"][0]["target"]
+        for w in req["windows"]:
+            for edge in (w["start"], w["end"]):
+                when = datetime.fromisoformat(edge)
+                az = azimuth(
+                    tgt["ra"] / 15, tgt["dec"], lst_hours(when, MINERVA.longitude), MINERVA.latitude
+                )
+                assert 117 <= az <= 264, (g["id"], edge, az)

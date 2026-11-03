@@ -462,6 +462,14 @@ def make_requests(
             if not best:
                 continue
             t = max(best, key=lambda x: x["alt_now"])
+            spans = [{"start": w0.isoformat(), "end": w1.isoformat()}]
+            if _az_intersection(s) is not None:  # only while it is inside the window
+                inside = observable(
+                    [t], w0, w1, ignore_twilight=s.ignore_twilight, az_window=_az_intersection(s)
+                )
+                if not inside:
+                    continue
+                spans = windows(inside[0])
             gid = f"IMG-{name}-{i + 1}"
             groups.append(
                 {
@@ -473,7 +481,7 @@ def make_requests(
                         {
                             "id": f"{gid}-r",
                             "location": {"telescope": name},
-                            "windows": [{"start": w0.isoformat(), "end": w1.isoformat()}],
+                            "windows": spans,
                             "configurations": [
                                 {
                                     "id": f"{gid}-img",
