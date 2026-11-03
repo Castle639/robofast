@@ -11,6 +11,8 @@ reading ground truth straight from the fake objects.
 in that order. Names match case-insensitively. The fakes' faults apply:
 ``hang()`` holds the request (up to ``hang_limit``), ``fail()`` answers
 HTTP 500, and a :class:`FakeDeviceError` is an Alpaca driver error (0x500).
+A camera's ``ImageArray`` (an :class:`~robofast_core.imagebytes.ImageArray`)
+goes out as ImageBytes when the client accepts it, else as Alpaca JSON.
 """
 
 from __future__ import annotations
@@ -24,6 +26,7 @@ from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 from robofast_core import hwgate
+from robofast_core import imagebytes as ib
 from robofast_core.alpaca_client import METHODS
 from robofast_core.testing.fakes import FakeDevice, FakeDeviceError
 from robofast_core.weather_server import NOT_IMPLEMENTED, _alpaca
@@ -100,7 +103,23 @@ class _Handler(BaseHTTPRequestHandler):
         except FakeDeviceError as exc:
             self._send(200, _alpaca(ctid=ctid, err=0x500, msg=str(exc)))
             return
+        if isinstance(value, ib.ImageArray):
+            self._send_image(value, ctid)
+            return
         self._send(200, _alpaca(value, ctid=ctid))
+
+    def _send_image(self, image: ib.ImageArray, ctid: int) -> None:
+        if ib.MEDIA_TYPE in (self.headers.get("Accept") or ""):
+            data = ib.encode_imagebytes(image.data, element_type=image.element_type, ctid=ctid)
+            self.send_response(200)
+            self.send_header("Content-Type", ib.MEDIA_TYPE)
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+            return
+        body = _alpaca(image.data.tolist(), ctid=ctid)
+        body.update(Type=image.element_type, Rank=image.data.ndim)
+        self._send(200, body)
 
 
 class FakeAlpacaServer(ThreadingHTTPServer):

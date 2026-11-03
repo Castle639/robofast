@@ -185,6 +185,7 @@ METHODS: dict[str, tuple[str, tuple[str, ...]]] = {
     "StopExposure": ("PUT", ()),
     # telescope
     "SlewToCoordinatesAsync": ("PUT", ("RightAscension", "Declination")),
+    "SlewToAltAzAsync": ("PUT", ("Azimuth", "Altitude")),
     "AbortSlew": ("PUT", ()),
     "PulseGuide": ("PUT", ("Direction", "Duration")),  # GuideDirections, ms
     "MoveAxis": ("PUT", ("Axis", "Rate")),  # TelescopeAxes, deg/s
