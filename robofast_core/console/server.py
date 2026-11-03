@@ -994,7 +994,9 @@ class Console:
             try:
                 async with asyncio.timeout(c.emergency_timeout):
                     reply = await self.supervisors[enc.name].call(
-                        "POST", "close", {"operator": operator, "reason": f"EMERGENCY: {reason}"}
+                        "POST",
+                        "close",
+                        {"operator": operator, "reason": f"EMERGENCY: {reason}", "emergency": True},
                     )
                 out.update(closing=True, via="supervisor", lease_revoked=bool(reply.get("revoked")))
             except TimeoutError:
