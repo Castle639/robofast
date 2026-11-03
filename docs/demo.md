@@ -146,3 +146,90 @@ prints every check that failed:
   at least one spectrum ended on counts; the biases and darks on the
   spectrograph PC are dark frames; the plan record (with joins); the
   frame index.
+
+## Hardware rehearsal: real mounts and cameras, the enclosure closed
+
+`robofast_core.testing.rehearsal` runs the same night **in real time** with,
+for the telescopes you name, the **real mount** (its Alpaca Telescope, and
+the Focuser and Rotator read for the FITS headers) and the **real science
+camera** in place of the fakes. Everything else stays simulated as above:
+the weather (forced safe), the Aqawan PAC simulator and Dome server (the
+*simulated* roof opens; the real enclosure is never contacted), the
+supervisor, the guiders (simulated FAU cameras that acquire and guide on
+synthetic star fields wherever the real mount points) and KiwiSpec. A
+telescope you do not name stays simulated. It is for an attended session
+with the **enclosure closed**: it checks that the sequencer drives the real
+mounts and cameras through a whole night (slews, tracking, exposures,
+downloads, headers, the end of the night) without opening anything.
+
+Start the real device servers first, yourself, as for any hardware session
+(the PWI servers with `--hardware`, docs/pwi.md; the cameras behind ASCOM
+Remote, docs/remote.md), and unpark the mounts. Then, for example:
+
+```sh
+python -m robofast_core.testing.rehearsal --out /tmp/rehearsal \
+    --telescope t1=127.0.0.1:11121/0 --camera t1=127.0.0.1:7151/0 \
+    --telescope t2=127.0.0.1:11122/0 --camera t2=127.0.0.1:7152/0 \
+    --i-know-the-enclosure-is-closed --duration 2h --end-action leave
+```
+
+* **Endpoints**: every real telescope needs both `--telescope NAME=HOST:PORT/N`
+  and `--camera NAME=HOST:PORT/N`. The Focuser and Rotator are device `N`
+  on the telescope's server unless `--focuser`/`--rotator` say otherwise
+  (`--rotator t1=none`: no rotator). It refuses to start without
+  `--i-know-the-enclosure-is-closed`, with a parked mount (it never sends
+  a real mount `Park` or `Unpark`), a busy camera or an endpoint that does
+  not answer. It logs, for each endpoint, whether it is a verified robofast
+  simulator (`robofast_core/hwgate.py`) or real.
+* **What it starts** is only the simulated night's services, each on a
+  verified simulator and none with `--hardware`: nothing it starts can
+  reach a real enclosure, PAC or PDU. The hardware gate is unchanged: the
+  real device servers are yours, and the rehearsal only talks Alpaca to
+  them.
+* **The mount guard** (`robofast_core/testing/mount_guard.py`): the
+  supervisor and the sequencer reach each real mount only through it.
+  Reads pass. It forwards `SlewToCoordinatesAsync` only within 21..83 deg
+  of altitude (robofast's MINERVA limits) at that moment, and
+  `AbortSlew`, `Tracking` and `Connected`; robofast's `Park` becomes
+  "abort the slew, tracking off, stay where you are" (`AtPark` then reads
+  true until robofast's next `Unpark`); every other command is refused and
+  reported. The camera is used directly.
+* **Real time.** The clock runs at real speed from now (the real mounts
+  point by the real sidereal time). The plan is made at start: `SPECTRUM`
+  requests (a B star through iodine, RV standards with iodine, a template
+  without), enough for the duration, and `--images` short imaging requests
+  per telescope (`--image-exptime`, two frames each), on the stars of
+  `sites/minerva/requests.example.json` plus a few bright stars in the
+  module (so that something is up at any sidereal time) that are within
+  the limits during the rehearsal. It ends after `--duration` or at
+  morning twilight, whichever is first (or once every request is done).
+  Before evening twilight nothing is observed until the Sun is at -12 deg;
+  `--ignore-twilight` observes at once, keeping targets 45 deg from the Sun
+  (only with the enclosure closed).
+* **No autofocus** on a real telescope (dark frames cannot be focused: a
+  log line says so). The real camera takes light frames (the shutter opens
+  inside the closed enclosure); nothing measures their content (no FWHM, no
+  plate solving). The frames, the frame index and the spectrum sidecars are
+  written as usual, the headers with the real mount's pointing.
+* **The end** (also on Ctrl-C or an error): the guard is locked, then each
+  real mount gets `--end-action`: `leave` (abort any slew, tracking off,
+  where it is; the default) or `altaz:ALT,AZ` (tracking off, then a slew
+  there, within the limits). A `kill -9` skips it: stop the mounts
+  yourself then.
+
+It prints the night as it goes (slews with the pointing error, frames,
+spectra), then a summary: the spectra, the request statuses at the end,
+every slew of a real mount (commanded position, the mount's position after
+it, the pointing error and how long it took), every frame (exposure time,
+download time and rate, the header's pointing), anything the guard refused,
+the simulated roof and the end action. The checks: spectra fed by every
+real telescope, no autofocus on a real one, the night ended by itself,
+nothing refused by the guard, every slew within the limits, the safety
+invariants above (never a spectrum unguided, every abort before a park,
+every park before the roof closes), a sidecar with the barycentric
+correction for every spectrum, every real frame on disk with the mount's
+pointing within a degree of its target, one night name, and every real
+mount not tracking after the end action. The tests
+(`tests/e2e/test_rehearsal.py`, `tests/core/test_rehearsal_guard.py`) run it
+against fake mounts and cameras served over Alpaca on loopback as if they
+were real, with a faster clock (test only).
