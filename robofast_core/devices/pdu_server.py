@@ -31,6 +31,16 @@ Running
 ::
 
     python -m robofast_core.devices.pdu_server --config pdu.json [--hardware | --simulate]
+        [--status | --check-write OUTLET]
+
+``--status`` prints the PDU's description and every outlet's state and name,
+then exits; ``--check-write N`` also SETs outlet N to the state it is
+already in, which proves the write community works without switching
+anything (:meth:`~robofast_core.devices.apc_pdu.APCPDU.check_write`).
+
+With ``"relay": true`` in ``pdu``, ``host:port`` is a TCP relay to the
+PDU (``scripts/snmp_relay.py`` on a site host, reached through ``ssh -L``;
+docs/remote.md), because an SSH tunnel cannot carry SNMP's UDP.
 
 ``--simulate`` starts a simulated PDU (:class:`~robofast_core.devices.apc_pdu.APCPDUSim`)
 on loopback with the config's outlets (and, without a credentials file,
@@ -86,12 +96,18 @@ class HardwareNotAllowed(hwgate.HardwareNotAllowed, RuntimeError):
     pass
 
 
-def check_pdu_address(host: str, port: int, *, allow_hardware: bool) -> str:
-    """Resolve ``host`` once; unless ``allow_hardware``, ``host:port`` (UDP)
-    must be a verified simulator (:func:`robofast_core.hwgate.check_endpoint`)."""
+def check_pdu_address(host: str, port: int, *, allow_hardware: bool, relay: bool = False) -> str:
+    """Resolve ``host`` once; unless ``allow_hardware``, ``host:port`` (UDP,
+    or TCP for a relay) must be a verified simulator
+    (:func:`robofast_core.hwgate.check_endpoint`)."""
     try:
         return hwgate.check_endpoint(
-            host, port, allow_hardware=allow_hardware, what="PDU", proto="udp", allow_absent=True
+            host,
+            port,
+            allow_hardware=allow_hardware,
+            what="PDU relay" if relay else "PDU",
+            proto="tcp" if relay else "udp",
+            allow_absent=True,
         )
     except hwgate.HardwareNotAllowed as exc:
         raise HardwareNotAllowed(str(exc)) from None
@@ -223,8 +239,9 @@ class PDUServer(ThreadingHTTPServer):
         if config.allow_hardware != hardware:
             log.info("hardware use needs allow_hardware in the config AND --hardware")
         host = str(config.pdu.get("host", "127.0.0.1"))
+        relay = bool(config.pdu.get("relay", False))
         self.pdu_ip = check_pdu_address(
-            host, int(config.pdu.get("port", 161)), allow_hardware=allow
+            host, int(config.pdu.get("port", 161)), allow_hardware=allow, relay=relay
         )
         if allow:
             log.warning("HARDWARE MODE: PDU at %s:%s", self.pdu_ip, config.pdu.get("port", 161))
@@ -242,6 +259,7 @@ class PDUServer(ThreadingHTTPServer):
             timeout=float(config.pdu.get("timeout", 2.0)),
             retries=int(config.pdu.get("retries", 2)),
             allow_hardware=allow,
+            relay=relay,
         )
         self._stid = 0
         self._lock = threading.Lock()
@@ -427,6 +445,23 @@ class PDUServer(ThreadingHTTPServer):
         raise AlpacaException(ACTION_NOT_IMPLEMENTED, f"no action {action!r}")
 
 
+async def _status(pdu: APCPDU, check_write: int | None) -> int:
+    """The one-shot ``--status`` / ``--check-write`` report; the exit code."""
+    print(await pdu.describe(), flush=True)
+    states = await pdu.states()
+    for n, on in enumerate(states, start=1):
+        print(f"outlet {n}: {'on ' if on else 'off'} {await pdu.name(n)!r}", flush=True)
+    if check_write is None:
+        return 0
+    try:
+        on = await pdu.check_write(check_write)
+    except SNMPError as exc:
+        print(f"write check FAILED: {exc}", flush=True)
+        return 1
+    print(f"write check OK: outlet {check_write} set to its own state ({'on' if on else 'off'})")
+    return 0
+
+
 def _main(argv: list[str] | None = None) -> None:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--config", required=True)
@@ -438,6 +473,15 @@ def _main(argv: list[str] | None = None) -> None:
     )
     mode.add_argument("--simulate", action="store_true", help="run against a simulated PDU")
     ap.add_argument("--listen", help="host:port, overriding the config")
+    ap.add_argument(
+        "--status", action="store_true", help="print the PDU and every outlet's state, then exit"
+    )
+    ap.add_argument(
+        "--check-write",
+        type=int,
+        metavar="OUTLET",
+        help="--status, then SET OUTLET to the state it is already in (proves write access)",
+    )
     ap.add_argument("--log-level", default="INFO")
     args = ap.parse_args(argv)
     logging.basicConfig(
@@ -464,6 +508,36 @@ def _main(argv: list[str] | None = None) -> None:
         sim = asyncio.run_coroutine_threadsafe(APCPDUSim(creds, names).start(), sim_loop).result(5)
         config.pdu = {**config.pdu, "host": "127.0.0.1", "port": sim.port}
         config.allow_hardware = False
+    if args.status or args.check_write is not None:
+        if args.check_write is not None and not any(
+            o.outlet == args.check_write and o.writable for o in config.outlets
+        ):
+            ap.error(f"--check-write {args.check_write}: not a writable outlet in the config")
+        allow = config.allow_hardware and args.hardware
+        relay = bool(config.pdu.get("relay", False))
+        port = int(config.pdu.get("port", 161))
+        try:
+            ip = check_pdu_address(
+                str(config.pdu.get("host", "127.0.0.1")), port, allow_hardware=allow, relay=relay
+            )
+        except HardwareNotAllowed as exc:
+            log.error("%s", exc)
+            sys.exit(2)
+        pdu = APCPDU(
+            ip,
+            port,
+            creds or load_credentials(config.credentials or ""),
+            timeout=float(config.pdu.get("timeout", 2.0)),
+            retries=int(config.pdu.get("retries", 2)),
+            allow_hardware=allow,
+            relay=relay,
+        )
+        code = (
+            asyncio.run_coroutine_threadsafe(_status(pdu, args.check_write), sim_loop).result(60)
+            if sim_loop is not None
+            else asyncio.run(_status(pdu, args.check_write))
+        )
+        sys.exit(code)
     try:
         server = PDUServer(config, hardware=args.hardware, credentials=creds).start()
     except HardwareNotAllowed as exc:

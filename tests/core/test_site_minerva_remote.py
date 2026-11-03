@@ -25,7 +25,7 @@ from robofast_core.timeline import Timeline
 REMOTE = Path(__file__).resolve().parents[2] / "sites" / "minerva" / "remote"
 
 #: The tunnel plan's localhost ports (docs/remote.md).
-TUNNEL_PORTS = {7100, 7101, 7102, 7141, 7142, 7151, 7152}
+TUNNEL_PORTS = {7100, 7101, 7102, 7141, 7142, 7151, 7152, 7162}
 
 
 def _json(name: str) -> dict:
@@ -45,7 +45,7 @@ def test_only_localhost_and_tunnel_ports():
 def test_every_device_config_opens_only_half_the_gate():
     for path in REMOTE.glob("*.json"):
         d = json.loads(path.read_text())
-        if "pac" in d or "pwi" in d or "backend" in d:
+        if "pac" in d or "pwi" in d or "backend" in d or "pdu" in d:
             assert d["allow_hardware"] is True, path.name
             assert any("--hardware" in line for line in d["_note"]), path.name
 
@@ -126,4 +126,21 @@ def test_pwi_configs_are_refused_without_hardware(name, port):
         d["listen"] = "127.0.0.1:0"
         with pytest.raises(hwgate.HardwareNotAllowed, match="tunnel"):
             PWIServer(PWIConfig.from_dict(d))  # no --hardware
+        assert not tunnel.touched
+
+
+def test_t2_pdu_config_is_refused_without_hardware():
+    from robofast_core.devices.apc_pdu import Credentials
+    from robofast_core.devices.pdu_server import PDUConfig, PDUServer
+
+    d = _json("t2_pdu.json")
+    assert d["pdu"]["host"] == "127.0.0.1" and d["pdu"]["port"] == 7162 and d["pdu"]["relay"]
+    # Only the camera and the mount panel can be switched; never the PC or the network.
+    switchable = {o["name"] for o in d["outlets"] if o.get("writable")}
+    assert switchable == {"inst", "panel"}
+    with FakeTunnel() as tunnel:
+        d["pdu"] = {**d["pdu"], "port": tunnel.port}
+        d["listen"] = "127.0.0.1:0"
+        with pytest.raises(hwgate.HardwareNotAllowed, match="tunnel"):
+            PDUServer(PDUConfig.from_dict(d), credentials=Credentials("r", "w"))  # no --hardware
         assert not tunnel.touched

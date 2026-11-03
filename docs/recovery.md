@@ -60,6 +60,16 @@ is an Alpaca **Switch** (ISwitchV2; ConformU-clean in CI,
 dependency; `apc_pdu.py`: PowerNet-MIB `sPDUOutletCtl`, as legacy
 `minerva_library/pdu.py`).
 
+- `--status` prints the PDU and every outlet, `--check-write N` also sets
+  outlet N to its own state (proves write access, switches nothing), then
+  both exit. An APC drops a SET it will not accept without answering, so
+  "reads work, SET times out" means the write community is wrong or
+  read-only, or the PDU refuses writes while someone is logged in to its
+  web or console interface (APC community access "Write"; "Write+" does
+  not); the check says so.
+- A PDU behind an SSH tunnel: `"relay": true` and `scripts/snmp_relay.py`
+  on a site host (docs/remote.md).
+
 - Only outlets listed in the config are switches. `writable: true` lets
   them be switched; anything the safety path needs (the enclosure
   controller, the weather station, the network, the supervisor's computer)

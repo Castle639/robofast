@@ -7,6 +7,9 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import subprocess
+import sys
+from pathlib import Path
 
 import pytest
 
@@ -19,6 +22,7 @@ from robofast_core.devices.pdu_server import (
     PDUServer,
     check_pdu_address,
 )
+from robofast_core.devices.pdu_server import main as pdu_main
 
 CREDS = Credentials("test-read", "test-write")
 
@@ -160,3 +164,79 @@ async def test_a_silent_pdu_is_an_error_not_a_hang(pdu_server):
             await dev.connect(timeout=5)
     finally:
         await dev.aclose()
+
+
+RELAY = Path(__file__).resolve().parents[2] / "scripts" / "snmp_relay.py"
+
+
+@pytest.fixture
+async def relay_to_sim():
+    """A simulated PDU behind scripts/snmp_relay.py (the gateway relay), as
+    robofast sees it through an SSH tunnel: TCP on loopback."""
+    sim = await APCPDUSim(CREDS, ["T2", "panel", "inst"], reboot_delay=0.1).start()
+    proc = await asyncio.create_subprocess_exec(
+        sys.executable, str(RELAY), "--listen", "127.0.0.1:0", "--target", sim.address,
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
+    )  # fmt: skip
+    try:
+        line = await asyncio.wait_for(proc.stdout.readline(), 10)
+        yield sim, int(line.decode().strip().rpartition(":")[2])
+    finally:
+        proc.terminate()
+        await proc.wait()
+        sim.close()
+
+
+async def test_snmp_through_the_tcp_relay(relay_to_sim):
+    sim, port = relay_to_sim
+    # A relay on loopback is not a simulator robofast can verify: the gate holds.
+    gated = APCPDU("127.0.0.1", port, CREDS, timeout=0.5, retries=0, relay=True)
+    with pytest.raises(snmp.SNMPError, match="not a simulator"):
+        await gated.state(1)
+    pdu = APCPDU("127.0.0.1", port, CREDS, timeout=0.5, retries=1, relay=True, allow_hardware=True)
+    assert "simulated" in await pdu.describe()
+    assert await pdu.name(3) == "inst" and await pdu.states() == [True, True, True]
+    await pdu.set(2, False)
+    assert await pdu.states() == [True, False, True] and not sim.is_on(2)
+    await pdu.reboot(3)
+    await asyncio.sleep(0.2)
+    assert await pdu.state(3) is True and sim.sets == [(2, 2), (3, 3)]
+    assert await pdu.check_write(1) is True and sim.sets[-1] == (1, 1)
+    # A silent agent is a timeout through the relay too, not a hang.
+    sim.silent = True
+    with pytest.raises(snmp.SNMPTimeout, match="relay"):
+        await pdu.state(1)
+
+
+async def test_check_write_names_a_dropped_set():
+    """The T2 APC (AP7900, AOS 3.7.4) answers reads and drops SETs unanswered."""
+    sim = await APCPDUSim(CREDS, ["a", "b"], drop_sets=True).start()
+    try:
+        pdu = APCPDU("127.0.0.1", sim.port, CREDS, timeout=0.2, retries=0)
+        assert await pdu.states() == [True, True]
+        with pytest.raises(snmp.SNMPError, match="logged in to its web/console") as e:
+            await pdu.check_write(2)
+        assert not isinstance(e.value, snmp.SNMPTimeout) and sim.sets == []
+    finally:
+        sim.close()
+
+
+def test_relay_listens_on_loopback_only():
+    out = subprocess.run(
+        [sys.executable, str(RELAY), "--listen", "0.0.0.0:0", "--target", "192.0.2.10:161"],
+        capture_output=True, text=True, timeout=30,
+    )  # fmt: skip
+    assert out.returncode == 2 and "loopback" in out.stderr
+
+
+def test_status_and_check_write_cli(tmp_path, capsys):
+    cfg = tmp_path / "pdu.json"
+    cfg.write_text(json.dumps({"outlets": OUTLETS}))
+    with pytest.raises(SystemExit) as e:
+        pdu_main(["--config", str(cfg), "--simulate", "--check-write", "2"])
+    out = capsys.readouterr().out
+    assert e.value.code == 0
+    assert "outlet 1: on  't1 camera'" in out and "write check OK: outlet 2" in out
+    with pytest.raises(SystemExit) as e:  # outlet 8 is not writable: not even a no-op SET
+        pdu_main(["--config", str(cfg), "--simulate", "--check-write", "8"])
+    assert e.value.code == 2

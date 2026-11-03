@@ -10,6 +10,7 @@ timeout and retries. Not a general SNMP stack (no v3, no bulk, no traps).
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import itertools
 import logging
 from collections.abc import Sequence
@@ -262,8 +263,13 @@ class SNMPClient:
         retries: int = 2,
         version: int = 1,
         allow_hardware: bool = False,
+        relay: bool = False,
     ) -> None:
         self.host, self.port = host, int(port)
+        #: ``host:port`` is a TCP relay to the agent (``scripts/snmp_relay.py``,
+        #: reached through ``ssh -L``), not the agent itself: each datagram goes
+        #: as a 2-byte big-endian length and the datagram, and so does each reply.
+        self.relay = relay
         #: Without the hardware gate, every request first re-verifies that
         #: the agent is a robofast simulator (robofast_core.hwgate).
         self.allow_hardware = allow_hardware
@@ -281,13 +287,15 @@ class SNMPClient:
                     self.host,
                     self.port,
                     hardware=self.allow_hardware,
-                    what="SNMP agent",
-                    proto="udp",
+                    what="SNMP relay" if self.relay else "SNMP agent",
+                    proto="tcp" if self.relay else "udp",
                 )
             else:
                 self._guard.check()
         except hwgate.HardwareNotAllowed as exc:
             raise SNMPError(str(exc)) from None
+        if self.relay:
+            return await self._request_relay(pdu, community, varbinds)
         loop = asyncio.get_running_loop()
         transport, proto = await loop.create_datagram_endpoint(
             _Proto, remote_addr=(self.host, self.port)
@@ -304,11 +312,60 @@ class SNMPClient:
                     return await asyncio.wait_for(fut, self.timeout)
                 except TimeoutError:
                     proto.waiting.pop(rid, None)
-            raise SNMPTimeout(
-                f"SNMP {self.host}:{self.port}: no answer in {self.retries + 1} x {self.timeout} s"
-            )
+            raise self._timeout()
         finally:
             transport.close()
+
+    def _timeout(self) -> SNMPTimeout:
+        via = " (through the TCP relay)" if self.relay else ""
+        return SNMPTimeout(
+            f"SNMP {self.host}:{self.port}{via}: no answer in {self.retries + 1} x {self.timeout} s"
+        )
+
+    async def _request_relay(
+        self, pdu: int, community: str, varbinds: list[tuple[str, Any]]
+    ) -> Message:
+        """One request through the relay: same retries and timeout as UDP;
+        replies to earlier attempts (other request ids) are skipped."""
+        try:
+            reader, writer = await asyncio.wait_for(
+                asyncio.open_connection(self.host, self.port), self.timeout
+            )
+        except (OSError, TimeoutError) as exc:
+            raise SNMPError(f"SNMP relay {self.host}:{self.port}: {exc!r}") from None
+        loop = asyncio.get_running_loop()
+        try:
+            for _ in range(self.retries + 1):
+                rid = next(_ids) & 0x7FFFFFFF
+                data = encode_message(Message(self.version, community, pdu, rid, varbinds=varbinds))
+                writer.write(len(data).to_bytes(2, "big") + data)
+                await writer.drain()
+                deadline = loop.time() + self.timeout
+                try:
+                    while True:
+                        left = deadline - loop.time()
+                        if left <= 0:
+                            raise TimeoutError
+                        head = await asyncio.wait_for(reader.readexactly(2), left)
+                        body = await asyncio.wait_for(
+                            reader.readexactly(int.from_bytes(head, "big")), left
+                        )
+                        try:
+                            m = decode_message(body)
+                        except SNMPError as exc:
+                            log.warning("SNMP relay: %s", exc)
+                            continue
+                        if m.request_id == rid:
+                            return m
+                except TimeoutError:
+                    continue
+                except asyncio.IncompleteReadError:
+                    raise SNMPError(f"SNMP relay {self.host}:{self.port} closed") from None
+            raise self._timeout()
+        finally:
+            writer.close()
+            with contextlib.suppress(OSError):
+                await writer.wait_closed()
 
     @staticmethod
     def _check(m: Message) -> list[tuple[str, Any]]:

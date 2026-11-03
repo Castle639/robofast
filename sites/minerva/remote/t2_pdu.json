@@ -1,0 +1,32 @@
+{
+  "_note": [
+    "robofast PDU server (Alpaca Switch) for the MINERVA T2 APC rack PDU (AP7900), through an SSH tunnel: docs/recovery.md, docs/remote.md.",
+    "SNMP is UDP and ssh -L carries TCP only, so the far end of the tunnel is scripts/snmp_relay.py on the site gateway, relaying to the PDU and nothing else; hence pdu.relay true.",
+    "Outlet names are the PDU's own (SNMP sPDUOutletCtlName); legacy apc_2.ini has the same order.",
+    "Only inst (the Apogee camera) and panel (the mount electronics and the Apogee filter wheel) may be switched or power-cycled. Cycling panel drops the mount controller: re-home in PWI4 afterwards.",
+    "The telcom PC, the heater, the Aqawan router (the enclosure's network) and CAMAL's outlets can never be switched from here.",
+    "credentials: {\"read\": ..., \"write\": ...} SNMP communities, chmod 600, outside every repository.",
+    "allow_hardware is true, but nothing talks to the real PDU without --hardware on the command line as well (robofast_core/hwgate.py)."
+  ],
+  "name": "pdu-t2",
+  "listen": "127.0.0.1:11132",
+  "pdu": {
+    "host": "127.0.0.1",
+    "port": 7162,
+    "relay": true,
+    "timeout": 3.0,
+    "retries": 2
+  },
+  "credentials": "~/.config/robofast/pdu-t2.credentials.json",
+  "allow_hardware": true,
+  "outlets": [
+    {"outlet": 1, "name": "T2", "description": "T2 telescope control PC", "writable": false},
+    {"outlet": 2, "name": "panel", "description": "T2 mount panel; also the Apogee filter wheel", "writable": true, "cycle": true},
+    {"outlet": 3, "name": "inst", "description": "T2 instruments: the Apogee camera", "writable": true, "cycle": true},
+    {"outlet": 4, "name": "A1 North Heater", "writable": false},
+    {"outlet": 5, "name": "aqawan1 router", "description": "the enclosure's network", "writable": false},
+    {"outlet": 6, "name": "CAMAL Computer", "writable": false},
+    {"outlet": 7, "name": "CAMAL Mount", "writable": false}
+  ],
+  "min_cycle_interval": 600
+}
