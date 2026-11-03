@@ -387,6 +387,13 @@ class TCSGO:
             raise AlpacaException(INVALID_OPERATION, "drives or amplifiers switch is down")
         if st.galil_stale:
             raise AlpacaException(INVALID_OPERATION, "TCS reports Galil data stale")
+        tripped = [x for x in st.limits if x != "soft_limit"]
+        if tripped:  # a travel limit locks the mount out until an operator clears it
+            raise AlpacaException(
+                INVALID_OPERATION,
+                f"travel limit tripped ({', '.join(tripped)}): an operator must clear it;"
+                " robofast never does",
+            )
 
     async def set_tracking(self, on: bool) -> None:
         if on:

@@ -229,13 +229,24 @@ captured.
 ## Limits
 
 - **Hardware travel limits** (east, west, north, south) and a **horizon
-  limit**, as status bits. What clears them is not documented.
+  limit**, as status bits. What clears them is not documented. They are
+  understood to be trip wires that stop the mount before damage and lock
+  out software control until an operator resets them (to confirm, with
+  how they are reset: question 13).
 - **Software limits**: "approaching" and "reached" soft limit bits, and the
   horizon check made before any motion: a target below the horizon sets
   "target out of range" and the mount switches to follow (does not slew).
 - robofast adds its own `min_alt` check before `#6` (20° in the example
   config), refuses slews with the drives or amplifiers switch down or the
   Galil data stale, and reports every limit bit in `Action("Faults")`.
+- While any travel or horizon limit bit is set, robofast refuses every
+  motion (slew, tracking on, park, shutter open) and never tries to clear
+  it: the night needs an operator. The "soft limit" bits alone do not
+  refuse (the TCS holds the mount itself).
+- robofast has **no HA/Dec envelope of its own yet**: the 60-inch's
+  hour-angle and declination limits are unknown (question 13), and the
+  simulator's (HA +-6 h, Dec -40..89.5) are placeholders. Its own envelope,
+  inside the trip wires, is to be added once they are known.
 
 ## How robofast maps it to Alpaca
 
