@@ -132,3 +132,5 @@ ignore = ["RUF001", "RUF002", "RUF003", "ASYNC109", "ASYNC110"]
 [tool.ruff.lint.per-file-ignores]
 # The console page's inline JavaScript and CSS (no build step, docs/console.md).
 "robofast_core/console/page.py" = ["E501"]
+# Runs on the MINERVA gateway's Python 2.7 as well as 3 (docs/remote.md): no pyupgrade.
+"scripts/snmp_relay.py" = ["UP"]
