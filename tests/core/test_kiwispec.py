@@ -91,6 +91,9 @@ def service_config(sim: KiwiSpecSim, **over) -> KiwiSpecConfig:
         # config has neither (test_minerva_is_iodine_only).
         "lamp_frames": ["thar", "fiberflat"],
         "slit_flat_led": True,
+        # The legacy exposure meter's mechanics; MINERVA uses the FAU flux
+        # (test_kiwispec_flux.py).
+        "flux_source": "expmeter",
         **over,
     }
     return KiwiSpecConfig.from_dict(d)

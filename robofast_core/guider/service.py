@@ -63,13 +63,19 @@ Config (JSON; every key optional except as noted)::
      "backlight": null | {"kind": "sim"} | {"kind": <a plug-in's kind>, ...},
      "guide": {...GuideConfig...},
      "sim": {...the simulated sky, when camera.kind is "sim"...},
-     "redis": null | {"host", "port", "channel"}}
+     "redis": null | {"host", "port", "channel"},
+     "flux_report": null | {"url", "telescope", "interval"?, "timeout"?}}
 
 Each ``kind`` is a backend registered in :mod:`robofast_core.guider.hardware`
 (a plug-in adds more: docs/plugins.md). MINERVA's FAU backlight is
 KiwiSpec's, ``{"kind": "kiwispec", "url": "http://host:port"}``, registered
 by the built-in :mod:`robofast_core.devices` plug-in; the earlier form
 ``{"<kind>": url}`` still works.
+
+``flux_report`` sends the counts inside the fiber's footprint on every guide
+frame to the spectrograph service (``POST /flux``), for the spectrum's
+flux-weighted midpoint (:mod:`robofast_core.guider.flux_report`; it turns
+on ``guide.fiber_flux``). ``GET /status`` shows it (``flux_report``).
 
 Safety
 ------
@@ -126,6 +132,7 @@ from robofast_core.guider.base import (
     TipTiltError,
 )
 from robofast_core.guider.centroid import WindowedCOM
+from robofast_core.guider.flux_report import FluxReportConfig, FluxReporter
 from robofast_core.guider.loop import (
     Backlight,
     GuideConfig,
@@ -189,6 +196,9 @@ class GuiderServiceConfig:
     #: the guide camera's band) and ``auto`` (choosing the guide star:
     #: :class:`~robofast_core.guider.offset.AutoConfig`).
     offset_guide: dict[str, Any] = field(default_factory=dict)
+    #: Report the fiber flux to the spectrograph service
+    #: (:class:`~robofast_core.guider.flux_report.FluxReportConfig`).
+    flux_report: dict[str, Any] | None = None
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> GuiderServiceConfig:
@@ -324,6 +334,11 @@ class GuiderService:
             calib.CalibrationStore(config.calibration_dir) if config.calibration_dir else None
         )
         gcfg = GuideConfig.from_dict({"scope": config.scope, **config.guide})
+        flux_cfg = (
+            None if config.flux_report is None else FluxReportConfig.from_dict(config.flux_report)
+        )
+        if flux_cfg is not None:
+            gcfg.fiber_flux = True
         self.pa_cal = self._pa_calibration()
         publisher = None
         if redis_client is not None or config.redis:
@@ -354,6 +369,7 @@ class GuiderService:
             registry=self.registry,
             publisher=publisher,
         )
+        self.flux_reporter = None if flux_cfg is None else FluxReporter(self.guider, flux_cfg)
         self._load_calibrations()
         self._catalog: Any = None
         self._solver: Any = None
@@ -449,11 +465,15 @@ class GuiderService:
                 await dev.open()
         self._server = await asyncio.start_server(self._connection, self.host, self.port)
         self.port = self._server.sockets[0].getsockname()[1]
+        if self.flux_reporter is not None:
+            self.flux_reporter.start()
         return self
 
     async def stop(self) -> None:
         with contextlib.suppress(Exception):
             await self.guider.stop("service stopping")
+        if self.flux_reporter is not None:
+            await self.flux_reporter.stop()
         p = self.parts
         for dev in (p.tiptilt, p.mount, p.camera):
             if dev is not None:
@@ -505,6 +525,7 @@ class GuiderService:
         s["scope"] = self.config.scope
         s["port"] = self.config.port
         s["busy"] = self._busy
+        s["flux_report"] = None if self.flux_reporter is None else self.flux_reporter.status()
         s["calibrations"] = {
             "tiptilt": None if self.guider.tt_cal is None else self.guider.tt_cal.as_json(),
             "mount": None if self.guider.mount_cal is None else self.guider.mount_cal.as_json(),

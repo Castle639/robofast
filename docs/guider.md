@@ -215,6 +215,29 @@ rotation: calibrate per port, and recalibrate if the rotator angle changes.
    -> state `lost`, alarm `star_lost`, back to step 2; after
    `max_reacquire` attempts, `failed`.
 
+### Fiber flux for the spectrograph
+
+With the fiber located, the guide frames also measure the light reaching
+the fiber. `guide.fiber_flux: true` (turned on by `flux_report`) sums every
+guide frame's counts inside the fiber's footprint: an aperture of
+`fiber_aperture` pixels (default `fiber_radius`) around the fiber pixel,
+less the median of the annulus `fiber_annulus` (default 2x..3x the
+aperture) per pixel (`robofast_core.guider.loop.fiber_counts`). Each
+frame's record has it (`fiber_counts`, `GET /telemetry`). With
+
+    "flux_report": {"url": "http://<kiwispec>:8130", "telescope": "T1", "interval": 2.0}
+
+the service sends `[t_start, t_end, counts]` for every frame (Unix
+seconds) to the KiwiSpec service's `POST /flux` every `interval` seconds
+(`robofast_core/guider/flux_report.py`); a failed report is kept, bounded,
+and resent, and the loop never waits for it. `GET /status` `flux_report`
+shows what was sent and the last error. The KiwiSpec service sums the
+telescopes feeding a spectrum into its flux-weighted midpoint
+(`docs/kiwispec.md`, "Flux from the FAU guide frames"). MINERVA's FAU is a
+beamsplitter, so this is the light reaching the fiber's position, not the
+light coupled into the fiber: a relative flux. With offset guiding the
+fiber must be inside the guide window (`roi_size`) to be measured.
+
 ## Offloading
 
 The `Offloader` watches the tip/tilt's mean position over `window` seconds

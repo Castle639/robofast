@@ -101,8 +101,8 @@ their good ideas instead (section 9).
   KiwiSpec is the first (`robofast_core/devices/kiwispec_service.py`,
   `docs/kiwispec.md`): it alone talks to the spectrograph PC's legacy server
   and SI camera server, runs one job at a time with every step bounded,
-  terminates on exposure-meter counts and reports the flux-weighted
-  midpoint, and gives the sequencer's cleanup a bounded abort that never
+  terminates on the flux record's counts (the FAU guide frames' flux, not
+  the unused exposure meter) and reports the flux-weighted midpoint, and gives the sequencer's cleanup a bounded abort that never
   raises. Like the Aqawan server, it refuses anything but a verified
   simulator without `allow_hardware` in the config and `--hardware`
   (below, "The hardware gate").

@@ -9,5 +9,8 @@
   "slit_flat_led": false,
   "lamp_frames": [],
   "heater_setpoint": 55.0,
-  "readout_time": 22.0
+  "readout_time": 22.0,
+  "_flux": "The legacy exposure meter is not used: the flux record is the FAU guide frames the guiders report (POST /flux). docs/kiwispec.md.",
+  "flux_source": "fau",
+  "pressure_alarm": "alarm"
 }

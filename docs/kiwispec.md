@@ -9,9 +9,13 @@ HTTP API, a simulator"):
 | robofast module | What it is |
 |---|---|
 | `robofast_core/devices/kiwispec_client.py` | async clients for both legacy services: allowlisted commands, hard timeouts, typed replies, bounded retries |
-| `robofast_core/devices/kiwispec_service.py` | the single owner: HTTP/JSON API, one job at a time, exposure-meter termination and the flux-weighted midpoint, the hardware-safety gate, and `KiwiSpecRemote` (the abort hook for the sequencer's cleanup) |
-| `robofast_core/devices/kiwispec_sim.py` | a TCP simulator of the spectrograph PC (both protocols, legacy quirks included), with fault injection |
-| `tests/core/test_kiwispec.py` | the fast-tier tests, all against the simulator on loopback |
+| `robofast_core/devices/kiwispec_service.py` | the single owner: HTTP/JSON API, one job at a time, count termination and the flux-weighted midpoint, the raw-file rewrite, SI Image restarts, the hardware-safety gate, and `KiwiSpecRemote` (the abort hook for the sequencer's cleanup) |
+| `robofast_core/devices/kiwispec_flux.py` | the flux record from the FAU guide frames: the per-telescope log and the summed flux-weighted midpoint |
+| `robofast_core/devices/kiwispec_fits.py` | the verified in-place rewrite of SI Image's raw file into legal FITS |
+| `robofast_core/devices/kiwispec_aux.py` | hardware not on the legacy protocol: the chiller (telemetry; simulator only so far) |
+| `robofast_core/guider/flux_report.py` | each guider's report of its fiber flux to the service (`POST /flux`) |
+| `robofast_core/devices/kiwispec_sim.py` | a TCP simulator of the spectrograph PC (both protocols, legacy quirks included, SI Image's raw files), with fault injection |
+| `tests/core/test_kiwispec.py`, `test_kiwispec_flux.py`, `test_guider_fiber_flux.py` | the fast-tier tests, all against the simulators on loopback |
 | `deploy/kiwispec.example.json` | an example config (loopback) |
 
 Everything below about the legacy system comes from its code
@@ -83,7 +87,7 @@ client's reply timeout:
 | `save_image` | `None` | `success`/`fail` | 30 s | `shutil.move("C:/IMAGES/I", file_name)`: the camera's last frame into place |
 | `write_header` | `<text>` | `success` | 3 s | appends to a header buffer |
 | `write_header_done` | `<text>` | `success`/`fail` | 10 s | appends, parses the buffer as JSON `{key: value or [value, comment]}`, **updates the raw FITS file in place**, and converts the SI `PARAMnn` keys (also: `DATE-OBS` + 7 h, local to UTC) |
-| `start_si_image` / `kill_si_image` | `None` | `success` | 10 s | start or `taskkill` the SI Image camera program (killing it stops the CCD cooler for ~15 s) |
+| `start_si_image` / `kill_si_image` | `None` | `success` | 10 s | start or `taskkill` the SI Image camera program (killing it stops the CCD cooler until it is started again) |
 
 **Dispatched but not defined** (each raises `AttributeError` and kills the
 listener): `thar_turn_on`, `thar_turn_off`, `flat_turn_on`, `flat_turn_off`,
@@ -159,16 +163,17 @@ something. robofast's client sends only the allowlisted ones
 | home the iodine stage (`i2stage_home`) | **yes** | | allowed (client only; the service does not home on its own) |
 | reconnect the stage (`i2stage_connect`) | **yes** (home, out, in) | **yes** (PDU outlet off/on) | allowed in the client; **the service never sends it** (legacy did, automatically, after a stuck move) |
 | `i2stage_disconnect` | | | allowed (client only) |
-| backlight on/off | **yes** (Dynamixel servo over the fiber input) | LED | allowed; the service pauses the exposure meter first (the backlight would saturate it) |
+| backlight on/off | **yes** (an LED disk on an arm: a Dynamixel servo swings it in over the fiber input and out again) | LED | allowed; with the legacy exposure meter in use, the service pauses it first (the backlight would saturate it) |
 | slit-flat LED on/off | | **yes** (PDU outlet) | allowed |
-| iodine cell heater on/off, set point | | **yes** (heater; a toggle) | allowed |
-| exposure meter pause/resume | | **yes** (PMT high voltage, PDU outlet) | allowed |
+| iodine cell heater on/off, set point | | **yes** (heater, through a Thorlabs controller; on/off is a toggle) | allowed |
+| exposure meter pause/resume | | **yes** (PMT high voltage, PDU outlet) | allowed; sent only with `flux_source: "expmeter"` (the meter is not used at MINERVA) |
 | SI: exposure (`Acquire`), `TerminateAcquisition` | **yes** (camera shutter) | | allowed |
 | SI: cooler on/off, readout mode, CCD format | | cooler | allowed (cooler only ever turned **on**) |
-| `kill_si_image` / `start_si_image` | | **stops/starts the CCD cooler** | forbidden (operator) |
+| `kill_si_image` / `start_si_image` | | **stops/starts the CCD cooler** | allowed: only to restart a wedged SI Image, kill then start at once ("Restarting SI Image") |
 | ThAr / flat lamp on/off | | | not possible: the handlers do not exist (forbidden: they kill the listener) |
 | vacuum: pump, pump valve, vent valve | **valves** | **pump** | not on this protocol (legacy `spectrograph.py` switches them on the bench PDU directly: `vent`, `pump`, `hold`); the server closes the pump valve by itself on a suspected pump failure. Not in robofast |
 | `save_image`, `write_header*` | | | allowed; edit files on the PC |
+| rewrite the raw file as legal FITS | | | the service, on the data directory's mount, verified before it replaces the raw file ("The raw file") |
 | reads (temperatures, pressures, stage position, meter total, index, camera status) | | | allowed; the only commands retried |
 
 ## 3. The robofast side
@@ -209,20 +214,23 @@ bound and every frame an overall bound. It differs from legacy on purpose:
   never passed it (`expose_with_timeout(exptime, expmeter)` leaves `exptype`
   at 1), so its biases and darks were light exposures.
 - **Exposure times are not truncated.** Legacy did `int(float(exptime))`.
-- **No automatic power cycle** of the iodine stage, no `kill_si_image`, no
-  recursion, no `sys.exit()` in a thread, no lock held across an error, no
-  32-minute lock wait (`recover_server`'s `si_lock.acquire(1920)` -- which,
-  in Python 2, is a blocking acquire with no timeout at all).
-- **Raw files are never rewritten on Linux.** Legacy's `fix_fits` rewrites
-  the raw spectrum in place (`clobber=True`); robofast writes its keywords
-  through the server's `write_header` only (the server's own in-place update
-  is legacy behaviour that robofast cannot change).
+- **No automatic power cycle** of the iodine stage, no recursion, no
+  `sys.exit()` in a thread, no lock held across an error, no 32-minute
+  lock wait (`recover_server`'s `si_lock.acquire(1920)` -- which, in
+  Python 2, is a blocking acquire with no timeout at all). SI Image is
+  restarted only as "Restarting SI Image" says: kill, then start at once.
+- **The raw file is rewritten once, verified.** Legacy's `fix_fits`
+  rewrote the raw spectrum in place (`clobber=True`) with no check; robofast
+  writes the legal file next to it, verifies it and only then replaces the
+  raw file ("The raw file").
 - **The file name is sent again just before `save_image`**: a server that
   restarted mid-exposure has forgotten it.
 - **A warm CCD refuses the exposure** (outside `ccd_temp_min..ccd_temp_max`,
   default -95..-85 C).
-- **Backlight:** the exposure meter is paused before the backlight goes on
-  and resumed after (legacy had this commented out).
+- **Backlight:** with the legacy exposure meter in use, it is paused before
+  the backlight goes on and resumed after (legacy had this commented out).
+- **No exposure meter.** The flux record comes from the FAU guide frames
+  (next section).
 - **Telescopes feeding the fiber** are part of a science request
   (`telescopes`), checked against the config, and written to the header
   (`FIBFEED`) and the result; calibrations take none.
@@ -301,12 +309,79 @@ and the guider guides on the configured fiber position (as legacy did);
 and the two enclosures' dispatch schedulers do not see each other's
 spectra in advance (each finds out from the queue).
 
-### Exposure-meter termination and the flux-weighted midpoint
+### The flux record: FAU guide frames, not the exposure meter
 
-During a light frame that uses the meter (science), the service resets the
-total, then polls `get_expmeter_total` every `expmeter_poll` s. If the total
-reaches `target_counts` it sends `TerminateAcquisition` (the frame is still
-read out and kept; `ended_by: "counts"`); otherwise the exposure runs for
+**The legacy exposure meter (a PMT) is not used.** `flux_source` (default
+`"fau"`) chooses where a science frame's flux record comes from:
+
+| `flux_source` | Flux record | Count termination (`target_counts`) |
+|---|---|---|
+| `fau` (MINERVA) | the FAU guide frames the guiders report (`POST /flux`) | on the summed FAU counts (relative units, below) |
+| `expmeter` | the legacy exposure meter's running total | on the meter's counts |
+| `none` | none | ignored, with a warning |
+
+With `fau` or `none` the service never resets, reads or pauses the meter
+(and `/status` does not read it). An exposure runs its fixed `exptime`
+unless a `target_counts` is reached first. When there is no flux record
+for a frame -- no guider reported, or the reports cover less than
+`fau_min_coverage` (default half) of the exposure, or the meter failed --
+the frame's `flux_midpoint_*` are `null`, its `midpoint_source` is
+`geometric`, and the barycentric correction uses the middle of the
+exposure (`robofast_core/spectra.py`; the sidecar says which).
+
+#### Flux from the FAU guide frames
+
+Each telescope's fiber-acquisition unit (FAU) images the fiber's entrance
+on its guide camera. The backlight lights the fiber from behind, so the
+fiber's position on each guide camera is known (`POST /locate` on the
+guider, `docs/guider.md`). With `guide.fiber_flux` on, the guider sums the
+counts inside the fiber's footprint in every guide frame (a
+`fiber_aperture` radius around the fiber pixel, less the median of an
+annulus: `robofast_core.guider.loop.fiber_counts`), and its `flux_report`
+(`robofast_core/guider/flux_report.py`) sends them every `interval`
+seconds to this service:
+
+    POST /flux  {"telescope": "T1", "frames": [[t_start, t_end, counts], ...]}
+
+Times are Unix seconds, UTC (the guider and the service are both on NTP);
+`telescope` is the service's name for it. A report that fails is kept
+(bounded) and resent; nothing in the guide loop waits for it. The service
+keeps each telescope's frames for `fau_max_age` (4 h); `/status`
+`flux_reports` shows when each telescope last reported.
+
+All four telescopes feed the fiber at the same time, and a spectrum's
+flux is the sum over the telescopes in its `telescopes`
+(`robofast_core/devices/kiwispec_flux.py`, `fau_flux`). Each frame's counts
+arrive at a constant rate over the frame; a gap between frames of at most
+`fau_max_gap` (10 s) is bridged (each frame's rate holds until halfway to
+its neighbour), a longer gap is left uncovered. Then
+
+    counts = Σ_tel ∫ R_tel(t) dt,   t_mid = Σ_tel ∫ t R_tel(t) dt / counts,   over [start, end]
+
+(tested against analytic midpoints for constant, linear and exponential
+rates, and for two telescopes). With `target_counts`, the running sum is
+checked every `expmeter_poll` s and the exposure terminated once it is
+reached (`ended_by: "counts"`); since guiders report every couple of
+seconds, termination lags the light by about one report interval. The
+midpoint is computed after the readout, so the last reports are in. The
+result has `fau_counts` and, per telescope, `fau` (`counts`, `frames`,
+`coverage`); the header `FAUFLUX` and `FLUXSRC`.
+
+**A relative flux.** MINERVA's FAU is a beamsplitter: the guide camera sees
+a fixed fraction of the light reaching the fiber's region, not the light
+that actually couples into the fiber (losses from focus, seeing and
+centring do not show). The FAU counts are a relative flux scale: right for
+weighting the midpoint in time, and for a `target_counts` calibrated in
+these same units (per telescope, per camera gain and exposure), but not a
+measure of the light in the spectrum. With offset guiding the fiber must
+be inside the guide window for its counts to be measured.
+
+#### The legacy exposure meter (`flux_source: "expmeter"`)
+
+During a science frame the service resets the total, then polls
+`get_expmeter_total` every `expmeter_poll` s. If the total reaches
+`target_counts` it sends `TerminateAcquisition` (the frame is still read
+out and kept; `ended_by: "counts"`); otherwise the exposure runs for
 `exptime`. After the shutter closes it waits one meter period and reads once
 more, so the counts up to the close have reached the total.
 
@@ -328,6 +403,87 @@ answer (`fail`, as with the legacy thread disabled), or its total goes
 backwards (a server restart), the frame is time-terminated with a warning and
 no midpoint.
 
+### The raw file
+
+SI Image writes a file that is not legal FITS (the header says `SIMPLE =
+F`, and standard readers refuse it), so the raw file's header is
+rewritten. There is **one copy at rest**: the legal file replaces the raw
+one, and only after it is verified (`robofast_core/devices/kiwispec_fits.py`,
+`standardize`). With `raw_fits: {"dir": ...}` (the spectrograph PC's data
+directory as this host mounts it; the file is `<dir>/<night>/<file>`), after
+each frame's header is written the service:
+
+1. waits (up to `raw_fits.wait`) for the file to appear, reads it and
+   decodes its 16-bit pixels;
+2. writes the legal file next to it under a temporary name (same
+   directory, so the rename is atomic), with FITS `CHECKSUM`/`DATASUM` and
+   `RAWSHA` (the SHA-256 of the pixels), and fsyncs it; `DATE-OBS` still in
+   the PC's local time (SI Image's own comment) is converted to UTC with
+   `pc_utc_offset_hours`;
+3. re-opens it: valid FITS, checksums good, the pixel array identical
+   (shape, every value, SHA-256) to the raw file's;
+4. checks that the raw file did not change meanwhile (size, mtime,
+   SHA-256);
+5. `os.replace`s the raw file with it and fsyncs the directory.
+
+On any failure the temporary file is deleted, the raw file is left exactly
+as it was, and `/status` raises an alarm (`raw file ... not rewritten (left
+untouched)`); the frame's result says why (`fits.error`). A file that is
+already legal is left alone; one whose header was never written (SI
+Image's `PARAMnn` keywords still in it) is refused, as legacy did. The
+result's `fits` (`pixel_sha256`, `datasum`, `raw_sha256`) goes into the
+spectrum's sidecar. The form of the illegal file is taken from legacy
+`fix_fits.py`; it has not yet been checked against a raw file from the
+current camera software.
+
+### Restarting SI Image
+
+SI Image sometimes wedges (legacy's recovery note: "click OK on KIWISPEC-PC
+and restart"). robofast may restart it, but must start it again **as soon
+as possible**: killing it stops the CCD cooler, and the CCD's temperature
+stability matters. So the restart is always the pair, back to back:
+`kill_si_image`, then at once `start_si_image` (retried until
+`camera_restart_timeout`), then reconnect and turn the cooler on. It runs
+after `camera_restart_after` (2) camera failures in a row (a failed
+exposure whose camera connection was dropped), while the job still holds
+the spectrograph, or on `POST /restart_camera`. `camera_restart: false`
+turns the automatic restart off. A restart that cannot start SI Image again
+raises an alarm ("start it by hand"). `/status` `camera_restarts` lists the
+recent ones, with how long each took. The next exposure still checks the
+CCD temperature, so a frame is never taken before the CCD is back in range.
+
+### Vacuum
+
+The spectrograph is, for now, isolated from its pump: the pump side is at
+atmosphere, and the gauges read correctly. `max_spec_pressure` (default
+0.006 mbar, legacy) is the threshold, and `pressure_alarm` says what a
+pressure above it is: `"alarm"` (default; `/status` `alarms`, so the
+sequencer marks the spectrograph down) or `"warning"` (`/status`
+`warnings` only). MINERVA's example config runs with `"warning"`. The pump
+pressure is read for telemetry; it raises nothing. robofast does not
+switch the pump or its valves.
+
+### Other hardware
+
+* **The backlight**: an LED disk on an arm that swings in over the fiber
+  (to locate it on the FAU cameras) and out again: `backlight_on` /
+  `backlight_off` on the legacy server, `POST /backlight` here; the server
+  turns it off by itself after 60 s. The simulator models the arm
+  (`backlight_arm`).
+* **The iodine cell heater**, through a Thorlabs controller behind the
+  legacy server: on/off (`POST /configure` `heater`; the last commanded
+  state is `/status` `heater_on`), set point, and the cell's temperature
+  (`/status` readings `heater_temp`, `heater_setpoint`).
+* **The chiller** (an Oasis 3): telemetry only, through
+  `robofast_core/devices/kiwispec_aux.py` (`chiller` in the config). Its
+  interface is not known yet, so the only backend is the simulator
+  (`{"kind": "sim"}`); `{"kind": "oasis3"}` names it and reports, as a
+  warning, that its driver is missing. A reading (`temp`, `setpoint`,
+  `flow`, `fault`) is in `/status` readings `chiller`; a temperature off
+  its set point by more than `tolerance` is a warning, a fault an alarm.
+* **The spectrograph PC's clock** is MST without daylight saving
+  (`pc_utc_offset_hours: -7`); SI Image stamps `DATE-OBS` in it.
+
 ### Faults the simulator injects, and what the service does
 
 | Fault | Result (tested) |
@@ -339,6 +495,8 @@ no midpoint.
 | iodine stage stuck | the job fails after `stage_timeout`; nothing is exposed |
 | spectrograph server restart mid-exposure | the camera finishes the frame; it is saved once the server is back (within `save_timeout`); the meter is reported lost |
 | camera restart mid-exposure | the job fails at once; the next exposure reconnects |
+| SI Image wedged (takes commands, never answers) | each exposure fails within its bound; after `camera_restart_after` failures SI Image is killed and started again at once, and the next exposure works |
+| raw file damaged, or changed during the rewrite | the raw file is left untouched; `/status` alarms |
 | camera hung during an abort | `/abort` returns after `abort_timeout` with `ended: false`; the job is cancelled, the camera connection dropped, the claim released |
 
 ### Night names and times
@@ -392,30 +550,32 @@ frames are the service's, and an enclosure config's
 `SpectrographBusy`, every other `KiwiSpecError` a `SpectrographError`).
 
 Done: `docs/rv_night.md`. In short, a `SPECTRUM` request is fed by every
-free telescope it allows. Each one acquires the target, locates the fiber
-with the backlight (`POST /backlight` through its guider) and guides. The
-leading telescope takes the spectrum (`POST /expose` with the telescopes
-that are guiding), and a telescope that drops out is reported in the
-spectrum's sidecar, not silently included. Every cleanup calls
-`KiwiSpecRemote.abort` before parking. Calibrations (`POST /calibrate`)
-run in the closed-roof calibration plan. Robofast's metadata goes into a
-sidecar file; the raw frame is never rewritten (question 10 below:
-robofast does not rely on `write_header_done`'s in-place update for
-anything it records itself).
+free telescope it allows (all four feed the fiber at once). Each one
+acquires the target, locates the fiber with the backlight (`POST
+/backlight` through its guider) and guides, and its guider reports the
+fiber flux (`POST /flux`). The leading telescope takes the spectrum (`POST
+/expose` with the telescopes that are guiding), and a telescope that drops
+out is reported in the spectrum's sidecar, not silently included. Every
+cleanup calls `KiwiSpecRemote.abort` before parking. Calibrations (`POST
+/calibrate`) run in the closed-roof calibration plan. robofast's metadata
+goes into a sidecar file; the raw frame is made legal FITS once, verified
+("The raw file"), and its checksums are in the sidecar.
 
 ## 6. Questions for JDE
 
-1. **The exposure meter is disabled** in `spectrograph_server.py`'s
-   `__main__` ("*** EXPMETER disabled ***"). Is it in use at all now? If it
-   is to be used: is the reading period still 1 s, is `MAXSAFECOUNT` (3e7
-   counts per reading) right, and does the PMT see light only while the
-   camera shutter is open (the `O` "shutter trigger"), or all the time?
-2. **Is the chiller** (also disabled) still part of KiwiSpec?
-3. ~~ThAr and fiber flat lamps~~ **Answered** (JDE, 2026-10-31): there
-   are none, and no way to switch over: KiwiSpec is iodine only (section
-   4). The slit-flat LED does not work (legacy: "Slit flat lamp is dead",
-   2023; confirmed by JDE 2026-11-01), so `slit_flat_led` stays false until
-   it is repaired.
+Answered (JDE, 2026-10-31 to 2026-11-02), and how robofast follows:
+
+1. ~~The exposure meter~~ **Not used.** Exposures run their fixed time
+   unless a flux record says otherwise; the flux record is the FAU guide
+   frames ("The flux record"); `flux_source: "expmeter"` keeps the meter's
+   code for a spectrograph that has one.
+2. ~~The chiller~~ **Part of KiwiSpec**: an Oasis 3, for telemetry
+   ("Other hardware"). Its interface is still to be found (below).
+3. ~~ThAr and fiber flat lamps~~ **None** used robotically: they were only
+   ever fed by hand, and there is no way to switch over; KiwiSpec is iodine
+   only (section 4), and no MINERVA plan asks for them
+   (`test_no_minerva_plan_expects_lamp_frames`). The slit-flat LED is dead
+   (legacy, 2023), so `slit_flat_led` stays false until it is repaired.
 4. **Iodine stage:** its speed and homing time? Should the service ever
    power-cycle the stage by itself (legacy did, after two failed moves)?
    (The positions are answered: the live server's values are correct, and
@@ -428,13 +588,25 @@ anything it records itself).
    complete when `Acquire`'s Done arrives? Is the SI header's `TIME` the
    shutter open/close, so the midpoint can be referred to it?
 7. **CCD temperature limits** to refuse an exposure (assumed -95..-85 C,
-   from PARAM62/PARAM63), and the pressure alarm (legacy 0.006 mbar)?
-8. **`write_header_done` adds 7 hours to `DATE-OBS`** (local to UTC). Is the
-   spectrograph PC still on MST without daylight saving?
-9. **Recovery:** when SI Image wedges ("click OK on KIWISPEC-PC and restart
-   mainNew.py"), should robofast ever restart it (`kill_si_image` /
-   `start_si_image`, which stops the cooler), or always page a human?
-10. **Raw files:** may the service rely on the server's in-place
-    `write_header_done`, or should robofast keep its keywords in a sidecar
-    and leave the raw file exactly as the camera wrote it?
-11. **Which telescopes feed the fiber** now (the example config lists T1-T4)?
+   from PARAM62/PARAM63)? ~~The pressure alarm~~ **Answered:** 0.006 mbar,
+   configurable, and downgradable to a warning while the spectrograph is
+   isolated from its pump ("Vacuum").
+8. ~~The PC's clock~~ **MST without daylight saving** (`pc_utc_offset_hours`).
+9. ~~Restarting SI Image~~ **robofast may restart it when it wedges, and
+   must start it again as soon as possible** ("Restarting SI Image").
+10. ~~Raw files~~ **The camera software's file is not legal FITS, so its
+    header is rewritten; no second copy is kept.** robofast rewrites it in
+    place, verified ("The raw file").
+11. ~~Which telescopes feed the fiber~~ **All four, simultaneously.**
+
+Still open:
+
+* The **chiller's** interface (serial or network, its protocol), for a
+  driver in `kiwispec_aux.py`.
+* The **raw file's** exact form: confirm with one raw file from the
+  current SI Image that `kiwispec_fits.read_raw` decodes it (the form is
+  taken from legacy `fix_fits.py`), and the data directory's mount on the
+  control computer (`raw_fits.dir`).
+* The **FAU flux scale**: each FAU's beamsplitter fraction and camera gain,
+  if `target_counts` is to mean the same on every telescope.
+* Questions 4 to 7 above.
