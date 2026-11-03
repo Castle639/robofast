@@ -189,6 +189,9 @@ TELESCOPE_MEMBERS = {
     "Azimuth": ("tel.az", "AZ", "deg", "Azimuth at exposure start"),
     "SiderealTime": ("tel.lst", "LST", "h", "Local sidereal time at start"),
     "Tracking": ("tel.tracking", "TRACKING", "", "Mount tracking"),
+    # The mount's driver and control software, with its version (the PWI
+    # server reports e.g. "PlaneWave PWI4 4.1.6; robofast pwi_server 0.1.0").
+    "DriverInfo": ("tel.driverinfo", "MNTSWVER", "", "Mount driver and software"),
 }
 FOCUSER_MEMBERS = {
     "Position": ("focuser.position", "FOCPOS", "step", "Focuser position"),

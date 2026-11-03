@@ -129,6 +129,12 @@ class PWIStatus:
     version: str | None = None
     #: Per-axis homed flags where reported (PWI4 ``axisN.is_homed``), az, alt.
     axes_homed: tuple[bool, bool] | None = None
+    #: PWI4: the azimuth axis's mechanical angle (``mount.axis0.position_degs``,
+    #: not wrapped) and the minimum of PWI4's axis-0 wrap range
+    #: (``mount.axis0_wrap_range_min_degs``: an alt/az or RA/Dec goto puts
+    #: azimuth at the mechanical angle in [min, min + 360)).
+    az_mech_deg: float | None = None
+    az_wrap_min: float | None = None
     raw: dict[str, str] = field(default_factory=dict, repr=False)
 
     @property
@@ -225,6 +231,8 @@ def parse_pwi4_status(text: str) -> PWIStatus:
         rotator_mech_deg=_f(raw.get("rotator.mech_position_degs")),
         rotator_moving=_b(raw.get("rotator.is_moving")) if "rotator.is_moving" in raw else None,
         pointing_model=raw.get("mount.model.filename") or None,
+        az_mech_deg=_f(raw.get("mount.axis0.position_degs")),
+        az_wrap_min=_f(raw.get("mount.axis0_wrap_range_min_degs")),
         raw=raw,
     )
 
@@ -334,6 +342,7 @@ PWI4_PATHS: dict[str, bool] = {
     "/mount/goto_alt_az": True,
     "/mount/offset": True,
     "/mount/stop": True,
+    "/mount/set_axis0_wrap_range_min": False,  # ?degs=: where gotos put azimuth
     "/mount/tracking_on": True,
     "/mount/tracking_off": True,
     "/m3/goto": True,
@@ -464,6 +473,10 @@ class PWIClient:
     async def tracking(self, on: bool) -> PWIStatus:
         raise NotImplementedError
 
+    async def set_az_wrap_min(self, degs: float) -> PWIStatus:
+        """PWI4: gotos put azimuth at the mechanical angle in [degs, degs + 360)."""
+        raise PWIError(f"{self.backend} has no azimuth wrap range setting")
+
     async def m3_select(self, port: int) -> PWIStatus:
         raise NotImplementedError
 
@@ -537,6 +550,9 @@ class PWI4Client(PWIClient):
 
     async def tracking(self, on: bool) -> PWIStatus:
         return await self._cmd("/mount/tracking_on" if on else "/mount/tracking_off")
+
+    async def set_az_wrap_min(self, degs: float) -> PWIStatus:
+        return await self._cmd("/mount/set_axis0_wrap_range_min", degs=_num(degs))
 
     async def m3_select(self, port: int) -> PWIStatus:
         return await self._cmd("/m3/goto", port=int(port))

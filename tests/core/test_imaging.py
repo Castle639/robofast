@@ -102,6 +102,7 @@ async def test_frames_are_saved_with_complete_headers_and_reported(make_rig, tmp
         assert h["FILTNAME"] == "V" and h["FILTPOS"] == 1
         assert h["RA"] == pytest.approx(10.5) and h["DEC"] == pytest.approx(41.3)
         assert h["OBJRA"] == pytest.approx(10.5) and h["RADESYS"] == "FK5"
+        assert h["MNTSWVER"] == "FakeTelescope 1.0"
         assert h["ALT"] == 60.0 and h["AIRMASS"] == pytest.approx(1.154, abs=1e-3)
         assert h["TIMESRC"] == "camera" and abs(h["CLKSKEW"]) < 1.0
         assert h["EXPTIME"] == 0.2 and h["EXPREQ"] == 0.2
