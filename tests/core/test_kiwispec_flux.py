@@ -435,9 +435,15 @@ async def test_wedged_camera_is_restarted_at_once(sim):
             for _ in range(2):
                 job = await run_job(http, "/expose", {"kind": "bias"}, wait=20)
                 assert job["state"] == "failed", job
+            # The job has ended; the spectrograph is held until SI Image is back.
+            for _ in range(100):
+                status = (await http.get("/status")).json()
+                if status["busy"] is None:
+                    break
+                assert status["busy"] == "restarting SI Image"
+                await asyncio.sleep(0.05)
             assert sim.si_kills == 1 and sim.si_starts == 1
             assert sim.cooler_on
-            status = (await http.get("/status")).json()
             assert status["camera_restarts"][-1]["ok"] is True
             assert status["camera_restarts"][-1]["seconds"] < 5
             job = await run_job(http, "/expose", {"kind": "bias"})

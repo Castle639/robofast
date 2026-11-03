@@ -1007,15 +1007,21 @@ class KiwiSpec:
             job.state, job.error = "failed", f"{type(exc).__name__}: {exc}"
         finally:
             self._acquisition = None
-            if job.state == "failed":  # not after an abort or a cancellation
-                job.phase = "restarting SI Image"
-                await self._maybe_restart_camera()
-            self._release()
             job.phase = ""
             job.ended = time.time()
             job.finished.set()
             if job.error:
                 log.warning("job %d %s: %s", job.id, job.state, job.error)
+            if job.state == "failed" and self._restart_due():
+                # The job has ended; the spectrograph stays held until SI
+                # Image is back. Shielded: a restart is never left halfway
+                # (killed and not started again).
+                self._held = "restarting SI Image"
+                task = asyncio.get_running_loop().create_task(self._maybe_restart_camera())
+                task.add_done_callback(lambda _t: self._release())
+                await asyncio.shield(task)
+            else:
+                self._release()
 
     def frame_bound(self, f: Frame) -> float:
         c = self.config
@@ -1091,12 +1097,14 @@ class KiwiSpec:
         log.warning("SI Image restarted in %.1f s", record["seconds"])
         return record
 
+    def _restart_due(self) -> bool:
+        c = self.config
+        return c.camera_restart and self.camera_failures >= c.camera_restart_after
+
     async def _maybe_restart_camera(self) -> None:
         """After ``camera_restart_after`` camera failures in a row (module
         doc). Never raises."""
         c = self.config
-        if not c.camera_restart or self.camera_failures < c.camera_restart_after:
-            return
         try:
             async with asyncio.timeout(c.camera_restart_timeout + 30):
                 await self.restart_camera(f"{self.camera_failures} camera failures in a row")
@@ -1394,7 +1402,9 @@ class KiwiSpec:
         """Abort the running job (discarding the frame), bounded by
         ``abort_timeout``; then cancel it if it has not ended."""
         job, task = self.current, self._task
-        if job is None or task is None or task.done():
+        if job is None or task is None or task.done() or job.finished.is_set():
+            # (A finished job's task may still be restarting SI Image: that
+            # is never cut short.)
             return {"aborted": False, "ended": True, "job": job.view() if job else None}
         job.abort_reason = reason
         self._abort.set()
