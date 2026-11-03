@@ -238,8 +238,8 @@ class MountGuard(ThreadingHTTPServer):
     the moment it is commanded. ``az_windows`` (optional) ``{name: (lo, hi)}``:
     a slew whose target azimuth at that moment is outside ``lo..hi`` deg is
     refused (a mount whose mechanical azimuth is kept in 0..360, as PWI4's is
-    with wrap minimum 0, then never leaves the window). ``events`` (if given) receives ``(time.monotonic(),
-    name, "park" | "unpark" | "slew")``.
+    with wrap minimum 0, then never leaves the window). ``events`` (if given)
+    receives ``(time.monotonic(), name, "park" | "unpark" | "slew")``.
     """
 
     daemon_threads = True
