@@ -14,6 +14,9 @@ infrastructure.
 If you write code to support new hardware, please consider a pull request or sending
 it to me so other users can use (and improve) it.
 
+**robofast moves real hardware and is not safety-certified: read
+[SAFETY.md](SAFETY.md) before deploying it.**
+
 ## Install
 
 The new core, `robofast_core/`, is the installable package (distribution

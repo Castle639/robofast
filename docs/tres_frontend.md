@@ -107,8 +107,8 @@ refused: not referenced or servo off), 7 (position out of limits), 10
   (`Status`, the log, and `Position` reading as an error) and does not block
   the next.
 * The **safety supervisor does not touch the stage**: no position is safer
-  than another for the enclosure, and the stage cannot hurt the telescope or
-  dome. A fault of the stage is the observation's error, not an enclosure
+  than another for the enclosure, and the supervisor does not treat the stage
+  as a hazard to the telescope or dome. A fault of the stage is the observation's error, not an enclosure
   fault. (If FLWO wants it left in a particular position at the end of the
   night, that is a sequencer cleanup step; see the questions.)
 
