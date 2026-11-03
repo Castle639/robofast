@@ -247,10 +247,15 @@ of them, or the one chosen in the dialog), in this order:
 1. **Hold every telescope** (`stop`, through `operator_control`), so the
    sequencer asks for no new lease and the supervisor does not simply
    reopen. Not waited for: closing comes first.
-2. **Ask the safety supervisor** (`POST /close`; the lease is revoked, the
-   sequencer aborts and parks, the supervisor closes; on a roll-off roof
-   with `park_before_close` it parks the telescopes first, bounded by
-   `park_wait`).
+2. **Ask the safety supervisor** (`POST /close` with `"emergency": true`;
+   the lease is revoked, the sequencer aborts and parks, the supervisor
+   closes; on a roll-off roof with `park_before_close` it parks the
+   telescopes first, bounded by `park_wait`). Being an emergency, it
+   overrides the park-before-close interlock
+   (`require_park_before_close`): the roof closes after `park_wait` even
+   on a telescope that did not park. The enclosure `stop` above is a
+   routine close, which that interlock holds until every telescope is
+   parked.
 3. **If the supervisor does not answer within `emergency_timeout`**
    (2 s), or answers with an error, close **through the dome's emergency
    channel**: `PUT /robofast/v1/emergency_close` on the dome server, with a

@@ -302,3 +302,133 @@ async def test_the_clear_faults_action_is_configurable(make_rig):
     rig.dome.Action = lambda action, parameters="": sent.append((action, parameters)) or "ok"
     await rig.supervisor.clear_faults("jde", "testing")
     assert sent == [("ResetFaults", "jde: testing")]
+
+
+# -- the park-before-close interlock (require_park_before_close) ------------------------
+
+INTERLOCK = dict(
+    park_before_close=True,
+    require_park_before_close=True,
+    park_wait=1.0,
+    park_interlock_escalate=0.5,
+)
+
+
+def _stuck(tel) -> None:
+    """A telescope that will not park (Park does nothing)."""
+    tel.Park = lambda: None
+
+
+def test_the_interlock_needs_park_before_close():
+    from robofast_core.safety import SafetyConfig
+
+    with pytest.raises(ValueError, match="needs park_before_close"):
+        SafetyConfig(require_park_before_close=True, allow_unattended_without_watchdog=True)
+
+
+async def test_routine_close_waits_for_every_telescope_to_park(make_rig):
+    """A released lease (a routine close) with a telescope that will not
+    park: the roof stays open, alarms, escalates to critical; once the
+    telescope parks the roof closes."""
+    rig = make_rig(telescopes=2, safety=INTERLOCK)
+    await rig.start(sequencer=False)
+    lease = await _open(rig)
+    sup = rig.supervisor
+    rig.tels[1].Unpark()
+    _stuck(rig.tels[1])
+    lease.release()
+    await wait_until(lambda: sup.status()["close_interlock"]["blocked"], 3, what="blocked")
+    assert "t2.telescope not parked" in sup.status()["close_interlock"]["blocked"]
+    assert rig.timeline.events("close_blocked")
+    assert rig.parked(0)  # the supervisor parked the one that would
+    await wait_until(lambda: sup.critical(), 3, what="escalated")
+    assert "NOT CLOSED" in sup.critical()[0]
+    assert rig.dome_open()
+    sent = rig.timeline.commands(device="dome", outcome="sent")
+    assert not [c for c in sent if c.what == "CloseShutter"]
+    del rig.tels[1].Park  # it parks again (the class's Park)
+    await wait_until(rig.dome_closed, 3, what="closed once parked")
+    assert rig.parked()
+    assert sup.status()["close_interlock"]["blocked"] is None and not sup.critical()
+    assert rig.timeline.events("close_unblocked")
+
+
+async def test_an_unreadable_telescope_holds_a_routine_close(make_rig):
+    rig = make_rig(safety=INTERLOCK)
+    await rig.start(sequencer=False)
+    lease = await _open(rig)
+    rig.tel.fail("telescope server gone")
+    rig.supervisor.operator_close("alice", "done for the night")  # routine
+    await wait_until(
+        lambda: rig.supervisor.status()["close_interlock"]["blocked"], 3, what="blocked"
+    )
+    assert "unreadable" in rig.supervisor.status()["close_interlock"]["blocked"]
+    await asyncio.sleep(0.3)
+    assert rig.dome_open()
+    lease.release()
+    rig.tel.unfail()
+    await wait_until(rig.dome_closed, 3)
+
+
+async def test_unsafe_weather_overrides_the_interlock(make_rig):
+    """An emergency (weather) still closes after park_wait, parked or not."""
+    rig = make_rig(safety=INTERLOCK)
+    await rig.start(sequencer=False)
+    lease = await _open(rig)
+    rig.tel.Unpark()
+    _stuck(rig.tel)
+    lease.release()
+    await wait_until(
+        lambda: rig.supervisor.status()["close_interlock"]["blocked"], 3, what="blocked"
+    )
+    assert rig.dome_open()
+    rig.weather.set_safe(False)
+    await wait_until(rig.dome_closed, 3, what="emergency close")
+    assert not rig.parked()
+    assert rig.timeline.events("close_unblocked")[-1].detail["how"].startswith("overridden")
+    assert rig.supervisor.status()["close_interlock"]["blocked"] is None
+
+
+async def test_unsafe_weather_closes_on_an_unparked_telescope_without_waiting(make_rig):
+    rig = make_rig(safety=INTERLOCK)
+    await rig.start(sequencer=False)
+    await _open(rig)
+    rig.tel.Unpark()
+    _stuck(rig.tel)
+    t0 = time.monotonic()
+    rig.weather.set_safe(False)
+    await wait_until(rig.dome_closed, 3)
+    assert not rig.parked()
+    # park_wait (cleanup half + parking half) + shutter travel, with slack
+    assert time.monotonic() - t0 < 1.0 + 1.0
+    assert not rig.timeline.events("close_blocked")
+
+
+async def test_an_operator_emergency_close_overrides_the_interlock(make_rig):
+    rig = make_rig(safety=INTERLOCK)
+    await rig.start(sequencer=False)
+    lease = await _open(rig)
+    rig.tel.Unpark()
+    _stuck(rig.tel)
+    sup = rig.supervisor
+    assert sup.operator_close("alice", "stop") is True  # routine: held back
+    lease.release()
+    await wait_until(lambda: sup.status()["close_interlock"]["blocked"], 3, what="blocked")
+    assert rig.dome_open()
+    sup.operator_close("alice", "EMERGENCY: smoke", emergency=True)
+    await wait_until(rig.dome_closed, 3, what="emergency close")
+    assert not rig.parked()
+    assert sup.status()["close_interlock"]["emergency_close"] is None  # cleared once closed
+
+
+async def test_without_the_interlock_a_routine_close_goes_ahead(make_rig):
+    """park_before_close alone: closes after park_wait, parked or not (as before)."""
+    rig = make_rig(safety=dict(park_before_close=True, park_wait=0.4))
+    await rig.start(sequencer=False)
+    lease = await _open(rig)
+    rig.tel.Unpark()
+    _stuck(rig.tel)
+    lease.release()
+    await wait_until(rig.dome_closed, 3)
+    assert not rig.parked()
+    assert rig.supervisor.status()["close_interlock"] is None

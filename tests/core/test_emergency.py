@@ -110,7 +110,10 @@ async def test_the_supervisor_closes_when_it_answers(mc):
     res = r.json()["result"]["enclosures"]["aqawan1"]
     assert res["closing"] is True and res["via"] == "supervisor" and res["lease_revoked"] is True
     assert fakes.posts() == [
-        ("sup.test/close", {"operator": "alice", "reason": "EMERGENCY: emergency close"})
+        (
+            "sup.test/close",
+            {"operator": "alice", "reason": "EMERGENCY: emergency close", "emergency": True},
+        )
     ]
     # Every telescope held (stopped), so nothing asks for a lease again.
     (cmd,) = [json.loads(p.read_text()) for p in (rig.control / "inbox").iterdir()]
