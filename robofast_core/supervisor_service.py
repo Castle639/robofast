@@ -66,9 +66,12 @@ is random per process start, so after a restart every old token is unknown
   another holder's, or the enclosure is not confirmed closed yet.
 * ``POST /leases/{token}/clear`` ``{"operator", "reason"}`` -- the same, for
   an operator who has made the telescope safe; logged.
-* ``POST /close`` ``{"operator", "reason"}`` -- an operator asks for the
-  enclosure to close: the current lease is revoked (logged). Answers
-  ``{"revoked": bool}``. There is no endpoint that opens.
+* ``POST /close`` ``{"operator", "reason", "emergency"?}`` -- an operator
+  asks for the enclosure to close: the current lease is revoked (logged).
+  ``"emergency": true`` (the console's EMERGENCY CLOSE) overrides the
+  park-before-close interlock (``require_park_before_close``); otherwise it
+  is a routine close. Answers ``{"revoked": bool}``. There is no endpoint
+  that opens.
 * ``GET /timeline?n=N`` -- the last ``N`` (at most 500) timeline entries,
   newest last, each with its wall-clock ``time``.
 * ``POST /duty`` ``{"operator", "op": "on"|"off"|"renew", "reason"?}`` --
@@ -218,8 +221,13 @@ class SupervisorServer:
                 operator = str(args["operator"]).strip()
                 if not operator:
                     raise _Error(400, "close needs an operator name")
+                emergency = args.get("emergency", False)
+                if not isinstance(emergency, bool):
+                    raise _Error(400, "close: emergency is true or false")
                 return 200, {
-                    "revoked": self.supervisor.operator_close(operator, str(args["reason"]))
+                    "revoked": self.supervisor.operator_close(
+                        operator, str(args["reason"]), emergency=emergency
+                    )
                 }
             if method == "POST" and parts == ["duty"]:
                 operator = str(args["operator"]).strip()

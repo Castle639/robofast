@@ -122,6 +122,29 @@ mode finishes that close before it stops commanding. The mode is saved
 (:class:`~robofast_core.modes.ModeStore`) and reloaded at start; a missing
 or unreadable file means the config's default mode, with an alarm.
 
+Closing on unparked telescopes
+------------------------------
+On a roll-off roof, ``park_before_close`` gives the sequencer's cleanup half
+of ``park_wait`` to park, then parks every telescope itself (in parallel,
+bounded by the other half), then closes -- parked or not: rain on the optics
+is worse than an unlikely roof contact. Some roofs can hit some telescopes,
+though, so ``require_park_before_close`` (per enclosure, default off) adds
+an interlock (JDE 2026-11-02): a **routine** close waits until every
+telescope under the roof reports ``AtPark``. Routine is every close that is
+not an emergency: a lease released (the night or an idle period over), a
+lease not renewed, an operator's close (the console's enclosure ``stop``),
+a mode switch, an operator's duty expiring. While held back the roof stays
+open, the supervisor parks the telescopes again on every pass, alarms (a
+``close_blocked`` timeline event, ``close_interlock`` in the status) and,
+after ``park_interlock_escalate``, raises a critical alarm; it never closes
+on an unparked telescope for a routine reason. An **emergency** close goes
+ahead after ``park_wait`` as before, parked or not (:meth:`emergency`):
+weather unsafe or unknown (no read yet, a stale feed, a failed read), an
+enclosure fault, a shutter error, an operator's emergency close
+(:meth:`operator_close` with ``emergency=True``: the console's EMERGENCY
+CLOSE), and the supervisor stopping (its final close; on an enclosure with
+a heartbeat the hardware would close by itself anyway).
+
 Recovering from a sequencer crash
 ---------------------------------
 A sequencer that dies holding a lease leaves it revoked (unrenewed) but never
@@ -235,6 +258,17 @@ class SafetyConfig:
     #: ourselves, all at once) before closing. Domes close immediately.
     park_before_close: bool = False
     park_wait: float = 60.0
+    #: The park-before-close interlock (module doc, "Closing on unparked
+    #: telescopes"): a roof that can hit a telescope closes routinely only
+    #: once every telescope under it reports ``AtPark``. An emergency close
+    #: (unsafe or unknown weather, an enclosure fault, a shutter error, an
+    #: operator's emergency close, the supervisor stopping) still goes ahead
+    #: after ``park_wait``. Needs ``park_before_close``.
+    require_park_before_close: bool = False
+    #: A routine close blocked by the interlock this long becomes a critical
+    #: alarm (the enclosure stays open; an operator parks the telescopes or
+    #: closes as an emergency).
+    park_interlock_escalate: float = 300.0
     #: Seconds between hardware heartbeat pings; ``None`` when the enclosure
     #: has no heartbeat device. At most ``heartbeat_timeout / 4``.
     heartbeat_interval: float | None = None
@@ -308,6 +342,15 @@ class SafetyConfig:
                 " enclosure if the supervisor dies. To run it unattended anyway, set"
                 " allow_unattended_without_watchdog: true (docs/modes.md)"
             )
+        if not isinstance(self.require_park_before_close, bool):
+            raise ValueError("require_park_before_close: true or false")
+        if self.require_park_before_close and not self.park_before_close:
+            raise ValueError(
+                "require_park_before_close needs park_before_close (the supervisor parks"
+                " the telescopes before every close)"
+            )
+        if not self.park_interlock_escalate >= 0:
+            raise ValueError("park_interlock_escalate must be >= 0")
         if not self.unwatched_warning_interval > 0:
             raise ValueError("unwatched_warning_interval must be > 0")
         if self.duty_ttl <= 0 or self.duty_grace < 0:
@@ -506,6 +549,14 @@ class SafetySupervisor:
         self._closing_since: float | None = None
         self._opening_since: float | None = None
         self._parked_for_close = False
+        #: The park-before-close interlock (``require_park_before_close``):
+        #: an operator's emergency close (why; cleared once closed), and a
+        #: routine close held back by unparked telescopes (why, since when,
+        #: and the critical alarm once it has lasted ``park_interlock_escalate``).
+        self._emergency_close: str | None = None
+        self._close_blocked: str | None = None
+        self._close_blocked_since: float | None = None
+        self._close_blocked_critical: str | None = None
         #: Set when the enclosure loop commits to closing (right before
         #: CloseShutter), cleared once the shutter reads CLOSED: no lease is
         #: granted in between, so no sequencer unparks a telescope under a
@@ -725,7 +776,13 @@ class SafetySupervisor:
         critical alarms until they are gone)."""
         return [
             c
-            for c in (self._estop, self._auto_clear_stopped, self._duty_expired, self._watch_alarm)
+            for c in (
+                self._estop,
+                self._auto_clear_stopped,
+                self._duty_expired,
+                self._watch_alarm,
+                self._close_blocked_critical,
+            )
             if c
         ]
 
@@ -877,6 +934,15 @@ class SafetySupervisor:
                 else self._shutter_hold_until - now
             ),
             "shutter": None if self.shutter is None else Shutter(self.shutter).name,
+            "close_interlock": None
+            if not self.config.require_park_before_close
+            else {
+                "blocked": self._close_blocked,
+                "blocked_for": None
+                if self._close_blocked_since is None
+                else now - self._close_blocked_since,
+                "emergency_close": self._emergency_close,
+            },
             "lease": repr(lease) if lease else None,
             "orphaned_for": self._orphan_age(now),
             "alarms": list(self.alarms),
@@ -947,16 +1013,29 @@ class SafetySupervisor:
         if lease is not None and lease._revoke(reason):
             self.timeline.event(self.name, "lease_revoked", lease=lease.id, reason=reason)
 
-    def operator_close(self, operator: str, reason: str) -> bool:
+    def operator_close(self, operator: str, reason: str, *, emergency: bool = False) -> bool:
         """An operator asks for the enclosure to close (the observer console):
         the current lease is revoked, so the sequencer stops and cleans up
         and the enclosure closes, as for any revocation. True if a live
         lease was revoked; False if there was none (it is closed, or closing,
         already). There is no operator *open*: only this supervisor's policy
-        opens."""
+        opens. ``emergency`` (the console's EMERGENCY CLOSE) overrides the
+        park-before-close interlock until the enclosure is closed (module
+        doc); otherwise it is a routine close."""
         lease = self._lease
-        self.timeline.event(self.name, "operator_close", operator=operator, reason=reason)
-        log.warning("%s: close requested by %s: %s", self.name, operator, reason)
+        self.timeline.event(
+            self.name, "operator_close", operator=operator, reason=reason, emergency=emergency
+        )
+        log.warning(
+            "%s: %sclose requested by %s: %s",
+            self.name,
+            "EMERGENCY " if emergency else "",
+            operator,
+            reason,
+        )
+        if emergency:
+            self._emergency_close = f"operator {operator}: {reason}"
+            self._wake.set()
         if lease is None or not lease.live:
             return False
         self._revoke_lease(f"operator {operator}: {reason}")
@@ -1318,6 +1397,7 @@ class SafetySupervisor:
             self._watch_alarm = None
             await self._ensure_closed()
             return
+        self._unblock_close(f"mode {self.mode} watches only")
         if self._intervening is not None:
             if status == Shutter.CLOSED:
                 await self._ensure_closed()  # its bookkeeping: enclosure_closed
@@ -1351,6 +1431,8 @@ class SafetySupervisor:
             self._parked_for_close = False
             self._close_committed = False
             self._fault_escalated = False
+            self._emergency_close = None
+            self._unblock_close("closed")
             return
         if self._fault is not None and not self._fault_escalated:
             # The dangerous case: a fault with the enclosure not closed.
@@ -1367,6 +1449,13 @@ class SafetySupervisor:
             self._closing_since = now
         if cfg.park_before_close and not self._parked_for_close:
             await self._park_before_close()
+        if (
+            cfg.require_park_before_close
+            and not self._close_committed
+            and not await self._close_interlock_clear()
+        ):
+            self._parked_for_close = False  # park again on the next pass
+            return
         if not self._close_committed and self._want_open(time.monotonic()):
             # A new lease was granted while we read the shutter or parked
             # (an idle release followed at once by more work): opening is
@@ -1416,8 +1505,88 @@ class SafetySupervisor:
         await asyncio.gather(*(park(t) for t in self._tels))
         self._parked_for_close = True
 
+    def emergency(self) -> str | None:
+        """Why a close now would be an emergency (None: a routine close),
+        for the park-before-close interlock (module doc)."""
+        if self._stopping:
+            return "supervisor stopping"
+        if self._emergency_close is not None:
+            return f"emergency close ({self._emergency_close})"
+        if not self._safe:
+            return f"weather: {self._reason}"
+        if self._fault is not None:
+            return f"enclosure fault: {self._fault}"
+        hold = self._shutter_hold_until
+        if hold is not None and time.monotonic() < hold:
+            return "shutter error"
+        return None
+
+    async def _close_interlock_clear(self) -> bool:
+        """``require_park_before_close``: may the enclosure close now? Yes
+        for an emergency, or once every telescope reports ``AtPark`` (an
+        unreadable one counts as unparked). Otherwise the close is held
+        back: alarm, and escalate after ``park_interlock_escalate``."""
+        why = self.emergency()
+        if why is not None:
+            if self._close_blocked is not None:
+                self._alarm(
+                    f"closing with telescopes possibly unparked: {why} overrides the"
+                    " park-before-close interlock",
+                    "critical",
+                )
+                self._unblock_close(f"overridden: {why}")
+            return True
+
+        async def parked(tel: Grant) -> str | None:
+            try:
+                if await tel.get("AtPark", timeout=self.config.read_timeout):
+                    return None
+                return f"{tel.owner.name} not parked"
+            except DeviceError as exc:
+                return f"{tel.owner.name} unreadable ({exc})"
+
+        problems = [p for p in await asyncio.gather(*(parked(t) for t in self._tels)) if p]
+        if self.emergency() is not None:
+            return await self._close_interlock_clear()  # it became one meanwhile
+        if not problems:
+            self._unblock_close("all parked")
+            return True
+        now = time.monotonic()
+        blocked = "; ".join(problems)
+        if self._close_blocked_since is None:
+            self._close_blocked_since = now
+            self.timeline.event(self.name, "close_blocked", why=blocked, level="warning")
+        if blocked != self._close_blocked:
+            self._alarm(
+                f"routine close held back by the park-before-close interlock ({blocked});"
+                " the enclosure stays open until every telescope is parked"
+            )
+        self._close_blocked = blocked
+        waited = now - self._close_blocked_since
+        if self._close_blocked_critical is None and waited >= self.config.park_interlock_escalate:
+            self._close_blocked_critical = (
+                f"enclosure NOT CLOSED for {waited:.0f} s: the park-before-close interlock"
+                f" holds a routine close ({blocked}); park the telescopes, or close as"
+                " an emergency"
+            )
+            self._alarm(self._close_blocked_critical, "critical")
+            self.timeline.event(self.name, "close_blocked_escalated", why=blocked, waited=waited)
+        return False
+
+    def _unblock_close(self, how: str) -> None:
+        if self._close_blocked_since is None:
+            return
+        self.timeline.event(
+            self.name,
+            "close_unblocked",
+            how=how,
+            waited=time.monotonic() - self._close_blocked_since,
+        )
+        self._close_blocked = self._close_blocked_since = self._close_blocked_critical = None
+
     async def _ensure_open(self) -> None:
         cfg = self.config
+        self._unblock_close("open wanted again")
         self._closing_since = None
         lease = self._lease
         assert lease is not None
