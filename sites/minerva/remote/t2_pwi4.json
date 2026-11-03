@@ -10,6 +10,7 @@
     "Only one of the PWI2 and PWI4 configs of a telescope runs at a time (same listen port); only one of PWI2 and PWI4 may own the mount.",
     "allow_find_home false: the Alpaca server's FindHome stays off; home with robofast-pwi-jog home --axis both (PWI4 4.1.6 cannot home one axis; 4.1.7+ can). Homing under PWI4 4.1.6 was verified on both CDK700s from any start position (docs/pwi.md, Homing).",
     "home_alt/home_az are not set yet: PWI4 4.1.6 reports no homed flag, so robofast counts T2 as homed only after a home it commanded ends at them. Home once with robofast-pwi-jog home --axis both, check on the webcam, and set them from the position it prints (docs/pwi.md, Homing).",
+    "az_wrap_min/az_wrap_max: the mechanical azimuth range every goto must end in = PWI2's goto range (-90..450 deg; hard limits -150..510). robofast sets PWI4's axis-0 wrap range per goto so azimuth goes the short legal way: with PWI4's default wrap (0..360) a park at az 0 from home went 264 deg the long way and stalled (docs/pwi.md, Azimuth wrap). Gotos are refused if PWI4 does not report its wrap range.",
     "allow_unhomed_moves true: the engineering override (moves before a recorded home). It does nothing without --allow-unhomed on the command line; set it false once homes are recorded routinely."
   ],
   "name": "t2",
@@ -41,6 +42,9 @@
   "max_jog_deg": 10.0,
   "jog_timeout": 60.0,
   "home_timeout": 300.0,
+  "az_wrap_min": -90.0,
+  "az_wrap_max": 450.0,
+  "park_timeout": 180.0,
   "allow_find_home": false,
   "allow_unhomed_moves": true,
   "request_timeout": 20.0

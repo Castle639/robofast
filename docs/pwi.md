@@ -61,6 +61,7 @@ Actions on the telescope:
 | goto alt/az | `/mount/goto_alt_az?alt_degs=&az_degs=` | `device=mount&cmd=move&alt=&azm=` | both: legacy (park) |
 | RA/Dec offset | `/mount/offset?ra_add_arcsec=&dec_add_arcsec=` | `device=mount&cmd=move&incrementra=&incrementdec=` | legacy; **sign conventions not confirmed on the sky** |
 | stop | `/mount/stop` | `device=mount&cmd=stop` | both: legacy |
+| azimuth wrap range | `/mount/set_axis0_wrap_range_min?degs=` (status `mount.axis0_wrap_range_min_degs`, `mount.axis0.position_degs`) | (none) | PWI4 changelog; **path, parameter and status keys unconfirmed** (see "Azimuth wrap") |
 | tracking on/off | `/mount/tracking_on`, `/tracking_off` | `cmd=trackingon` / `trackingoff` | both: legacy |
 | M3 port | `/m3/goto?port=1\|2`, `/m3/stop` | `device=m3&cmd=select&port=`, `cmd=stop` | both: legacy |
 | focuser goto/stop | `/focuser/goto?target=`, `/focuser/stop` (GUI-selected focuser) | `device=focuserN&cmd=move&position=`, `cmd=stop` | legacy |
@@ -106,6 +107,12 @@ Quirks handled:
   after 120 s); sent again later it took 6 s. `SelectPort` re-sends a goto
   the M3 has not started on (see Actions). `m3.port` reads -1 while the M3
   moves, and may read -1 or stale just after PWI4 starts.
+* **PWI4 disables an axis after a drive fault** (seen: "Axis 0 error: 29056
+  Motor pulse usage too high (I2t)", a thermal overload after the motor had
+  pushed against something for minutes). The server refuses motion with
+  the axis named and any axis error fields PWI reports; a slew under way
+  when it happens fails (`Slewing` raises). Find the cause before
+  `MotorsEnable`.
 * **PWI4 configuration keys are dotted** (`Axis0.HomePositionDegs`,
   `Axis1.NegativeSoftwareLimitDegs`); an undotted name is silently ignored.
 
@@ -177,9 +184,10 @@ prints.
 
 The PWI version (PWI4 `pwi4.version`; PWI2 reports none) is logged by the
 server at start and on any change, by the jog at its first read, and is in
-the `Status` Action's JSON. It is not yet in FITS headers: the header path
-reads standard Alpaca properties, and a PWI version needs a new value
-source there (a later step).
+the `Status` Action's JSON. The telescope's `DriverInfo` starts with it
+(`PlaneWave PWI4 4.1.6; robofast pwi_server 0.1.0`), and the imaging
+pipeline writes `DriverInfo` into each light frame's header as `MNTSWVER`
+(docs/data.md).
 
 ## Safety
 
@@ -210,11 +218,48 @@ source there (a later step).
   inside the limits is left to PWI's own deceleration unless the mount
   passes that target by more than `limit_margin`. It never commands motion.
   The jog tool applies the same coast to its own limit check.
-* **Stalled slews**: see "Quirks handled" (PWI4 at its own limit).
+* **Stalled slews**: see "Quirks handled" (PWI4 at its own limit). A slew
+  to an alt/az target (and a park) must make progress toward it: at least
+  `stall_move` deg in `stall_time` s on the axis furthest from its target,
+  so a mount pushing against an obstruction and only creeping is stopped
+  too. A park also fails after `park_timeout` s.
+* **Azimuth wrap**: see below.
 * **Stop** is always reachable: Alpaca `AbortSlew`, Action `Stop` (no
   connection needed), `robofast-pwi-jog stop`, and PWI's own GUI.
 * Every PWI request has a timeout (`pwi.timeout`); nothing is retried,
   except an M3 goto PWI visibly did not start on (bounded, `m3_retries`).
+
+## Azimuth wrap
+
+A CDK700's azimuth axis turns more than 360 deg (MINERVA's PWI2 settings:
+goto range -90 to 450 deg mechanical, hard limits -150 to 510), so every
+azimuth has one or two mechanical angles. PWI4 picks the one inside its
+axis-0 wrap range, [min, min + 360). With PWI4 4.1.6's default (min 0, as
+PWI4 logs "WrapMin = 0 degs"), a park at azimuth 0 from the home position
+(mechanical 281) drove 264 deg the long way, down toward mechanical 0; the
+mount stopped at 17.3, still "slewing", and the next slew found azimuth
+disabled by a drive overload. PWI2 had always parked there through
+mechanical 360.
+
+With `az_wrap_min`/`az_wrap_max` in the config (mechanical deg; the
+MINERVA PWI4 configs say -90 and 450, PWI2's goto range), every goto
+robofast sends (slews, park):
+
+1. reads the mechanical azimuth (`mount.axis0.position_degs`) and PWI4's
+   wrap range (`mount.axis0_wrap_range_min_degs`); if PWI4 reports either
+   not, the goto is refused;
+2. picks the target's mechanical angle inside [`az_wrap_min`,
+   `az_wrap_max`] nearest the current one (the shortest legal path; a path
+   between two angles inside the range stays inside it);
+3. if PWI4's wrap range would not put it there, sets the wrap range
+   minimum to that angle - 180 (`/mount/set_axis0_wrap_range_min?degs=`),
+   reads it back, and refuses the goto if PWI4 did not take it;
+4. sends the goto, and watches it make progress (stalled slews, above).
+
+The limit watch stops a mount whose mechanical azimuth leaves the range (or
+would coast out of it). The jog tool does not set the wrap range: it
+refuses an alt/az jog that PWI4's current wrap range would send the long
+way. Without `az_wrap_min`/`az_wrap_max` PWI chooses, as before.
 
 ## Config
 
@@ -227,7 +272,8 @@ source there (a later step).
 `m3_resend_after`, `m3_retries`, `max_offset`, `guide_rate`,
 `max_pulse_ms`, `limit_margin`, `watch_interval`, `stop_distance`,
 `slew_speed`, `stall_time`, `stall_move`, `moving_speed`,
-`slew_report_min`, `park_tolerance`, `status_max_age`, `request_timeout`,
+`slew_report_min`, `park_tolerance`, `park_timeout`, `az_wrap_min`,
+`az_wrap_max`, `status_max_age`, `request_timeout`,
 `aperture_diameter`, `focal_length`, `max_jog_deg` (at most 10),
 `jog_timeout`, `home_timeout`, `home_alt`, `home_az`, `home_tolerance`,
 `home_record`, `allow_find_home`, `allow_unhomed_moves`,
@@ -241,12 +287,15 @@ source there (a later step).
 
 One CDK700 model behind either API. Motion needs connect + enable (start
 with `--ready` for connected, enabled and homed); slews at `--slew-rate`;
-the azimuth never crosses 0/360, so a goto from 359 to 1 deg goes the long
-way (as a mount's cable wrap might). Fault modes (`/robofast-sim/mode?mode=`):
+a goto puts azimuth at its mechanical angle in PWI4's wrap range,
+[0, 360) by default, so a goto from 359 to 1 deg goes the long way (as
+PWI4 does). Fault modes (`/robofast-sim/mode?mode=`):
 `hang`, `slow`, `garble`, `http500`. The PWI4 behaviour seen on hardware is
 modelled too: `--pwi-min-alt` (a goto below PWI's own limit stops there and
-reports slewing forever), `m3.port` -1 while the M3 moves, dropped M3
-gotos (`CDK700Model.m3_drops`), and a controller power cycle
+reports slewing forever), the axis-0 wrap range (`--wrap-min`; mechanical
+azimuth is continuous and a goto ends inside the wrap range),
+`CDK700Model.az_mech_min` (an azimuth obstruction), `m3.port` -1 while the
+M3 moves, dropped M3 gotos (`CDK700Model.m3_drops`), and a controller power cycle
 (`CDK700Model.power_cycle`: disconnected, not homed, both axes at 0).
 Loopback only, registered with `hwgate` while serving.
 
@@ -393,6 +442,12 @@ Two CDK700s under PWI4 4.1.6 (2026-11):
   spelling; the older both-axes command is `/mount/find_home`), axis 0 =
   azimuth, 1 = altitude (PWI4 4.1.7+). PWI4 4.1.6 reports no homed state
   over HTTP (hence the home record); whether a later PWI4 does.
-* The azimuth cable wrap: which way PWI takes for a goto near the wrap
-  limits (the jog refuses azimuth moves across 0/360 meanwhile).
+* The PWI4 wrap-range request and status keys ("Azimuth wrap"): the path
+  `/mount/set_axis0_wrap_range_min`, its parameter (`degs` assumed), and the
+  keys `mount.axis0_wrap_range_min_degs` and `mount.axis0.position_degs`.
+  Until they are confirmed on PWI4 4.1.6, gotos on a config with
+  `az_wrap_min` are refused if PWI4 does not report them; nothing moves.
+* The mechanical azimuth range that is really free of obstructions and
+  cable limits on each mount (a goto toward mechanical 0 stopped at 17.3 on
+  T1, inside PWI2's -90..450 goto range).
 * Focuser positions (microns) and rotator mechanical angles match legacy.

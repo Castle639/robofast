@@ -18,9 +18,15 @@ The model, from the legacy driver's use of PWI (``docs/pwi.md``):
   connected or enabled at start unless asked (``--ready``), and not homed
   unless asked (``--homed``): moves work unhomed here, as on a real mount;
   refusing them is robofast's job.
-* each axis slews at ``slew_rate`` deg/s. Azimuth moves linearly within
-  [0, 360) and **never crosses 0/360** (a crude cable wrap): a goto from
-  az 359 to 1 goes the long way round, as a real mount with a wrap might.
+* each axis slews at ``slew_rate`` deg/s. Azimuth is mechanical
+  (``mech``, unbounded; reported azimuth is ``mech`` mod 360). A goto takes
+  azimuth to the mechanical angle in [``wrap_min``, ``wrap_min`` + 360), as
+  PWI4 does with its axis-0 wrap range (PWI4 ``/status``
+  ``mount.axis0_wrap_range_min_degs``, set with
+  ``/mount/set_axis0_wrap_range_min?degs=``; 0 by default, so a goto from
+  az 359 to 1 goes the long way round, as PWI4 did on a CDK700). Tracking
+  stays continuous. Below ``az_mech_min`` the mount cannot go (an
+  obstruction, or a cable at its end): it stops there and reports slewing.
 * ``goto_ra_dec_j2000`` slews and then tracks (J2000 = apparent here);
   ``goto_alt_az`` slews and stops tracking (PWI4; PWI2 keeps its tracking
   state and holds the alt/az); ``stop`` and ``disable`` stop the axes and
@@ -120,6 +126,8 @@ class CDK700Model:
         home_az: float = 180.0,
         version: str = "4.1.8.0",
         pwi_min_alt: float | None = None,
+        wrap_min: float = 0.0,
+        az_mech_min: float | None = None,
     ) -> None:
         self.lat, self.lon = latitude, longitude
         self.slew_rate = slew_rate
@@ -133,10 +141,16 @@ class CDK700Model:
         self.home_pos = (home_alt, home_az)
         self.version = version
         self.pwi_min_alt = pwi_min_alt
+        self.wrap_min = wrap_min
+        self.az_mech_min = az_mech_min
+        #: PWI4: report the mechanical azimuth and wrap range in /status.
+        self.report_wrap = True
+        #: Mechanical azimuth target of an alt/az goto (deg), or None.
+        self.mech_target: float | None = None
         #: The next this many M3 gotos are answered and ignored.
         self.m3_drops = 0
         self.homing_axes: tuple[int, ...] = ()
-        self.alt, self.az = alt, az
+        self.alt, self.mech = alt, az
         self.tracking = False
         #: Tracked/slew target in RA (h) / Dec (deg), or None.
         self.radec: tuple[float, float] | None = None
@@ -155,6 +169,22 @@ class CDK700Model:
         self._t = time.monotonic()
 
     # -- geometry ------------------------------------------------------------------
+
+    @property
+    def az(self) -> float:
+        return self.mech % 360.0
+
+    @az.setter
+    def az(self, value: float) -> None:
+        self.mech = float(value)
+
+    def wrap_to_mech(self, az: float) -> float:
+        """The mechanical angle a goto to azimuth ``az`` ends at (PWI4's wrap)."""
+        return self.wrap_min + (az - self.wrap_min) % 360.0
+
+    def nearest_mech(self, az: float) -> float:
+        """The mechanical angle of ``az`` nearest the current one (tracking)."""
+        return self.mech + (az - self.mech + 180.0) % 360.0 - 180.0
 
     def lst(self) -> float:
         return lst_hours(self.lon)
@@ -185,16 +215,22 @@ class CDK700Model:
             if self.slewing:
                 if self.radec is not None:
                     t_alt, t_az = self.altaz_of(*self.radec)
+                    t_mech = self.wrap_to_mech(t_az)
                 else:
                     assert self.altaz is not None
                     t_alt, t_az = self.altaz
+                    if self.mech_target is None:
+                        self.mech_target = self.wrap_to_mech(t_az)
+                    t_mech = self.mech_target
                 stuck = self.pwi_min_alt is not None and t_alt < self.pwi_min_alt
                 if stuck:
                     t_alt = self.pwi_min_alt
+                if self.az_mech_min is not None and t_mech < self.az_mech_min:
+                    t_mech, stuck = self.az_mech_min, True
                 step = self.slew_rate * dt
-                d_alt, d_az = t_alt - self.alt, t_az % 360.0 - self.az
+                d_alt, d_az = t_alt - self.alt, t_mech - self.mech
                 self.alt += max(-step, min(step, d_alt))
-                self.az = (self.az + max(-step, min(step, d_az))) % 360.0
+                self.mech += max(-step, min(step, d_az))
                 if abs(d_alt) <= step and abs(d_az) <= step:
                     if stuck:
                         # At PWI's limit: still "slewing", and "tracking", forever.
@@ -204,7 +240,8 @@ class CDK700Model:
             elif self.tracking:
                 if self.radec is None:
                     self.radec = self.radec_now()
-                self.alt, self.az = self.altaz_of(*self.radec)
+                alt, az = self.altaz_of(*self.radec)
+                self.alt, self.mech = alt, self.nearest_mech(az)
 
     # -- commands ----------------------------------------------------------------------
 
@@ -235,6 +272,7 @@ class CDK700Model:
         self.slewing = False
         self.tracking = False
         self.radec = self.altaz = None
+        self.mech_target = None
 
     @property
     def homed(self) -> bool:
@@ -247,6 +285,8 @@ class CDK700Model:
             alt = self.home_pos[0] if 1 in axes else self.alt
             az = self.home_pos[1] if 0 in axes else self.az
             self.radec, self.altaz, self.slewing = None, (alt, az), True
+            # The home is a mechanical position (no wrap choice).
+            self.mech_target = float(self.home_pos[1]) if 0 in axes else self.mech
             self.homing_axes = axes
             self.homing_until = time.monotonic() + self.home_time
 
@@ -258,6 +298,7 @@ class CDK700Model:
     def goto_altaz(self, alt: float, az: float, *, keep_tracking: bool = False) -> None:
         if self._can_move("goto_altaz"):
             self.radec, self.altaz = None, (alt, az % 360.0)
+            self.mech_target = None
             self.slewing = True
             if not keep_tracking:
                 self.tracking = False
@@ -321,6 +362,8 @@ class CDK700Model:
                 "homing": self.homing,
                 "alt": self.alt,
                 "az": self.az,
+                "mech": self.mech,
+                "wrap_min": self.wrap_min,
                 "tracking": self.tracking,
                 "slewing": self.slewing,
                 "m3_port": self.current_port,
@@ -365,6 +408,15 @@ def pwi4_status(m: CDK700Model) -> str:
         ("mount.is_slewing", _b4(moving)),
         ("mount.is_tracking", _b4(m.tracking)),
         ("mount.axis0.is_enabled", _b4(m.enabled[0])),
+        *(
+            [
+                ("mount.axis0.position_degs", repr(m.mech)),
+                ("mount.axis1.position_degs", repr(m.alt)),
+                ("mount.axis0_wrap_range_min_degs", repr(m.wrap_min)),
+            ]
+            if m.report_wrap
+            else []
+        ),
         ("mount.axis1.is_enabled", _b4(m.enabled[1])),
         *(
             [(f"mount.axis{i}.is_homed", _b4(m.axes_homed[i])) for i in (0, 1)]
@@ -437,6 +489,8 @@ def pwi4_handle(m: CDK700Model, path: str, q: dict[str, list[str]]) -> str:
             m.find_home(int(axis))
         elif path == "/mount/stop":
             m.stop()
+        elif path == "/mount/set_axis0_wrap_range_min":
+            m.wrap_min = _param(q, "degs")
         elif path == "/mount/goto_ra_dec_j2000":
             m.goto_radec(_param(q, "ra_hours"), _param(q, "dec_degs"))
         elif path == "/mount/goto_alt_az":
@@ -764,6 +818,7 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("--report-homed", action="store_true", help="PWI4: report mount.axisN.is_homed")
     ap.add_argument("--version", default="4.1.8.0", help="PWI4 version to report")
     ap.add_argument("--pwi-min-alt", type=float, help="PWI's own altitude limit (deg)")
+    ap.add_argument("--wrap-min", type=float, default=0.0, help="PWI4 axis-0 wrap range min")
     args = ap.parse_args(argv)
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
@@ -782,6 +837,7 @@ def main(argv: list[str] | None = None) -> None:
         report_homed=args.report_homed,
         version=args.version,
         pwi_min_alt=args.pwi_min_alt,
+        wrap_min=args.wrap_min,
     ).start()
     print(f"{args.api} simulator on {sim.address}", flush=True)
     try:

@@ -127,6 +127,20 @@ def plan_altaz(cfg: PWIConfig, st: PWIStatus, dalt: float, daz: float) -> tuple[
     az = st.az_deg + daz
     if not 0.0 <= az < 360.0:
         raise JogRefused(f"azimuth move {st.az_deg:.3f} -> {az:.3f} crosses 0/360 (cable wrap)")
+    if cfg.az_wrap_min is not None:
+        # PWI4 puts azimuth at the mechanical angle in its wrap range, which
+        # can be the long way round even for an altitude-only jog.
+        if st.az_mech_deg is None or st.az_wrap_min is None:
+            raise JogRefused(
+                "PWI reports no mechanical azimuth or wrap range: cannot tell which way it"
+                " would go round (az_wrap_min/az_wrap_max are configured)"
+            )
+        mech = st.az_wrap_min + (az - st.az_wrap_min) % 360.0
+        if abs(mech - st.az_mech_deg) > abs(daz) + 0.01:
+            raise JogRefused(
+                f"PWI's wrap range (min {st.az_wrap_min:.2f}) would take azimuth from mechanical"
+                f" {st.az_mech_deg:.2f} to {mech:.2f}, the long way: slew with the server"
+            )
     return alt, az
 
 

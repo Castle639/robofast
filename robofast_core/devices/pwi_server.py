@@ -71,7 +71,13 @@ Safety
   (``stall_time``, ``stall_move``) has failed -- PWI4 accepts a goto beyond
   its own axis limits, stops at the limit and reports slewing forever: the
   server stops the mount and ``Slewing`` raises the reason until the next
-  slew or ``AbortSlew``.
+  slew or ``AbortSlew``. So does an axis PWI disables during a slew (a
+  drive fault), and a park not done within ``park_timeout``.
+* With ``az_wrap_min``/``az_wrap_max`` (mechanical azimuth, PWI4), every
+  goto picks the mechanical angle of its azimuth inside that range nearest
+  the current one and sets PWI4's axis-0 wrap range so PWI goes there; it
+  is refused when PWI4 cannot report or take the range. The limit watch
+  covers the mechanical azimuth range too.
 * Every request to PWI has a timeout; every Alpaca request is bounded by
   ``request_timeout``.
 
@@ -247,6 +253,17 @@ class PWIConfig:
     #: Slewing is reported true this long after a motion command (s).
     slew_report_min: float = 1.0
     park_tolerance: float = 0.5
+    #: Park fails (mount stopped, Slewing raises) if not parked after this (s).
+    park_timeout: float = 180.0
+    #: The mechanical azimuth range (deg, PWI4 ``mount.axis0.position_degs``)
+    #: a goto may end in. Set, every goto (slew, park) picks the mechanical
+    #: angle of its azimuth inside it nearest the current one, sets PWI4's
+    #: wrap range so PWI goes there (``/mount/set_axis0_wrap_range_min``),
+    #: and is refused if PWI4 cannot say or take it. The limit watch stops
+    #: a mount moving out of it. None: PWI chooses (PWI4 4.1.6's default
+    #: wrap range is [0, 360), which took a CDK700 the long way to az 0).
+    az_wrap_min: float | None = None
+    az_wrap_max: float | None = None
     #: Reads reuse a PWI reply this recent (s).
     status_max_age: float = 0.3
     #: Bound on each Alpaca request (s).
@@ -321,6 +338,16 @@ class PWIConfig:
             raise ValueError("need m3_retries >= 0 and m3_resend_after > 0")
         if cfg.home_tolerance <= 0:
             raise ValueError("home_tolerance must be > 0")
+        if (cfg.az_wrap_min is None) != (cfg.az_wrap_max is None):
+            raise ValueError("az_wrap_min and az_wrap_max go together")
+        if cfg.az_wrap_min is not None:
+            assert cfg.az_wrap_max is not None
+            if cfg.backend != "pwi4":
+                raise ValueError("az_wrap_min/az_wrap_max need the pwi4 backend")
+            if cfg.az_wrap_max - cfg.az_wrap_min < 360.0:
+                raise ValueError("az_wrap_max - az_wrap_min must be at least 360")
+        if cfg.park_timeout <= 0:
+            raise ValueError("park_timeout must be > 0")
         return cfg
 
     def home_record_path(self) -> Path:
@@ -401,6 +428,9 @@ class PWIMount:
         #: A slew this server sent is under way: its target altitude (deg).
         self._slew_active = False
         self._goto_alt: float | None = None
+        #: Its alt/az target (None for RA/Dec) and mechanical azimuth target.
+        self._goto_altaz: tuple[float, float] | None = None
+        self._goto_mech: float | None = None
         self._stall_ref: tuple[float, float, float] | None = None  # (t, alt, az)
         #: Why the last slew failed (Slewing raises it until the next command).
         self.slew_error: str | None = None
@@ -449,17 +479,89 @@ class PWIMount:
             self._invalidate()
         return st
 
-    def _arm_slew(self, target_alt: float) -> None:
+    def _arm_slew(
+        self, target_alt: float, altaz: tuple[float, float] | None, mech: float | None
+    ) -> None:
         """A slew this server sends: watch it for a stall (:meth:`_check_stall`)."""
         self._slew_active = True
         self._goto_alt = target_alt
+        self._goto_altaz = altaz
+        self._goto_mech = mech
         self._stall_ref = None
         self.slew_error = None
 
     def _disarm_slew(self) -> None:
         self._slew_active = False
         self._goto_alt = None
+        self._goto_altaz = None
+        self._goto_mech = None
         self._stall_ref = None
+
+    def _fail_slew(self, why: str) -> None:
+        self._disarm_slew()
+        if self.park_state == "parking":
+            self.park_state = "unknown"
+        self.slew_error = why
+        log.error("%s", why)
+
+    async def _place_azimuth(self, st: PWIStatus, az: float, what: str) -> float | None:
+        """With ``az_wrap_min``/``az_wrap_max``: the mechanical angle a goto
+        to azimuth ``az`` must end at (inside that range, nearest the current
+        one), with PWI4's wrap range set so that PWI goes there. None when no
+        range is configured. Refuses (nothing moves) when PWI4 cannot say its
+        mechanical azimuth or wrap range, or does not take the new range."""
+        cfg = self.config
+        if cfg.az_wrap_min is None or cfg.az_wrap_max is None:
+            return None
+        if st.az_mech_deg is None or st.az_wrap_min is None:
+            raise AlpacaException(
+                INVALID_OPERATION,
+                f"{what}: PWI reports no mechanical azimuth or wrap range"
+                " (mount.axis0.position_degs, mount.axis0_wrap_range_min_degs), so it cannot be"
+                " told which way to go round; refusing (az_wrap_min/az_wrap_max are configured)",
+            )
+        m0 = st.az_mech_deg
+        k0 = math.floor((cfg.az_wrap_min - az) / 360.0)
+        cands = [
+            az + 360.0 * k
+            for k in range(k0, k0 + 4 + int((cfg.az_wrap_max - cfg.az_wrap_min) // 360))
+            if cfg.az_wrap_min <= az + 360.0 * k <= cfg.az_wrap_max
+        ]
+        if not cands:
+            raise AlpacaException(
+                INVALID_OPERATION,
+                f"{what}: azimuth {az:.3f} has no mechanical angle in"
+                f" [{cfg.az_wrap_min}, {cfg.az_wrap_max}]",
+            )
+        mech = min(cands, key=lambda c: abs(c - m0))
+        if not st.az_wrap_min <= mech < st.az_wrap_min + 360.0 - 1e-6:
+            wrap = mech - 180.0
+            await self._send(
+                lambda: self.pwi.set_az_wrap_min(wrap), f"axis-0 wrap range min {wrap:.3f}"
+            )
+            now = await self.status(0)
+            if now.az_wrap_min is None or abs(now.az_wrap_min - wrap) > 0.01:
+                raise AlpacaException(
+                    DRIVER_ERROR,
+                    f"{what}: PWI did not take axis-0 wrap range min {wrap:.3f} (reads"
+                    f" {now.az_wrap_min}); refusing the goto",
+                )
+        log.info("%s: azimuth %.3f -> mechanical %.3f (from %.3f)", what, az, mech, m0)
+        return mech
+
+    @staticmethod
+    def _axis_errors(st: PWIStatus) -> str:
+        """PWI's error fields for the axes that say something, as text."""
+        quiet = ("", "0", "false", "no error", "none")
+        errs = {
+            k: v
+            for k, v in st.raw.items()
+            if k.startswith("mount.axis")
+            and "error" in k
+            and "arcsec" not in k
+            and v.strip().lower() not in quiet
+        }
+        return "; ".join(f"{k}={v}" for k, v in sorted(errs.items()))
 
     async def _check_stall(self, st: PWIStatus) -> None:
         """PWI4 accepts a goto beyond its own axis limits, stops at the limit
@@ -471,27 +573,56 @@ class PWIMount:
             return
         cfg = self.config
         now = time.monotonic()
+        if not st.motors_enabled:
+            off = [
+                n for n, on in (("azimuth", st.az_enabled), ("altitude", st.alt_enabled)) if not on
+            ]
+            errs = self._axis_errors(st)
+            self._fail_slew(
+                f"slew failed: PWI disabled the {' and '.join(off)} axis during the slew (a drive"
+                f" fault, e.g. motor current overload: see PWI's log){'; ' + errs if errs else ''}"
+            )
+            with contextlib.suppress(PWIError):
+                await self._send(self.pwi.stop, "stop (axis disabled)")
+            return
         if st.slewing is not True:
             if now - self._moving_since > cfg.slew_report_min and self.speed < cfg.moving_speed:
                 self._disarm_slew()
             self._stall_ref = None
             return
+        # Progress: toward an alt/az target whose mechanical azimuth is known
+        # (a mount pushing against an obstruction may still creep), else any
+        # movement (RA/Dec targets move; a sky separation can grow on the way).
         ref = self._stall_ref
-        if ref is None or _sep_deg(st.alt_deg, st.az_deg, ref[1], ref[2]) > cfg.stall_move:
-            self._stall_ref = (now, st.alt_deg, st.az_deg)
+        if (
+            self._goto_altaz is not None
+            and self._goto_mech is not None
+            and st.az_mech_deg is not None
+        ):
+            togo = max(abs(st.alt_deg - self._goto_altaz[0]), abs(st.az_mech_deg - self._goto_mech))
+            if togo < 0.01:
+                self._stall_ref = None  # settling on the target
+                return
+            progressed = ref is None or ref[1] - togo > cfg.stall_move
+            sample = (now, togo, 0.0)
+        else:
+            progressed = ref is None or (
+                _sep_deg(st.alt_deg, st.az_deg, ref[1], ref[2]) > cfg.stall_move
+            )
+            sample = (now, st.alt_deg, st.az_deg)
+        if progressed:
+            self._stall_ref = sample
             return
+        assert ref is not None
         if now - ref[0] < cfg.stall_time:
             return
-        self._disarm_slew()
-        if self.park_state == "parking":
-            self.park_state = "unknown"
-        self.slew_error = (
-            f"slew failed: PWI reports slewing but the mount has not moved for"
-            f" {now - ref[0]:.1f} s (alt {st.alt_deg:.3f}, az {st.az_deg:.3f}); the target is"
-            " probably beyond PWI's own axis limits (PWI4 accepts such a goto, stops at its"
-            " limit and reports slewing forever). Mount stopped."
+        self._fail_slew(
+            f"slew failed: PWI reports slewing but the mount has made no progress for"
+            f" {now - ref[0]:.1f} s (alt {st.alt_deg:.3f}, az {st.az_deg:.3f}"
+            + (f", mechanical az {st.az_mech_deg:.3f}" if st.az_mech_deg is not None else "")
+            + "); the target is probably beyond PWI's own axis limits or the axis is blocked"
+            " (PWI4 accepts such a goto, stops short and reports slewing forever). Mount stopped."
         )
-        log.error("%s", self.slew_error)
         with contextlib.suppress(PWIError):
             await self._send(self.pwi.stop, "stop (slew stalled)")
 
@@ -602,8 +733,15 @@ class PWIMount:
                 f"{what}: PWI is not connected to the mount (Action MountConnect)",
             )
         if not st.motors_enabled:
+            off = [
+                n for n, on in (("azimuth", st.az_enabled), ("altitude", st.alt_enabled)) if not on
+            ]
+            errs = self._axis_errors(st)
             raise AlpacaException(
-                INVALID_OPERATION, f"{what}: mount motors are disabled (Action MotorsEnable)"
+                INVALID_OPERATION,
+                f"{what}: the {' and '.join(off)} axis motor is disabled. PWI disables an axis"
+                " after a drive fault (e.g. motor current overload, I2t: see PWI's log); find the"
+                f" cause, then Action MotorsEnable{'. ' + errs if errs else ''}",
             )
         for axis, err in (("alt", st.alt_motor_error), ("az", st.az_motor_error)):
             if err is not None and err[0] != 0:
@@ -622,8 +760,10 @@ class PWIMount:
     def _check_alt(self, alt: float, what: str) -> None:
         cfg = self.config
         if not cfg.min_alt <= alt <= cfg.max_alt:
+            # InvalidValue (ASCOM: a target the mount cannot reach), which
+            # ConformU expects; InvalidOperation made it abandon its run.
             raise AlpacaException(
-                INVALID_OPERATION,
+                INVALID_VALUE,
                 f"{what}: target altitude {alt:.2f} deg outside [{cfg.min_alt}, {cfg.max_alt}]",
             )
 
@@ -642,12 +782,13 @@ class PWIMount:
             raise AlpacaException(INVALID_OPERATION, "slew: tracking is off")
         if st.lst_hours is None:
             raise AlpacaException(DRIVER_ERROR, "slew: PWI reports no sidereal time")
-        alt, _ = target_altaz(ra, dec, st.lst_hours, self.config.latitude)
+        alt, az = target_altaz(ra, dec, st.lst_hours, self.config.latitude)
         self._check_alt(alt, "slew")
+        mech = await self._place_azimuth(st, az % 360.0, "slew")
         self.target_ra, self.target_dec = ra, dec
         self.park_state = "unparked"
         self._watch_latched = False
-        self._arm_slew(alt)
+        self._arm_slew(alt, None, mech)
         self._moving_since = time.monotonic()
         await self._send(
             lambda: self.pwi.goto_radec_j2000(ra, dec), f"goto J2000 {ra:.5f} h {dec:.4f}"
@@ -661,8 +802,9 @@ class PWIMount:
         if st.tracking:
             raise AlpacaException(INVALID_OPERATION, f"{what}: tracking is on")
         self._check_alt(alt, what)
+        mech = await self._place_azimuth(st, az, what)
         self._watch_latched = False
-        self._arm_slew(alt)
+        self._arm_slew(alt, (alt, az), mech)
         self._moving_since = time.monotonic()
         await self._send(lambda: self.pwi.goto_altaz(alt, az), f"goto alt {alt:.4f} az {az:.4f}")
 
@@ -697,18 +839,19 @@ class PWIMount:
             return
         st = await self._ready("Park")
         cfg = self.config
+        mech = await self._place_azimuth(st, cfg.park_az % 360.0, "Park")
         if st.tracking:
             await self._send(lambda: self.pwi.tracking(False), "tracking off (park)")
         self.park_state = "parking"
         self._watch_latched = False
-        self._arm_slew(cfg.park_alt)
+        self._arm_slew(cfg.park_alt, (cfg.park_alt, cfg.park_az % 360.0), mech)
         self._moving_since = time.monotonic()
         await self._send(lambda: self.pwi.goto_altaz(cfg.park_alt, cfg.park_az), "goto park")
         self._park_task = asyncio.get_running_loop().create_task(self._finish_park())
 
     async def _finish_park(self) -> None:
         cfg = self.config
-        deadline = time.monotonic() + 600.0
+        deadline = time.monotonic() + cfg.park_timeout
         while self.park_state == "parking" and time.monotonic() < deadline:
             await asyncio.sleep(0.25)
             try:
@@ -723,8 +866,11 @@ class PWIMount:
                 log.info("parked")
                 return
         if self.park_state == "parking":
-            log.error("park did not complete")
-            self.park_state = "unknown"
+            self._fail_slew(
+                f"Park did not complete within park_timeout {cfg.park_timeout:g} s; mount stopped"
+            )
+            with contextlib.suppress(PWIError):
+                await self._send(self.pwi.stop, "stop (park timeout)")
 
     async def unpark(self) -> None:
         if self.park_state == "parking":
@@ -891,9 +1037,27 @@ class PWIMount:
 
     # -- the limit watch -----------------------------------------------------------------
 
+    def _limit_check(
+        self, pos: float, v: float, lo: float, hi: float, goto: float | None
+    ) -> tuple[bool, bool, float]:
+        """One axis against [lo, hi]: (outside it, should stop, rest point).
+        Stop if outside and moving further out, or heading out fast enough
+        that a stop now would coast past (a slew of ours to a target inside
+        is left to PWI's deceleration until it passes that target)."""
+        margin = self.config.limit_margin
+        rest = pos + math.copysign(coast_deg(self.config, v), v)
+        outside = not lo <= pos <= hi
+        out_now = (pos < lo and v < -1e-4) or (pos > hi and v > 1e-4)
+        heading = (v < -1e-4 and rest < lo) or (v > 1e-4 and rest > hi)
+        if heading and goto is not None and lo <= goto <= hi:
+            heading = (v < 0 and pos < goto - margin) or (v > 0 and pos > goto + margin)
+        if self._homing_since is not None:
+            heading = False  # homing may cross the limits
+        return outside or heading, out_now or heading, rest
+
     async def watch(self) -> None:
         cfg = self.config
-        last: tuple[float, float] | None = None  # (t, alt)
+        last: tuple[float, float, float | None] | None = None  # (t, alt, mech az)
         while True:
             await asyncio.sleep(cfg.watch_interval)
             try:
@@ -902,44 +1066,40 @@ class PWIMount:
                 last = None
                 continue
             await self._check_stall(st)
-            t, alt = self._st_at, st.alt_deg
-            lo, hi = cfg.min_alt - cfg.limit_margin, cfg.max_alt + cfg.limit_margin
-            v = 0.0
-            if last is not None and t - last[0] > 1e-3:
-                v = (alt - last[1]) / (t - last[0])
+            t, alt, mech = self._st_at, st.alt_deg, st.az_mech_deg
+            dt = t - last[0] if last is not None else 0.0
+            v = (alt - last[1]) / dt if last is not None and dt > 1e-3 else 0.0
             # Where the mount would come to rest if stopped now: a stop
             # coasts up to stop_distance (6-8 deg from full speed).
-            rest = alt + math.copysign(coast_deg(cfg, v), v)
-            low, high = alt < lo, alt > hi
-            out_now = (low and v < -1e-4) or (high and v > 1e-4)
-            # Heading out fast enough to coast past a limit. A slew this server
-            # sent to a target inside the limits is left to PWI's own
-            # deceleration while the mount has not passed that target.
-            heading = (v < -1e-4 and rest < lo) or (v > 1e-4 and rest > hi)
-            if heading and self._goto_alt is not None and lo <= self._goto_alt <= hi:
-                heading = (v < 0 and alt < self._goto_alt - cfg.limit_margin) or (
-                    v > 0 and alt > self._goto_alt + cfg.limit_margin
+            m = cfg.limit_margin
+            near, stop, rest = self._limit_check(
+                alt, v, cfg.min_alt - m, cfg.max_alt + m, self._goto_alt
+            )
+            what = f"altitude {alt:.2f} deg at {v:.2f} deg/s (would coast to {rest:.2f})"
+            what += f" against [{cfg.min_alt}, {cfg.max_alt}]"
+            if cfg.az_wrap_min is not None and cfg.az_wrap_max is not None and mech is not None:
+                vm = 0.0
+                if last is not None and last[2] is not None and dt > 1e-3:
+                    vm = (mech - last[2]) / dt
+                near_m, stop_m, rest_m = self._limit_check(
+                    mech, vm, cfg.az_wrap_min - m, cfg.az_wrap_max + m, self._goto_mech
                 )
-            if self._homing_since is not None:
-                heading = False  # homing may cross the limits
-            if not (low or high or heading):
+                if stop_m and not stop:
+                    what = (
+                        f"mechanical azimuth {mech:.2f} deg at {vm:.2f} deg/s (would coast to"
+                        f" {rest_m:.2f}) against [{cfg.az_wrap_min}, {cfg.az_wrap_max}]"
+                    )
+                near, stop = near or near_m, stop or stop_m
+            if not near:
                 self._watch_latched = False
-            elif (out_now or heading) and not self._watch_latched and last is not None:
+            elif stop and not self._watch_latched and last is not None:
                 self._watch_latched = True
                 self.watch_stops += 1
                 self._disarm_slew()
-                log.error(
-                    "LIMIT: altitude %.2f deg at %.2f deg/s (would coast to %.2f) against"
-                    " [%s, %s]: stop",
-                    alt,
-                    v,
-                    rest,
-                    cfg.min_alt,
-                    cfg.max_alt,
-                )
+                log.error("LIMIT: %s: stop", what)
                 with contextlib.suppress(PWIError):
                     await self._send(self.pwi.stop, "stop (limit watch)")
-            last = (t, alt)
+            last = (t, alt, mech)
 
     # -- focuser ----------------------------------------------------------------------
 
@@ -1191,18 +1351,27 @@ class PWIServer(ThreadingHTTPServer):
                 # Reading only: connecting never commands PWI.
                 self._call(lambda: self.mount.status(0), "Connect")
                 with self._clients_lock:
+                    first = not any(d == "telescope" for d, _ in self._clients)
                     self._clients.add((device, client))
+                if first and device == "telescope":
+                    # A new session: targets set by earlier clients do not
+                    # carry over (TargetRightAscension/Declination are unset
+                    # until written or slewed to, as ASCOM expects).
+                    self.mount.target_ra = self.mount.target_dec = None
         else:
             with self._clients_lock:
                 self._clients.discard((device, client))
 
     def _common(self, device: str, member: str, client: int) -> Any:
         cfg = self.config
+        pwi_version = self.mount.version or "(version not read)"
         return {
             "connected": self.connected(device, client),
             "connecting": False,
             "description": f"{cfg.name} {device} via PlaneWave {cfg.backend.upper()}",
-            "driverinfo": f"robofast_core.devices.pwi_server: Alpaca {device} for PlaneWave PWI",
+            # PWI's own version first: it goes in the FITS header (MNTSWVER).
+            "driverinfo": f"PlaneWave {cfg.backend.upper()} {pwi_version};"
+            f" robofast pwi_server {DRIVER_VERSION}",
             "driverversion": DRIVER_VERSION,
             "interfaceversion": INTERFACE[device],
             "name": f"robofast PWI {cfg.name} {device}",

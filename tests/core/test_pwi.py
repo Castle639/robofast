@@ -301,15 +301,15 @@ async def test_altitude_limits_are_enforced(make, backend):
     sim, server = make(backend)
     tel = await device(server)
     for alt in (19.9, 85.1):
-        with pytest.raises(InvalidOperationException, match="outside"):
+        with pytest.raises(InvalidValueException, match="outside"):
             await tel.put("SlewToAltAzAsync", Altitude=alt, Azimuth=100.0, timeout=T)
     await tel.set("Tracking", True, timeout=T)
     lst = await tel.get("SiderealTime", timeout=T)
     # Below the horizon limit: hour angle 6 h at Dec -40.
-    with pytest.raises(InvalidOperationException, match="outside"):
+    with pytest.raises(InvalidValueException, match="outside"):
         await tel.call("SlewToCoordinatesAsync", (lst - 6.0) % 24, -40.0, timeout=T)
     # Near the zenith: above max_alt.
-    with pytest.raises(InvalidOperationException, match="outside"):
+    with pytest.raises(InvalidValueException, match="outside"):
         await tel.call("SlewToCoordinatesAsync", lst, SIM_LATITUDE, timeout=T)
     assert not any("goto" in c or "move" in c for c in sim.model.commands)
     ra, dec = (lst - 1.0) % 24, 20.0
@@ -918,3 +918,146 @@ def test_encoders_reset_needs_both_axes_near_zero():
     assert encoders_reset(st)
     st.alt_deg = 25.0  # parked at az 0 is not a reset
     assert not encoders_reset(st)
+
+
+# -- the azimuth wrap, stalls, park timeout, disabled axes ----------------------------------
+
+WRAP = {"az_wrap_min": -90.0, "az_wrap_max": 450.0}
+
+
+async def test_park_at_az_0_goes_the_short_legal_way(make):
+    """From mechanical 281, PWI4's default wrap (0..360) would take az 0 the
+    long way to mechanical 0; robofast sets the wrap so it goes to 360."""
+    sim, server = make("pwi4", sim_kw={"az": 281.0, "alt": 46.0}, park_az=0.0, **WRAP)
+    tel = await device(server)
+    await tel.call("Park", timeout=T)
+    await until(lambda: tel.get("AtPark", timeout=T), timeout=15, what="parked")
+    st = sim.model.state()
+    assert abs(st["mech"] - 360.0) < 0.01 and abs(st["wrap_min"] - 180.0) < 1e-9
+    assert "/mount/set_axis0_wrap_range_min?degs=180.0" in sim.model.commands
+    # Back to 100: nearest legal is mechanical 100 (no wrap change needed? 100 < 180).
+    await tel.call("Unpark", timeout=T)
+    await tel.put("SlewToAltAzAsync", Altitude=40.0, Azimuth=100.0, timeout=T)
+    await until(lambda: _not(tel.get("Slewing", timeout=T)), timeout=15, what="slew")
+    assert abs(sim.model.state()["mech"] - 100.0) < 0.01
+    await tel.aclose()
+
+
+async def test_goto_refused_when_pwi4_reports_no_wrap_range(make):
+    sim, server = make("pwi4", **WRAP)
+    sim.model.report_wrap = False
+    tel = await device(server)
+    with pytest.raises(InvalidOperationException, match="wrap range"):
+        await tel.put("SlewToAltAzAsync", Altitude=40.0, Azimuth=100.0, timeout=T)
+    with pytest.raises(InvalidOperationException, match="wrap range"):
+        await tel.call("Park", timeout=T)
+    assert not any("goto" in c for c in sim.model.commands)
+    await tel.aclose()
+
+
+async def test_park_the_long_way_into_an_obstruction_is_stopped(make):
+    """No wrap configured: PWI4 goes the long way and the axis stops short
+    (here at mechanical 17.3); robofast stops it and the park fails."""
+    sim, server = make(
+        "pwi4",
+        sim_kw={"az": 281.0, "alt": 46.0, "az_mech_min": 17.3, "slew_rate": 30.0},
+        park_az=0.0,
+        stall_time=0.5,
+    )
+    tel = await device(server)
+    await tel.call("Park", timeout=T)
+    with pytest.raises(Exception, match="no progress"):
+        await until(lambda: _not(tel.get("Slewing", timeout=T)), timeout=20, what="park")
+    st = sim.model.state()
+    assert not st["slewing"] and abs(st["mech"] - 17.3) < 0.01
+    assert not await tel.get("AtPark", timeout=T)
+    await tel.aclose()
+
+
+async def test_park_timeout(make):
+    sim, server = make("pwi4", sim_kw={"slew_rate": 1.0, "az": 100.0}, park_timeout=1.0)
+    tel = await device(server)
+    await tel.call("Park", timeout=T)
+    await asyncio.sleep(1.6)
+    with pytest.raises(Exception, match="park_timeout"):
+        await tel.get("Slewing", timeout=T)
+    assert not sim.model.state()["slewing"]
+    await tel.aclose()
+
+
+async def test_axis_disabled_during_a_slew_fails_it(make):
+    sim, server = make("pwi4", sim_kw={"slew_rate": 2.0})
+    tel = await device(server)
+    await tel.put("SlewToAltAzAsync", Altitude=60.0, Azimuth=120.0, timeout=T)
+    await asyncio.sleep(0.3)
+    with sim.model.lock:
+        sim.model.enabled[0] = False  # PWI disables azimuth (a drive fault)
+    with pytest.raises(Exception, match="disabled the azimuth axis"):
+        await until(lambda: _not(tel.get("Slewing", timeout=T)), timeout=5, what="slew")
+    with pytest.raises(InvalidOperationException, match="azimuth axis motor is disabled"):
+        await tel.put("SlewToAltAzAsync", Altitude=40.0, Azimuth=100.0, timeout=T)
+    assert await tel.get("Connected", timeout=T)
+    await tel.aclose()
+
+
+async def test_watch_stops_azimuth_leaving_the_wrap_range(make):
+    sim, server = make("pwi4", sim_kw={"slew_rate": 5.0, "az": 0.0}, **WRAP)
+    with sim.model.lock:
+        sim.model.mech = -80.0
+        sim.model.goto_altaz(30.0, 0.0)
+        sim.model.mech_target = -200.0  # something else drives it out
+    await until(lambda: _async(server.mount.watch_stops >= 1), timeout=8, what="watch stop")
+    await until(lambda: _async(not sim.model.state()["slewing"]), timeout=3, what="stopped")
+    assert sim.model.state()["mech"] > -91.0
+
+
+def test_wrap_config_checks():
+    with pytest.raises(ValueError, match="go together"):
+        config(1, "pwi4", az_wrap_min=-90.0)
+    with pytest.raises(ValueError, match="pwi4 backend"):
+        config(1, "pwi2", **WRAP)
+    with pytest.raises(ValueError, match="at least 360"):
+        config(1, "pwi4", az_wrap_min=0.0, az_wrap_max=300.0)
+
+
+async def test_jog_refuses_a_long_way_round():
+    sim = PWISim("pwi4", ready=True, homed=True, report_homed=True, alt=30.0, az=0.0).start()
+    with sim.model.lock:
+        sim.model.mech = 360.0  # parked through 360; PWI4's wrap still 0..360
+    jog, _, _ = jog_for(sim, "pwi4", **WRAP)
+    try:
+        with pytest.raises(JogRefused, match="the long way"):
+            await jog.altaz(0.5, 0.0)
+        assert sim.model.commands == []
+        with sim.model.lock:
+            sim.model.wrap_min = 180.0
+        assert await jog.altaz(0.5, 0.0)
+        assert abs(sim.model.state()["mech"] - 360.0) < 0.01
+    finally:
+        await jog.pwi.aclose()
+        sim.stop()
+
+
+async def test_targets_do_not_carry_over_to_a_new_session(make):
+    _, server = make("pwi4")
+    tel = await device(server)
+    await tel.set("Tracking", True, timeout=T)
+    lst = await tel.get("SiderealTime", timeout=T)
+    await tel.call("SlewToCoordinatesAsync", (lst - 1.0) % 24, 20.0, timeout=T)
+    assert await tel.get("TargetDeclination", timeout=T) == 20.0
+    await tel.set("Connected", False, timeout=T)
+    await tel.aclose()
+    tel2 = await device(server)  # a new session (e.g. ConformU)
+    with pytest.raises(InvalidOperationException, match="not been set"):
+        await tel2.get("TargetRightAscension", timeout=T)
+    await tel2.call("AbortSlew", timeout=T)
+    await tel2.aclose()
+
+
+async def test_driver_info_carries_the_pwi_version(make):
+    """It goes in FITS headers as MNTSWVER (docs/data.md)."""
+    _, server = make("pwi4", sim_kw={"version": "4.1.6.0"})
+    tel = await device(server)
+    info = await tel.get("DriverInfo", timeout=T)
+    assert info.startswith("PlaneWave PWI4 4.1.6.0;") and "pwi_server" in info
+    await tel.aclose()
