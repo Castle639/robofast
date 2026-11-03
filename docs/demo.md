@@ -55,8 +55,10 @@ run in real seconds, shortened. The whole night is `n20261109` everywhere.
    through iodine (the instrumental-profile calibration), four RV
    standards with the iodine cell in, and a template with the cell out.
    One telescope leads, the other joins, and both locate the fiber with
-   the backlight and guide. One target ends on the exposure meter's
-   counts.
+   the backlight and guide; each guider reports its fiber flux to the
+   KiwiSpec service, which sums it into each spectrum's flux-weighted
+   midpoint. One target ends on those FAU counts. Each raw file is made
+   legal FITS in place, verified (`docs/kiwispec.md`, "The raw file").
 5. **Bad weather** during the second spectrum: humidity goes to 95 %, the
    bridge reports unsafe, and the supervisor revokes the lease. The
    sequencer aborts the spectrum, stops the guiders and parks. The

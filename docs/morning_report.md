@@ -23,7 +23,7 @@ It writes `report-<night>.md` and `report-<night>.json` to `--out` and, with
 | Per telescope: light frames, exposure, spectra time, plate solves, median pointing offset, zero points per filter and their change against earlier reports | the frame index (`*.frames.jsonl`), the spectrum sidecars, `--history` (default `--out`) |
 | Requests: outcomes, failures, ToOs, preemptions | the plan record |
 | Autofocus results and the seeing trend | the plan record's `autofocus` entries |
-| Guiding rms, fiber flux (exposure-meter counts/s), acquisition methods | the sidecars; the sequencer's `guiding` events (`acq_method`, `docs/acquisition.md`) |
+| Guiding rms, fiber flux (flux-record counts/s: FAU guide frames, relative), acquisition methods | the sidecars; the sequencer's `guiding` events (`acq_method`, `docs/acquisition.md`) |
 | Spectrograph frames by kind (science, ThAr, flats, biases, darks) | the sidecars |
 | Alarms (incl. pointing drift, recovery, giving up) and anomalies (errors, dropped telescopes, recovery) | the timeline |
 | Throughput (with `--throughput`): per telescope, port and filter, tonight's clear-night zero point above the atmosphere, the trend's level, efficiency, change against the baseline and slope, events and alarms | the throughput monitor (docs/throughput.md): the report first ingests the night's frame indexes into its store and writes its status file |

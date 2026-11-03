@@ -91,6 +91,9 @@ def service_config(sim: KiwiSpecSim, **over) -> KiwiSpecConfig:
         # config has neither (test_minerva_is_iodine_only).
         "lamp_frames": ["thar", "fiberflat"],
         "slit_flat_led": True,
+        # The legacy exposure meter's mechanics; MINERVA uses the FAU flux
+        # (test_kiwispec_flux.py).
+        "flux_source": "expmeter",
         **over,
     }
     return KiwiSpecConfig.from_dict(d)
@@ -637,6 +640,12 @@ async def test_spec_server_restart_mid_exposure(http, sim):
     )
     job = r.json()
     await asyncio.sleep(0.5)
+    # The service has read a non-zero total before the restart (under load
+    # the first readings can still be 0, and a fresh 0 is not "backwards").
+    deadline = time.monotonic() + 3
+    while (sim.expmeter_total or 0) < 200 and time.monotonic() < deadline:
+        await asyncio.sleep(0.05)
+    await asyncio.sleep(0.2)
     await sim.restart("spec", downtime=0.4)
     job = (await http.get(f"/jobs/{job['id']}", params={"wait": 10})).json()
     # the camera is a separate program: the frame completes and is saved once

@@ -41,6 +41,16 @@ per ``publish_interval``, to a value registry (``<scope>.guide_*``, with
 FITS keywords; design.md 3.8) and optionally to a Redis channel in
 tres-guider's ``tracking_data`` format (:mod:`~robofast_core.guider.redis_pub`).
 
+**Fiber flux** (``fiber_flux``; docs/kiwispec.md, "Flux from the FAU guide
+frames"): every guide frame's background-subtracted counts inside the
+fiber's footprint (:func:`fiber_counts`, a ``fiber_aperture`` radius around
+the fiber pixel, the background from an annulus) go into the frame's record
+(``fiber_counts``) and into :attr:`Guider.flux_frames`, which the guider
+service reports to the spectrograph service for the spectrum's
+flux-weighted midpoint. Behind a beamsplitter (MINERVA's FAU) this is the
+light reaching the fiber's position, not the light coupled into it: a
+relative flux.
+
 Alarms: ``star_lost``, ``tiptilt_limit``, ``residual_high``,
 ``acquisition_failed``, ``not_converging``, ``device_error``; repeated
 alarms within ``alarm_repeat`` seconds are counted, not duplicated.
@@ -132,6 +142,14 @@ class GuideConfig:
     plate_scale: float | None = None
     #: Value registry scope (the telescope's name: "t2").
     scope: str = "guider"
+    #: Measure the counts inside the fiber's footprint on every guide frame
+    #: (module doc): an aperture of ``fiber_aperture`` pixels (default
+    #: ``fiber_radius``) around the fiber pixel, less the median of the
+    #: annulus ``fiber_annulus`` (inner, outer radius; default 2x and 3x
+    #: the aperture).
+    fiber_flux: bool = False
+    fiber_aperture: float | None = None
+    fiber_annulus: tuple[float, float] | None = None
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> GuideConfig:
@@ -152,6 +170,10 @@ class GuideConfig:
             raise ValueError("exposure times out of range")
         if not 8 <= c.roi_size <= 4096:
             raise ValueError("roi_size out of range")
+        if c.fiber_annulus is not None:
+            c.fiber_annulus = (float(c.fiber_annulus[0]), float(c.fiber_annulus[1]))
+            if not 0 < c.fiber_annulus[0] < c.fiber_annulus[1]:
+                raise ValueError("fiber_annulus: 0 < inner < outer")
         Gains.from_dict(c.gains)
         return c
 
@@ -173,6 +195,33 @@ class FrameRecord:
     valid: bool = True
     #: Frame delivered -> command sent (the guider's own share).
     processing: float = math.nan
+    #: Background-subtracted counts inside the fiber's footprint (fiber_flux).
+    fiber_counts: float = math.nan
+
+
+def fiber_counts(
+    frame: Frame, x: float, y: float, radius: float, annulus: tuple[float, float] | None = None
+) -> float | None:
+    """Counts inside a ``radius``-pixel circle around detector pixel
+    ``(x, y)``, less the median of the ``annulus`` (default 2x..3x the
+    radius) times the aperture's pixel count. None when the annulus is not
+    wholly inside the frame (the fiber is outside the window)."""
+    r_in, r_out = annulus or (2 * radius, 3 * radius)
+    data = frame.data
+    cx, cy = x - frame.roi.x, y - frame.roi.y
+    ny, nx = data.shape
+    if cx - r_out < 0 or cy - r_out < 0 or cx + r_out > nx - 1 or cy + r_out > ny - 1:
+        return None
+    x0, x1 = math.floor(cx - r_out), math.ceil(cx + r_out) + 1
+    y0, y1 = math.floor(cy - r_out), math.ceil(cy + r_out) + 1
+    cut = np.asarray(data[y0:y1, x0:x1], dtype=float)
+    yy, xx = np.mgrid[y0:y1, x0:x1]
+    d = np.hypot(xx - cx, yy - cy)
+    ap = d <= radius
+    ring = (d >= r_in) & (d <= r_out)
+    if not ap.any() or not ring.any():
+        return None
+    return float(cut[ap].sum() - np.median(cut[ring]) * ap.sum())
 
 
 class Backlight:
@@ -221,6 +270,8 @@ class Guider:
         self.state = "idle"
         self.reason = ""
         self.records: deque[FrameRecord] = deque(maxlen=max(config.window, 10))
+        #: Fiber flux not yet reported: (t_start, t_end, counts), clock time.
+        self.flux_frames: deque[tuple[float, float, float]] = deque(maxlen=20000)
         self.alarms: deque[Alarm] = deque(maxlen=50)
         self.last: Measurement | None = None
         self.frames = 0
@@ -684,6 +735,14 @@ class Guider:
         tgt = self.config.target or (math.nan, math.nan)
         pos = self.fine.position if self.fine is not None else (math.nan, math.nan)
         u = u if u is not None else np.zeros(2)
+        counts = math.nan
+        fib = self.fiber or self.config.target
+        if self.config.fiber_flux and fib is not None:
+            r = self.config.fiber_aperture or self.config.fiber_radius
+            got = fiber_counts(frame, fib[0], fib[1], r, self.config.fiber_annulus)
+            if got is not None:
+                counts = got
+                self.flux_frames.append((frame.t_start, frame.t_end, max(0.0, got)))
         self.records.append(
             FrameRecord(
                 frame.t_end,
@@ -700,6 +759,7 @@ class Guider:
                 latency,
                 valid,
                 processing,
+                counts,
             )
         )
 

@@ -35,7 +35,9 @@ degrees.)
   `extra_params` (declared by its instrument type,
   `robofast_core/devices/kiwispec_instrument.py`): `iodine` (true/false;
   absent: the spectrograph service's default) and `target_counts`
-  (exposure-meter termination, `exposure_time` then being the maximum),
+  (termination on the spectrograph's flux record -- at MINERVA the summed
+  FAU guide-frame counts, a relative scale -- `exposure_time` then being
+  the maximum),
   only for `SPECTRUM` and only on an instrument whose type declares them.
   The scheduler passes them to the observation as `spectrum["params"]`, as
   the spectrograph takes them (`iodine`: `"in"`/`"out"`), and the
@@ -86,7 +88,10 @@ the sequencer's `preempt` with policy `next`, which interrupts nothing.
 Each telescope of the feed, in its own task: slew, locate the fiber with
 the backlight (`locate_fiber`; one telescope at a time, since the backlight
 lights the whole bundle; on failure it guides on the configured fiber
-position, as legacy did), and start guiding. Then:
+position, as legacy did), and start guiding. While it guides, its guider
+reports the counts inside the fiber's footprint on every frame to the
+spectrograph service (`flux_report`; `docs/kiwispec.md`, "Flux from the
+FAU guide frames"): the flux record for the spectrum's midpoint. Then:
 
 * The **leader** opens the session and waits until every expected member
   is guiding, or until `spectrum_ready_timeout`; then it starts with the
@@ -182,12 +187,13 @@ nightly plan record. In production it is the host's clock (NTP; see
 `docs/deploy.md`). The simulated night (`docs/demo.md`) runs a compressed
 clock, and its outputs carry one night name, `n20261109`, everywhere.
 
-## 4. The metadata: sidecars, not rewritten raw files
+## 4. The metadata: sidecars, and one legal raw file
 
-The raw FITS file stays on the spectrograph PC exactly as the camera and
-the spectrograph server wrote it. robofast never rewrites it in place
-(`docs/kiwispec.md`, open question 10). Everything robofast knows about a
-spectrum goes into a JSON **sidecar** (`robofast_core/spectra.py`):
+The camera software's raw file is not legal FITS. The spectrograph service
+rewrites it once, in place, and only after the rewritten file is verified
+(valid FITS, identical pixels, checksums; `docs/kiwispec.md`, "The raw
+file"): one copy at rest. Everything robofast knows about a spectrum goes
+into a JSON **sidecar** (`robofast_core/spectra.py`):
 
 ```
 <data_root>/<site>/kiwispec/n<YYYYMMDD>/<raw file name>.json
@@ -201,13 +207,16 @@ A sidecar holds:
   the end (`telescopes_end`), and who dropped out and why (`dropped`);
 * each telescope's guide statistics at the end of the frame (`guide`:
   state, residual rms, flux, and so on, from the guider's status);
-* the exposure meter's counts and flux-weighted midpoint (seconds, UTC,
-  JD), what ended the exposure (`time` or `counts`), and the iodine
-  position;
+* the flux record's source (`flux_source`: `fau` at MINERVA), its counts
+  (`fau_counts`, per telescope in `spectrograph.fau`) and the
+  flux-weighted midpoint (seconds, UTC, JD), what ended the exposure
+  (`time` or `counts`), the iodine position, and the raw file's rewrite
+  (`fits`: the pixels' SHA-256 and the FITS `DATASUM`);
 * the target (with its astrometry), the site and the request ids;
 * `barycentric`: computed with astropy at the flux-weighted midpoint. If
-  there is no midpoint, the middle of the exposure is used, and
-  `midpoint_source` says which. It contains:
+  there is no flux record (no guider reported, too little of the exposure
+  covered), the middle of the exposure is used, and `midpoint_source`
+  says which (`fau`, `expmeter` or `geometric`). It contains:
   * `bjd_tdb`: the midpoint in TDB plus the light travel time to the
     solar-system barycentre;
   * `barycentric_correction`: the RV correction in m/s

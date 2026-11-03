@@ -7,14 +7,14 @@ and the sequencer's: enclosure open/close and why, weather, alarms, errors,
 guiding and its acquisition method), the nightly frame index of each
 telescope (``*.frames.jsonl``: frames, exposure, plate solves, zero
 points) and the spectrograph's sidecars (``*.fits.json``: spectra and
-calibrations, guiding, exposure-meter counts) -- and writes a Markdown
+calibrations, guiding, fiber flux) -- and writes a Markdown
 report and its JSON next to each other (``report-<night>.md``/``.json``),
 then sends it through the notifier's sinks.
 
 Sections: the enclosure (open time, every close and why), weather
 interruptions, time on sky per telescope, requests completed/failed,
 autofocus (results and the seeing/FWHM trend), guiding (rms) and fiber flux
-(exposure meter), zero points per telescope and filter against the
+(the flux record: FAU guide frames), zero points per telescope and filter against the
 previous nights' (``--history``: earlier reports) and, with
 ``--throughput``, the throughput monitor's trend per telescope and port
 (docs/throughput.md), pointing (plate-solve
@@ -293,10 +293,12 @@ def build_report(inp: _Inputs, qa: QAConfig | None = None) -> dict[str, Any]:
             if isinstance(v, int | float):
                 rms[t].append(float(v))
     science = [sc for sc in inp.sidecars if sc.get("kind") == "science"]
+    # The flux record's counts per second: the FAU guide frames' (relative,
+    # docs/kiwispec.md), or a legacy exposure meter's.
     flux = [
-        float(sc["expmeter_counts"]) / float(sc["exptime"])
+        float(sc.get("fau_counts") or sc["expmeter_counts"]) / float(sc["exptime"])
         for sc in science
-        if sc.get("expmeter_counts") and sc.get("exptime")
+        if (sc.get("fau_counts") or sc.get("expmeter_counts")) and sc.get("exptime")
     ]
     acq = Counter(
         e["detail"].get("acq_method") for e in ev if e["what"] == "guiding" and e["detail"]
@@ -417,7 +419,7 @@ def render_markdown(rep: dict[str, Any]) -> str:
         "## Guiding and fiber",
         "",
         f"Guiding rms (median, arcsec): {g['rms_arcsec_median']}; fiber flux (median"
-        f" exposure-meter counts/s): {g['fiber_flux_median']}; acquisition methods:"
+        f" flux-record counts/s): {g['fiber_flux_median']}; acquisition methods:"
         f" {g['acquisition_methods'] or '-'}.",
         "",
         "## Spectrograph",
