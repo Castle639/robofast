@@ -511,7 +511,7 @@ def _alpaca_put(client: httpx.Client, url: str, **values: Any) -> None:
 def preflight(s: RehearsalSettings, timeout: float = 10.0) -> dict[str, dict[str, Any]]:
     """Read every real endpoint once; :class:`RehearsalRefused` with every
     problem found. Nothing moves: the only command is ``Connected=True`` to
-    a camera not yet connected (as robofast's device owner does anyway). A
+    a device not yet connected (as robofast's device owners do anyway). A
     focuser or rotator that does not answer is only noted (they are read for
     the FITS headers)."""
     bad: list[str] = []
@@ -535,6 +535,11 @@ def preflight(s: RehearsalSettings, timeout: float = 10.0) -> dict[str, dict[str
                 what = "a verified robofast simulator" if sim else "NOT a verified simulator: REAL"
                 log.warning("%s %s at %s: %s", name, kind, ep, what)
                 try:
+                    if kind != "camera" and not _alpaca_get(c, url + "/connected"):
+                        # A robofast device server keeps Connected per Alpaca
+                        # client; connecting is what its clients do anyway.
+                        log.warning("%s %s at %s: connecting it", name, kind, ep)
+                        _alpaca_put(c, url + "/connected", Connected=True)
                     if kind == "telescope":
                         if not _alpaca_get(c, url + "/connected"):
                             bad.append(f"{name} telescope at {ep}: not connected")
