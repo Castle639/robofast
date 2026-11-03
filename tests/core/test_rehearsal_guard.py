@@ -295,5 +295,7 @@ def test_imaging_requests_wait_for_the_azimuth_window():
         for w in req["windows"]:
             for edge in (w["start"], w["end"]):
                 when = datetime.fromisoformat(edge)
-                az = azimuth(tgt["ra"] / 15, tgt["dec"], lst_hours(when, MINERVA.longitude), MINERVA.latitude)
+                az = azimuth(
+                    tgt["ra"] / 15, tgt["dec"], lst_hours(when, MINERVA.longitude), MINERVA.latitude
+                )
                 assert 117 <= az <= 264, (g["id"], edge, az)
