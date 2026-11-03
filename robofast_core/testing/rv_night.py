@@ -111,10 +111,13 @@ class NightSettings:
     #: slow CI runner at 400 the night ran out before every target was done.
     scale: float = 200.0
     start: datetime = DEFAULT_START
-    #: RV spectra: maximum exposure time; the exposure meter's count rate
-    #: (counts/s) and one target that ends on counts.
+    #: RV spectra: maximum exposure time; the (unused) exposure meter's
+    #: count rate (counts/s); one FAU's fiber-aperture counts/s on the
+    #: simulated star (the flux record: about 0.79 of the guide star's 2e6
+    #: e/s fall in the 3-pixel aperture), and one target that ends on counts.
     rv_exptime: float = 2.0
     expmeter_rate: float = 2.0e5
+    fau_rate: float = 1.5e6
     #: The supervisor's reopen hold after bad weather, and how long the bad
     #: weather lasts after the roof is shut.
     reopen_hold: float = 4.0
@@ -411,6 +414,8 @@ class SimulatedNight:
                 expmeter_period=0.1,
                 heater_tau=0.2,
                 backlight_failsafe=1.0,
+                # SI Image's raw files, rewritten as legal FITS by the service
+                data_dir=str(self.out / "kiwispec-pc"),
             )
         ).start()
         self.kiwi_sim.set_sky(self.s.expmeter_rate)
@@ -446,6 +451,7 @@ class SimulatedNight:
             status_interval=1.0,
             status_timeout=3.0,
             clock={"file": str(self.clock_file)},
+            raw_fits={"dir": str(self.out / "kiwispec-pc"), "wait": 5},
         )
         path = self.out / "kiwispec.json"
         path.write_text(json.dumps(base, indent=1))
@@ -458,6 +464,9 @@ class SimulatedNight:
         self.services.append(self.kiwispec)
 
     def _start_guiders(self) -> None:
+        # Each guider reports its fiber flux to the KiwiSpec service: the
+        # spectra's flux record (docs/kiwispec.md, "Flux from the FAU guide frames").
+        self.kiwispec_url = json.loads(self.kiwispec.first_line())["url"]
         for name in NAMES:
             cfg = {
                 "name": f"{name}-guider",
@@ -468,6 +477,11 @@ class SimulatedNight:
                 "camera": {"kind": "sim"},
                 "tiptilt": {"kind": "sim", "limits": [[-200, 200], [-200, 200]]},
                 "backlight": {"sim": True},
+                "flux_report": {
+                    "url": self.kiwispec_url,
+                    "telescope": name.upper(),
+                    "interval": 0.25,
+                },
                 "guide": {
                     "exposure": 0.05,
                     "acq_exposure": 0.05,
@@ -537,7 +551,6 @@ class SimulatedNight:
         self.services.append(self.supervisor)
 
     async def _wait_ready(self) -> None:
-        self.kiwispec_url = json.loads(self.kiwispec.first_line())["url"]
         for t in self.telescopes.values():
             assert t.guider is not None
             t.guider_url = json.loads(t.guider.first_line())["url"]
@@ -702,7 +715,7 @@ class SimulatedNight:
                 i, f"RV standard {i + 1}"
             )
             if i == 2:
-                extra["target_counts"] = self.s.expmeter_rate * self.s.rv_exptime * 0.6
+                extra["target_counts"] = self.s.fau_rate * self.s.rv_exptime * 0.6
             ic = {"exposure_time": self.s.rv_exptime, "exposure_count": 1, "extra_params": extra}
             groups.append(
                 {
@@ -1340,8 +1353,12 @@ def output_problems(o: Outcome) -> list[str]:
             bad.append(f"{r['file']}: no guide statistics")
         if r.get("flux_midpoint_utc") is None:
             bad.append(f"{r['file']}: no flux-weighted midpoint")
+        elif r.get("flux_source") != "fau":
+            bad.append(f"{r['file']}: flux record {r.get('flux_source')!r}, not the FAU frames")
+        if not (r.get("fits") or {}).get("rewritten"):
+            bad.append(f"{r['file']}: raw file not made legal FITS: {r.get('fits')}")
     if not any(r.get("ended_by") == "counts" for r in science):
-        bad.append("no spectrum ended on the exposure meter's counts")
+        bad.append("no spectrum ended on the FAU flux counts")
     # The iodine cell: in for the B star and the RV stars, out for the template.
     for r in science:
         want = "out" if r.get("object") == TARGET_NAMES[5] else "in"

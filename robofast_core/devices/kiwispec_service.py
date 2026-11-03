@@ -23,8 +23,9 @@ All bodies are JSON; errors are ``{"error": ...}`` with 400 (bad request),
 * ``POST /expose`` ``{"kind", "exptime", "object"?, "telescopes"?,
   "target_counts"?, "iodine"?}`` -- start one frame; 202 with the job. Kinds:
   ``science`` (``telescopes`` -- the ones feeding the fiber -- required;
-  ``iodine`` default from config; exposure-meter terminated when
-  ``target_counts`` is given, ``exptime`` then being the maximum),
+  ``iodine`` default from config; terminated on the flux record
+  (``flux_source``: the FAU guide frames, or the legacy exposure meter)
+  when ``target_counts`` is given, ``exptime`` then being the maximum),
   ``thar``, ``slitflat``, ``fiberflat``, ``dark``, ``bias`` (``exptime`` 0).
   Only the kinds this spectrograph can take are accepted (``/status``
   ``frame_kinds``): ``thar`` and ``fiberflat`` need ``lamp_frames``, and
@@ -34,8 +35,10 @@ All bodies are JSON; errors are ``{"error": ...}`` with 400 (bad request),
   calibration sequence as one job; 202.
 * ``GET /jobs/{id}?wait=S`` -- a job's state; waits up to ``S`` s for it to
   finish. Each frame's result has the file name, the actual exposure time,
-  what ended it (``time``, ``counts``, ``stop``), the exposure-meter counts
-  and the **flux-weighted midpoint** (seconds after the start, UTC, JD).
+  what ended it (``time``, ``counts``, ``stop``), the flux record's counts,
+  the **flux-weighted midpoint** (seconds after the start, UTC, JD; None
+  without a flux record: then ``midpoint_source`` is ``geometric``), and,
+  with ``raw_fits``, the raw file's rewrite (``fits``: checksums).
 * ``POST /abort`` ``{"reason"}`` -- abort the running job: terminate the
   exposure and discard the frame; answers once the job has ended, or after
   ``abort_timeout`` (then ``"ended": false``; the job is cancelled and every
@@ -43,8 +46,16 @@ All bodies are JSON; errors are ``{"error": ...}`` with 400 (bad request),
   lets that frame finish reading out and be saved, then ends the job.
   ``POST /stop`` ends the exposure early and keeps the frame.
 * ``POST /backlight`` ``{"on": bool}`` -- the FAU fiber-acquisition backlight
-  (the exposure meter is paused while it is on; the server itself turns the
-  backlight off after 60 s).
+  (an LED disk on an arm that swings in over the fiber; with the legacy
+  exposure meter in use, the meter is paused while it is on; the server
+  itself turns the backlight off after 60 s).
+* ``POST /flux`` ``{"telescope", "frames": [[t_start, t_end, counts], ...]}``
+  -- FAU guide-frame flux from a guider (Unix seconds; counts inside the
+  fiber's footprint): the flux record of ``flux_source: "fau"``
+  (:mod:`robofast_core.devices.kiwispec_flux`).
+* ``POST /restart_camera`` ``{"reason"?}`` -- kill SI Image and start it
+  again at once (its CCD cooler stops while it is down); also done by the
+  service itself after ``camera_restart_after`` camera failures in a row.
 
 One job at a time. ``configure``, ``expose``, ``calibrate`` and
 ``backlight`` take an optional ``"wait": S`` and ``"client": name``: while
@@ -111,6 +122,7 @@ from urllib.parse import parse_qs, urlparse
 from robofast_core.cancel import isolated, stop_task
 from robofast_core.clock import clock_from_config
 from robofast_core.config import load_device_config, require_keys
+from robofast_core.devices.kiwispec_aux import Chiller, build_chiller
 from robofast_core.devices.kiwispec_client import (
     CAMERA_PORT,
     SPEC_PORT,
@@ -125,6 +137,8 @@ from robofast_core.devices.kiwispec_client import (
     SpecServerClient,
     StagePosition,
 )
+from robofast_core.devices.kiwispec_fits import FitsRewriteError, standardize
+from robofast_core.devices.kiwispec_flux import FluxLog, fau_flux, parse_frames
 
 log = logging.getLogger(__name__)
 
@@ -144,6 +158,11 @@ KINDS: dict[str, tuple[bool, str | None, bool, bool, bool]] = {
     "dark": (True, "in", False, False, False),
     "bias": (True, "in", False, False, False),
 }
+#: Where a science frame's flux record comes from (``flux_source``): the FAU
+#: guide frames the guiders report (``POST /flux``), the legacy exposure
+#: meter (a PMT; not used at MINERVA), or nothing (time-terminated, and the
+#: barycentric correction uses the geometric midpoint).
+FLUX_SOURCES = ("fau", "expmeter", "none")
 #: Kinds that need a calibration lamp the service does not control.
 LAMP_KINDS = ("thar", "fiberflat")
 #: The iodine stage's named positions (the server's ``[I2POSITIONS]`` names).
@@ -278,6 +297,20 @@ class KiwiSpecConfig:
     #: Added to every exposure's bound (exposure + readout + this).
     exposure_margin: float = 60.0
     max_exptime: float = 3600.0
+    #: The flux record for the flux-weighted midpoint and count termination
+    #: (:data:`FLUX_SOURCES`). ``"fau"``: the FAU guide frames the guiders
+    #: report (``POST /flux``; :mod:`robofast_core.devices.kiwispec_flux`).
+    #: ``"expmeter"``: the legacy exposure meter (PMT), which MINERVA does
+    #: not use; only then is the meter reset, read or paused. ``"none"``:
+    #: every exposure runs its fixed time. Without a flux record the
+    #: spectrum's midpoint is the geometric one.
+    flux_source: str = "fau"
+    #: FAU flux: gaps between guide frames up to this (s) are bridged; a
+    #: midpoint needs some telescope's frames to cover at least this
+    #: fraction of the exposure; frames are kept this long (s).
+    fau_max_gap: float = 10.0
+    fau_min_coverage: float = 0.5
+    fau_max_age: float = 4 * 3600.0
     expmeter_poll: float = 1.0
     #: The meter's own reading period (legacy: 1 reading/s).
     expmeter_period: float = 1.0
@@ -287,8 +320,35 @@ class KiwiSpecConfig:
     ccd_temp_min: float = -95.0
     ccd_temp_max: float = -85.0
     check_ccd_temp: bool = True
-    #: Legacy spectrograph pressure alarm threshold (mbar).
+    #: Spectrograph pressure threshold (mbar; legacy 0.006), and whether a
+    #: pressure above it is an ``"alarm"`` (``/status`` ``alarms``: the
+    #: sequencer marks the spectrograph down) or only a ``"warning"``
+    #: (``/status`` ``warnings``), e.g. while the spectrograph is isolated
+    #: from its pump.
     max_spec_pressure: float = 0.006
+    pressure_alarm: str = "alarm"
+    #: The spectrograph PC's local time, hours from UTC (MST, no daylight
+    #: saving: -7). SI Image stamps DATE-OBS in it.
+    pc_utc_offset_hours: float = -7.0
+    #: The raw file, as this host sees the spectrograph PC's data directory
+    #: (a mount): ``{"dir": path, "rewrite": true, "wait": s}``. The file is
+    #: ``<dir>/<night>/<file>``. With ``rewrite`` (default) each frame is made
+    #: legal FITS in place, verified, after its header is written
+    #: (:mod:`robofast_core.devices.kiwispec_fits`); ``wait`` bounds how long
+    #: the file may take to appear. None: the raw file is not visible here
+    #: and is left as the camera wrote it.
+    raw_fits: dict[str, Any] | None = None
+    #: SI Image restarts (docs/kiwispec.md, "Restarting SI Image"): after
+    #: this many camera failures in a row the service kills and at once
+    #: restarts the camera software (its CCD cooler stops while it is
+    #: down), bounded by ``camera_restart_timeout``. False: never by itself
+    #: (``POST /restart_camera`` still works).
+    camera_restart: bool = True
+    camera_restart_after: int = 2
+    camera_restart_timeout: float = 60.0
+    #: The spectrograph's chiller (telemetry only): None, ``{"kind": "sim",
+    #: ...}`` or a driver's kind (:mod:`robofast_core.devices.kiwispec_aux`).
+    chiller: dict[str, Any] | None = None
     abort_timeout: float = 30.0
     #: How long a finished frame may wait for the spectrograph server to come
     #: back (to move the raw frame into place).
@@ -327,6 +387,19 @@ class KiwiSpecConfig:
             raise ValueError(f"lamp_frames: a list of {list(LAMP_KINDS)}, not {lamps!r}")
         if not isinstance(d.get("slit_flat_led", False), bool):
             raise ValueError("slit_flat_led must be true or false")
+        if d.get("flux_source", "fau") not in FLUX_SOURCES:
+            raise ValueError(f"flux_source: one of {list(FLUX_SOURCES)}, not {d['flux_source']!r}")
+        if d.get("pressure_alarm", "alarm") not in ("alarm", "warning"):
+            raise ValueError(f"pressure_alarm: alarm or warning, not {d['pressure_alarm']!r}")
+        raw = d.get("raw_fits")
+        if raw is not None:
+            if not isinstance(raw, dict) or not raw.get("dir"):
+                raise ValueError("raw_fits: {'dir': path, 'rewrite'?: bool, 'wait'?: s}")
+            extra = set(raw) - {"dir", "rewrite", "wait"}
+            if extra:
+                raise ValueError(f"raw_fits: unknown keys {sorted(extra)}")
+        if d.get("chiller") is not None:
+            build_chiller(d["chiller"])  # fail at load, not at the first read
         return cls(**d)
 
     def frame_kinds(self) -> list[str]:
@@ -455,9 +528,16 @@ class KiwiSpec:
         self.last_stage_request: str | None = None
         #: The stage's named positions as the live server reports them (mm).
         self.stage_learned: dict[str, float] = {}
+        self.heater_on: bool | None = None
         self.readings: dict[str, dict[str, Any]] = {}
         self.faults: list[str] = []
         self._status_task: asyncio.Task | None = None
+        #: FAU guide-frame flux, per telescope (``POST /flux``).
+        self.flux = FluxLog(max_age=config.fau_max_age)
+        self.chiller: Chiller | None = build_chiller(config.chiller)
+        #: Camera failures since the last good frame, and SI Image restarts.
+        self.camera_failures = 0
+        self.camera_restarts: list[dict[str, Any]] = []
 
     # -- status -------------------------------------------------------------------
 
@@ -491,10 +571,21 @@ class KiwiSpec:
                 await self._read("stage", self.spec.stage_position())
                 await self._read("spec_pressure", self.spec.spec_pressure())
                 await self._read("pump_pressure", self.spec.pump_pressure())
-                await self._read("expmeter_total", self.spec.expmeter_total())
+                if self.config.flux_source == "expmeter":
+                    await self._read("expmeter_total", self.spec.expmeter_total())
                 await self._read("ccd_temp", self.camera.ccd_temperature())
+                if self.chiller is not None:
+                    await self._read_chiller()
         except TimeoutError:
             self.faults.append("status refresh timed out")
+
+    async def _read_chiller(self) -> None:
+        assert self.chiller is not None
+        try:
+            async with asyncio.timeout(self.config.status_timeout):
+                self._record("chiller", await self.chiller.read())
+        except Exception as exc:  # a driver's error is telemetry, not a crash
+            self._record("chiller", error=f"{type(exc).__name__}: {exc}")
 
     async def _status_loop(self) -> None:
         while True:
@@ -512,21 +603,37 @@ class KiwiSpec:
             await self.abort("service stopping")
         await self.camera.close()
 
-    def alarms(self) -> list[str]:
-        c, out = self.config, []
+    #: Readings whose errors are warnings, not alarms (telemetry only).
+    WARNING_READINGS = ("chiller", "pump_pressure")
+
+    def _checks(self) -> tuple[list[str], list[str]]:
+        """``(alarms, warnings)`` from the last readings and the faults."""
+        c, alarms, warns = self.config, [], []
         get = self.readings.get
         ccd = (get("ccd_temp") or {}).get("value")
         if ccd is not None and not c.ccd_temp_min <= ccd <= c.ccd_temp_max:
-            out.append(f"CCD temperature {ccd} C outside {c.ccd_temp_min}..{c.ccd_temp_max}")
+            alarms.append(f"CCD temperature {ccd} C outside {c.ccd_temp_min}..{c.ccd_temp_max}")
         p = (get("spec_pressure") or {}).get("value")
         if p is not None and p > c.max_spec_pressure:
-            out.append(f"spectrograph pressure {p} mbar > {c.max_spec_pressure}")
+            msg = f"spectrograph pressure {p} mbar > {c.max_spec_pressure}"
+            (alarms if c.pressure_alarm == "alarm" else warns).append(msg)
+        chill = (get("chiller") or {}).get("value")
+        if chill and self.chiller is not None:
+            if chill.get("fault"):
+                alarms.append(f"chiller fault: {chill['fault']}")
+            t, sp = chill.get("temp"), chill.get("setpoint")
+            if t is not None and sp is not None and abs(t - sp) > self.chiller.tolerance:
+                warns.append(f"chiller at {t} C, set point {sp} C")
         for key, r in self.readings.items():
             if r.get("error"):
-                out.append(f"{key}: {r['error']}")
-        return out + self.faults[-5:]
+                (warns if key in self.WARNING_READINGS else alarms).append(f"{key}: {r['error']}")
+        return alarms + self.faults[-5:], warns
+
+    def alarms(self) -> list[str]:
+        return self._checks()[0]
 
     def status(self) -> dict[str, Any]:
+        alarms, warns = self._checks()
         return {
             "name": self.config.name,
             "busy": self._held,
@@ -538,10 +645,15 @@ class KiwiSpec:
             "readings": self.readings,
             "led_on": self.led_on,
             "backlight_on": self.backlight,
+            "heater_on": self.heater_on,
             "stage_request": self.last_stage_request,
             "stage_positions_live": dict(self.stage_learned),
             "frame_kinds": self.config.frame_kinds(),
-            "alarms": self.alarms(),
+            "flux_source": self.config.flux_source,
+            "flux_reports": self.flux.status(),
+            "camera_restarts": self.camera_restarts[-5:],
+            "alarms": alarms,
+            "warnings": warns,
         }
 
     # -- hardware steps (all bounded) ------------------------------------------------
@@ -626,12 +738,16 @@ class KiwiSpec:
         self.led_on = on
 
     async def set_backlight(self, on: bool) -> None:
+        """The FAU backlight: an LED disk on an arm that swings in over the
+        fiber (on) and out again (off)."""
+        meter = self.config.flux_source == "expmeter"
         if on:
             # The backlight would saturate the exposure meter: pause it first
             # (best effort: the legacy server answers 'fail' when the meter is
             # not running).
-            with contextlib.suppress(KiwiSpecFailed):
-                await self.spec.call("stop_log_expmeter")
+            if meter:
+                with contextlib.suppress(KiwiSpecFailed):
+                    await self.spec.call("stop_log_expmeter")
             await self.spec.call("backlight_on")
             self.backlight = True
         else:
@@ -639,16 +755,19 @@ class KiwiSpec:
                 await self.spec.call("backlight_off")
                 self.backlight = False
             finally:
-                with contextlib.suppress(KiwiSpecFailed):
-                    await self.spec.call("start_log_expmeter")
+                if meter:
+                    with contextlib.suppress(KiwiSpecFailed):
+                        await self.spec.call("start_log_expmeter")
 
     async def heater(self, on: bool | None, setpoint: float | None) -> None:
         if setpoint is not None:
             await self.spec.cell_heater_set_temp(setpoint)
         if on is True:
             await self.spec.cell_heater_on()
+            self.heater_on = True
         elif on is False:
             await self.spec.cell_heater_off()
+            self.heater_on = False
 
     async def wait_heater(self) -> str | None:
         """Wait up to ``heater_wait`` for the cell to reach its set point;
@@ -888,12 +1007,21 @@ class KiwiSpec:
             job.state, job.error = "failed", f"{type(exc).__name__}: {exc}"
         finally:
             self._acquisition = None
-            self._release()
             job.phase = ""
             job.ended = time.time()
             job.finished.set()
             if job.error:
                 log.warning("job %d %s: %s", job.id, job.state, job.error)
+            if job.state == "failed" and self._restart_due():
+                # The job has ended; the spectrograph stays held until SI
+                # Image is back. Shielded: a restart is never left halfway
+                # (killed and not started again).
+                self._held = "restarting SI Image"
+                task = asyncio.get_running_loop().create_task(self._maybe_restart_camera())
+                task.add_done_callback(lambda _t: self._release())
+                await asyncio.shield(task)
+            else:
+                self._release()
 
     def frame_bound(self, f: Frame) -> float:
         c = self.config
@@ -906,19 +1034,96 @@ class KiwiSpec:
             + c.exposure_margin
             + c.save_timeout
             + c.abort_timeout
+            # the raw file's rewrite: its wait to appear, and the rewrite
+            + (float(c.raw_fits.get("wait", 30.0)) + 60.0 if c.raw_fits else 0.0)
         )
 
     async def _drop_camera(self) -> None:
+        """Forget the camera connection after a camera failure (counted
+        towards an SI Image restart)."""
+        self._camera_ready = False
+        self.camera_failures += 1
+        await self.camera.close()
+
+    async def restart_camera(self, reason: str) -> dict[str, Any]:
+        """Kill SI Image and start it again **at once** (its CCD cooler is off
+        while it is down, and the CCD's temperature stability matters), then
+        reconnect and turn the cooler on. Bounded by
+        ``camera_restart_timeout``. Raises :class:`KiwiSpecError` if SI
+        Image could not be started again (an alarm: a human must start it).
+        The caller holds the spectrograph."""
+        c = self.config
+        log.warning("restarting SI Image: %s", reason)
+        record: dict[str, Any] = {"reason": reason, "at": time.time(), "ok": False}
+        self.camera_restarts.append(record)
+        del self.camera_restarts[:-20]
         self._camera_ready = False
         await self.camera.close()
+        t0 = time.monotonic()
+        deadline = t0 + c.camera_restart_timeout
+        try:
+            try:
+                await self.spec.call("kill_si_image")
+            except KiwiSpecError as exc:
+                # It may be gone already; start it regardless.
+                log.warning("kill_si_image: %s", exc)
+            last: Exception | None = None
+            while True:  # start again at once, retrying until the deadline
+                try:
+                    await self.spec.call("start_si_image")
+                    break
+                except KiwiSpecError as exc:
+                    last = exc
+                    if time.monotonic() >= deadline:
+                        raise KiwiSpecError(f"start_si_image failed: {last}") from exc
+                    await asyncio.sleep(1.0)
+            while True:  # SI Image takes a moment to listen again
+                try:
+                    await self.ensure_camera()
+                    break
+                except (KiwiSpecError, TimeoutError) as exc:
+                    self._camera_ready = False
+                    await self.camera.close()
+                    if time.monotonic() >= deadline:
+                        raise KiwiSpecError(f"SI Image did not come back: {exc}") from exc
+                    await asyncio.sleep(0.5)
+        except KiwiSpecError as exc:
+            msg = f"SI Image restart failed ({exc}): the CCD cooler may be off; start it by hand"
+            record["error"] = msg
+            self.faults.append(msg)
+            log.error("%s", msg)
+            raise
+        record["ok"] = True
+        record["seconds"] = round(time.monotonic() - t0, 2)
+        self.camera_failures = 0
+        log.warning("SI Image restarted in %.1f s", record["seconds"])
+        return record
+
+    def _restart_due(self) -> bool:
+        c = self.config
+        return c.camera_restart and self.camera_failures >= c.camera_restart_after
+
+    async def _maybe_restart_camera(self) -> None:
+        """After ``camera_restart_after`` camera failures in a row (module
+        doc). Never raises."""
+        c = self.config
+        try:
+            async with asyncio.timeout(c.camera_restart_timeout + 30):
+                await self.restart_camera(f"{self.camera_failures} camera failures in a row")
+        except (KiwiSpecError, TimeoutError) as exc:
+            log.error("SI Image restart: %s", exc)
 
     async def _take(self, job: Job, f: Frame) -> dict[str, Any]:
         c = self.config
         dark, stage, led, uses_meter, _ = KINDS[f.kind]
         warnings: list[str] = []
         job.phase = f"{f.kind}: checking camera"
-        await self.ensure_camera()
-        ccd = await self.check_ccd()
+        try:
+            await self.ensure_camera()
+            ccd = await self.check_ccd()
+        except (KiwiSpecError, TimeoutError):
+            await self._drop_camera()
+            raise
 
         job.phase = f"{f.kind}: configuring"
         if self.backlight is not False:
@@ -942,13 +1147,19 @@ class KiwiSpec:
         file_name = f"{f.night or night(self.clock())}.{f.object}.{index:04d}.fits"
         await self.spec.call("set_file_name", file_name)
 
-        meter = uses_meter
+        source = c.flux_source if uses_meter else "none"
+        meter = source == "expmeter"
+        fau = source == "fau"
         if meter:
             try:
                 await self.spec.reset_expmeter()
             except KiwiSpecError as exc:
                 meter = False
                 warnings.append(f"exposure meter unavailable ({exc}); time-terminated")
+        if f.target_counts is not None and source == "none" and uses_meter:
+            warnings.append(
+                "no flux source (flux_source none): target_counts ignored, time-terminated"
+            )
         if self._abort.is_set():
             raise Aborted(job.abort_reason or "aborted")
 
@@ -957,6 +1168,10 @@ class KiwiSpec:
         self._acquisition = acq
         t0 = time.monotonic()
         start_utc = self.clock()
+        # The FAU frames carry the guiders' wall-clock (Unix, NTP) times: the
+        # exposure window is matched against them in the same time, even
+        # when a simulation runs this service on a scaled clock.
+        start_unix = time.time()
         ended_by, samples, failures = "time", [(0.0, 0.0)], 0
         end = f.exptime
         try:
@@ -973,6 +1188,12 @@ class KiwiSpec:
                 with contextlib.suppress(TimeoutError):
                     async with asyncio.timeout(wait):
                         await self._wake()
+                if fau and f.target_counts is not None and not self._abort.is_set():
+                    got = self._fau(f.telescopes, start_unix, time.time()).counts
+                    if got >= f.target_counts:
+                        ended_by = "counts"
+                        end = time.monotonic() - t0
+                        break
                 if meter and not self._abort.is_set():
                     total = await self._meter(c.expmeter_poll)
                     if total is None:
@@ -1015,11 +1236,30 @@ class KiwiSpec:
 
         job.phase = f"{f.kind}: saving"
         await self._save(file_name)
-        midpoint = counts = None
+        self.camera_failures = 0
+        midpoint = counts = fau_counts = None
+        fau_detail: dict[str, Any] | None = None
         if meter and len(samples) > 1:
             lag = c.expmeter_period / 2
             shifted = [(samples[0][0], samples[0][1])] + [(t - lag, n) for t, n in samples[1:]]
             midpoint, counts = flux_weighted_midpoint(shifted, 0.0, end)
+        if fau:
+            # The readout gave the guiders time to report the last frames.
+            t_start = start_unix
+            res = self._fau(f.telescopes, t_start, t_start + end)
+            fau_counts, fau_detail = res.counts, res.telescopes
+            best = max((v["coverage"] for v in res.telescopes.values()), default=0.0)
+            if res.midpoint is None:
+                warnings.append("no FAU flux reported for this exposure: geometric midpoint")
+            elif best < c.fau_min_coverage:
+                warnings.append(
+                    f"FAU flux covers {best:.0%} of the exposure (< {c.fau_min_coverage:.0%}):"
+                    " geometric midpoint"
+                )
+            else:
+                midpoint = res.midpoint - t_start
+        if midpoint is None:
+            source = "none"
         mid_utc = None if midpoint is None else start_utc + datetime.timedelta(seconds=midpoint)
         result: dict[str, Any] = {
             "file": file_name,
@@ -1031,11 +1271,17 @@ class KiwiSpec:
             "exptime": end,
             "ended_by": ended_by,
             "start_utc": start_utc.isoformat(),
+            "flux_source": source,
             "expmeter_counts": counts,
+            "fau_counts": fau_counts,
+            "fau": fau_detail,
             "target_counts": f.target_counts,
             "flux_midpoint_s": midpoint,
             "flux_midpoint_utc": None if mid_utc is None else mid_utc.isoformat(),
             "flux_midpoint_jd": None if mid_utc is None else jd(mid_utc),
+            # The midpoint for the barycentric correction: the flux-weighted
+            # one, else the middle of the exposure.
+            "midpoint_source": "geometric" if mid_utc is None else source,
             "iodine": {"requested": str(where), "mm": pos.mm, "name": pos.name},
             "led_on": led,
             "heater_temp": heater_temp,
@@ -1049,7 +1295,38 @@ class KiwiSpec:
         except KiwiSpecError as exc:
             result["header_written"] = False
             warnings.append(f"header not written: {exc}")
+        if c.raw_fits is not None and c.raw_fits.get("rewrite", True):
+            job.phase = f"{f.kind}: standardizing the raw file"
+            result["fits"] = await self._standardize(f.night or night(start_utc), file_name)
+            if result["fits"].get("error"):
+                warnings.append(f"raw file not rewritten: {result['fits']['error']}")
         return result
+
+    def _fau(self, telescopes: list[str], start: float, end: float) -> Any:
+        """The FAU flux of ``telescopes`` in ``[start, end]`` (Unix s)."""
+        c = self.config
+        return fau_flux(self.flux.window(telescopes, start, end), start, end, c.fau_max_gap)
+
+    async def _standardize(self, night_label: str, file_name: str) -> dict[str, Any]:
+        """Make the raw file legal FITS in place, verified
+        (:func:`~robofast_core.devices.kiwispec_fits.standardize`). Never
+        raises: a failure leaves the raw file untouched and raises an alarm."""
+        from pathlib import Path
+
+        raw = self.config.raw_fits or {}
+        path = Path(raw["dir"]) / night_label / file_name
+        deadline = time.monotonic() + float(raw.get("wait", 30.0))
+        while not path.exists() and time.monotonic() < deadline:
+            await asyncio.sleep(0.2)
+        try:
+            return await asyncio.to_thread(
+                standardize, path, utc_offset_hours=self.config.pc_utc_offset_hours
+            )
+        except FitsRewriteError as exc:
+            msg = f"raw file {file_name} not rewritten (left untouched): {exc}"
+            log.error("%s", msg)
+            self.faults.append(msg)
+            return {"file": file_name, "rewritten": False, "error": str(exc)}
 
     async def _wake(self) -> None:
         """Return when an abort or stop is requested."""
@@ -1097,9 +1374,14 @@ class KiwiSpec:
             "IMAGETYP": [r["kind"], "Type of image"],
             "OBJECT": [r["object"], "Object name"],
             "EXPTERM": [r["ended_by"], "What ended the exposure (time/counts/stop)"],
+            "FLUXSRC": [r["flux_source"], "Flux record for FLUXMID (fau/expmeter/none)"],
             "EXPFLUX": [
                 "UNKNOWN" if r["expmeter_counts"] is None else r["expmeter_counts"],
                 "Exposure meter flux during exposure in counts",
+            ],
+            "FAUFLUX": [
+                "UNKNOWN" if r["fau_counts"] is None else round(r["fau_counts"], 1),
+                "Summed FAU fiber-aperture flux (relative)",
             ],
             "MEXPFLUX": [
                 "NA" if r["target_counts"] is None else r["target_counts"],
@@ -1125,7 +1407,9 @@ class KiwiSpec:
         """Abort the running job (discarding the frame), bounded by
         ``abort_timeout``; then cancel it if it has not ended."""
         job, task = self.current, self._task
-        if job is None or task is None or task.done():
+        if job is None or task is None or task.done() or job.finished.is_set():
+            # (A finished job's task may still be restarting SI Image: that
+            # is never cut short.)
             return {"aborted": False, "ended": True, "job": job.view() if job else None}
         job.abort_reason = reason
         self._abort.set()
@@ -1300,6 +1584,17 @@ class KiwiSpecServer:
                 return 200, await k.abort(str(args.get("reason") or "requested"))
             if method == "POST" and parts == ["stop"]:
                 return 200, k.stop()
+            if method == "POST" and parts == ["flux"]:
+                tel = str(args.get("telescope") or "")
+                if tel not in self.config.telescopes:
+                    raise ValueError(f"unknown telescope {tel!r}; known: {self.config.telescopes}")
+                frames = parse_frames(args.get("frames"))
+                kept = k.flux.add(tel, frames, time.time())
+                return 200, {"telescope": tel, "accepted": len(frames), "kept": kept}
+            if method == "POST" and parts == ["restart_camera"]:
+                wait, client = queue_args(args)
+                async with k.hold("restart_camera", wait, client):
+                    return 200, await k.restart_camera(str(args.get("reason") or "requested"))
             if method == "POST" and parts == ["backlight"]:
                 wait, client = queue_args(args)
                 async with k.hold("backlight", wait, client):
@@ -1329,7 +1624,7 @@ class KiwiSpecRemote:
 
     #: Keys of a frame's result the sequencer copies to the top of each
     #: spectrum sidecar record (:class:`~robofast_core.sequencer.SpectrographHook`).
-    record_keys: tuple[str, ...] = ("iodine",)
+    record_keys: tuple[str, ...] = ("iodine", "flux_source", "fau_counts", "fits")
 
     def __init__(
         self,
