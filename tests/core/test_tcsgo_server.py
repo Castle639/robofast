@@ -223,7 +223,7 @@ async def test_slew_refusals(make_rig):
     rig.sim.set_stale(False)
     # A tripped travel limit (a trip wire) locks the mount out: refuse, never clear it.
     rig.sim.hit_limit("west")  # the mount holds (tracking off)
-    with pytest.raises(InvalidOperationException, match="travel limit tripped.*west_limit"):
+    with pytest.raises(InvalidOperationException, match=r"travel limit tripped.*west_limit"):
         await tel.set("Tracking", True)
     with pytest.raises(InvalidOperationException, match="travel limit"):
         await tel.call("Park")
