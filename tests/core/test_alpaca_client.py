@@ -117,7 +117,7 @@ async def test_unknown_method_and_wrong_arity_are_refused_locally():
     srv = Recorder()
     tel = srv.device()
     with pytest.raises(ValueError, match="METHODS"):
-        await tel.call("SlewToAltAzAsync", 1, 2, timeout=1)
+        await tel.call("SyncToCoordinates", 1, 2, timeout=1)
     with pytest.raises(TypeError):
         await tel.call("SlewToCoordinatesAsync", 1, timeout=1)
     assert not srv.requests

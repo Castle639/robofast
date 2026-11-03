@@ -1278,6 +1278,10 @@ def main(argv: list[str] | None = None) -> int:
     except RehearsalRefused as exc:
         print(f"REFUSED: {exc}", file=sys.stderr)
         return 2
+    except KeyboardInterrupt:
+        # Before the night started (or after it): the end action has run.
+        print("interrupted; see the end action above", file=sys.stderr)
+        return 130
     print(summary(outcome))
     problems = check(outcome)
     for p in problems:
