@@ -418,7 +418,10 @@ async def test_an_operator_emergency_close_overrides_the_interlock(make_rig):
     sup.operator_close("alice", "EMERGENCY: smoke", emergency=True)
     await wait_until(rig.dome_closed, 3, what="emergency close")
     assert not rig.parked()
-    assert sup.status()["close_interlock"]["emergency_close"] is None  # cleared once closed
+    # cleared on the supervisor's next pass once closed (not the same instant)
+    await wait_until(
+        lambda: sup.status()["close_interlock"]["emergency_close"] is None, 3, what="cleared"
+    )
 
 
 async def test_without_the_interlock_a_routine_close_goes_ahead(make_rig):
