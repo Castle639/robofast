@@ -177,6 +177,7 @@ class FakeTelescope(FakeDevice):
         self.dec = 0.0
         #: ASCOM EquatorialSystem: 2 = J2000.
         self.EquatorialSystem = 2
+        self.DriverInfo = "FakeTelescope 1.0"
         self.Altitude = 60.0
         self.Azimuth = 120.0
 

@@ -13,6 +13,7 @@ file, and logs everything it reads and sends.
     robofast-pwi-jog --config ... --hardware enable | disable
     robofast-pwi-jog --config ... --hardware tracking-off
     robofast-pwi-jog --config ... --hardware home --axis 0|1|both [--yes]
+    robofast-pwi-jog --config ... --hardware forget-home
     robofast-pwi-jog --config ... --hardware altaz --dalt 0.5 --daz 0 [--yes]
     robofast-pwi-jog --config ... --hardware radec --dra 60 --ddec 0 [--yes]
 
@@ -25,10 +26,15 @@ file, and logs everything it reads and sends.
   altitude (1) alone needs PWI4 4.1.7+ (``/mount/findhome?axis=``); it asks
   first, prints the position, and stops on Ctrl-C, after ``home_timeout``
   s, or if the *other* axis moves (a PWI4 that ignored the axis parameter).
+  PWI4 reports no homed flag: a home that ends at the config's
+  ``home_alt``/``home_az`` is recorded (:mod:`~robofast_core.devices.pwi_homed`),
+  which is what lets the server and this tool move afterwards;
+  ``forget-home`` drops that record.
 * ``altaz`` and ``radec`` are refused while the mount is not homed (PWI2
-  ``encoders_have_been_set``, PWI4 ``axisN.is_homed``; unknown counts as not
-  homed) unless the config says ``allow_unhomed_moves`` **and** the command
-  line ``--allow-unhomed`` (engineering; logged as a warning).
+  ``encoders_have_been_set``, PWI4 ``axisN.is_homed`` or robofast's home
+  record; unknown counts as not homed) unless the config says
+  ``allow_unhomed_moves`` **and** the command line ``--allow-unhomed``
+  (engineering; logged as a warning).
 * ``altaz``: a relative alt/az move (degrees), sent as a PWI alt/az goto to
   the current position plus the offsets. Each offset at most
   ``max_jog_deg`` (config, default 1); the target altitude within
@@ -41,8 +47,11 @@ Every move prints its plan and waits for ``yes`` on the terminal (or
 ``--yes``), then polls PWI every ``--poll`` s and prints the position.
 It sends **stop** on Ctrl-C, after ``jog_timeout`` s, if the mount goes
 further from where it started than the plan allows (+ ``--slack`` deg), or
-if the altitude leaves the limits. PWI's version (PWI4 ``pwi4.version``) and
-any home-related status keys are logged at the first read. The log is appended to
+if the altitude leaves the limits or heads out of them fast enough to coast
+past them (``stop_distance``), or if PWI reports slewing while the mount does
+not move (``stall_time``: a target beyond PWI's own limits). PWI's version
+(PWI4 ``pwi4.version``) and any home-related status keys are logged at the
+first read. The log is appended to
 ``$ROBOFAST_DATA_DIR/pwi-jog/<name>.log`` (or ``--log``).
 """
 
@@ -71,7 +80,8 @@ from robofast_core.devices.pwi_client import (
     make_client,
     version_at_least,
 )
-from robofast_core.devices.pwi_server import PWIConfig, _sep_deg
+from robofast_core.devices.pwi_homed import HomeRecord, not_at_home
+from robofast_core.devices.pwi_server import PWIConfig, _sep_deg, coast_deg
 
 log = logging.getLogger("robofast.pwi_jog")
 
@@ -117,6 +127,20 @@ def plan_altaz(cfg: PWIConfig, st: PWIStatus, dalt: float, daz: float) -> tuple[
     az = st.az_deg + daz
     if not 0.0 <= az < 360.0:
         raise JogRefused(f"azimuth move {st.az_deg:.3f} -> {az:.3f} crosses 0/360 (cable wrap)")
+    if cfg.az_wrap_min is not None:
+        # PWI4 puts azimuth at the mechanical angle in its wrap range, which
+        # can be the long way round even for an altitude-only jog.
+        if st.az_mech_deg is None or st.az_wrap_min is None:
+            raise JogRefused(
+                "PWI reports no mechanical azimuth or wrap range: cannot tell which way it"
+                " would go round (az_wrap_min/az_wrap_max are configured)"
+            )
+        mech = st.az_wrap_min + (az - st.az_wrap_min) % 360.0
+        if abs(mech - st.az_mech_deg) > abs(daz) + 0.01:
+            raise JogRefused(
+                f"PWI's wrap range (min {st.az_wrap_min:.2f}) would take azimuth from mechanical"
+                f" {st.az_mech_deg:.2f} to {mech:.2f}, the long way: slew with the server"
+            )
     return alt, az
 
 
@@ -159,6 +183,8 @@ class Jog:
         self.confirm = confirm or _ask
         self.poll = poll
         self.slack = slack
+        #: robofast's record of homes (a PWI4 without a homed flag).
+        self.record = HomeRecord(cfg.home_record_path())
 
     def say(self, text: str) -> None:
         log.info("%s", text)
@@ -166,12 +192,17 @@ class Jog:
 
     async def status(self) -> PWIStatus:
         st = await self.pwi.status()
+        if st.homed is None:
+            self.record.observe(st)
         if not self._version_logged:
             self._version_logged = True
             self.say(f"PWI ({st.backend}) version {st.version or 'not reported'}")
             homes = {k: v for k, v in st.raw.items() if "home" in k.lower()}
             if homes:
                 self.say(f"home-related status: {homes}")
+            if st.homed is None:
+                axes = sorted(self.record.axes(st))
+                self.say(f"robofast home record ({self.record.path}): axes {axes or 'none'}")
         self.say(fmt(st))
         log.debug("status %s", json.dumps(st.as_dict()))
         return st
@@ -206,6 +237,8 @@ class Jog:
     def _check_homed(self, st: PWIStatus) -> None:
         if st.homed:
             return
+        if st.homed is None and self.record.axes(st) >= {0, 1}:
+            return  # robofast's record of a verified home (pwi_homed)
         state = "NOT HOMED" if st.homed is False else "homed state NOT REPORTED"
         if not self.unhomed_ok:
             raise JogRefused(
@@ -275,7 +308,29 @@ class Jog:
             return False
         self.say(f"find home {'both' if axis is None else axis}")
         await self.pwi.find_home(axis)
-        return await self._watch_home(st, axis)
+        if not await self._watch_home(st, axis):
+            return False
+        end = await self.pwi.status()
+        if end.homed is not None:
+            return True
+        # PWI reports no homed flag (PWI4): record the home if it ended at
+        # the configured home position (robofast_core/devices/pwi_homed.py).
+        axes = (0, 1) if axis is None else (axis,)
+        cfg = self.cfg
+        why = not_at_home(end, axes, cfg.home_alt, cfg.home_az, cfg.home_tolerance)
+        if why is not None:
+            self.say(
+                f"home NOT recorded: {why}. Ended at alt {end.alt_deg:.4f} az {end.az_deg:.4f}"
+                " (home_alt/home_az in the config are where a good home ends)"
+            )
+            return False
+        self.record.record(axes, end, "robofast-pwi-jog home")
+        self.say(f"home recorded for axes {list(axes)} in {self.record.path}")
+        return True
+
+    def forget_home(self) -> None:
+        had = self.record.clear("robofast-pwi-jog forget-home")
+        self.say(f"home record {self.record.path} {'removed' if had else 'was not there'}")
 
     async def _watch_home(self, start: PWIStatus, axis: int | None) -> bool:
         cfg = self.cfg
@@ -337,6 +392,8 @@ class Jog:
         t0 = time.monotonic()
         settled_since: float | None = None
         last: PWIStatus | None = None
+        last_t = t0
+        stall: tuple[float, float, float] | None = None  # (t, alt, az)
         try:
             while True:
                 await asyncio.sleep(self.poll)
@@ -349,6 +406,7 @@ class Jog:
                         await self.stop("timeout, PWI not answering")
                         return False
                     continue
+                now = time.monotonic()
                 moved = _sep_deg(st.alt_deg, st.az_deg, *start)
                 # Tracking drifts alt/az at up to ~15"/s.
                 allowed = planned + self.slack + (0.005 * elapsed if target is None else 0.0)
@@ -362,6 +420,38 @@ class Jog:
                 margin = cfg.limit_margin
                 if not cfg.min_alt - margin <= st.alt_deg <= cfg.max_alt + margin:
                     await self.stop(f"altitude {st.alt_deg:.3f} outside the limits")
+                    return False
+                # A stop coasts (up to stop_distance from full speed): stop
+                # early if the mount heads out of the limits other than on
+                # its way to (and not past) a target inside them.
+                v = 0.0 if last is None else (st.alt_deg - last.alt_deg) / max(now - last_t, 1e-3)
+                rest = st.alt_deg + math.copysign(coast_deg(cfg, v), v)
+                lo, hi = cfg.min_alt - margin, cfg.max_alt + margin
+                if (v < -1e-4 and rest < lo) or (v > 1e-4 and rest > hi):
+                    if target is None or (
+                        (v < 0 and st.alt_deg < target[0] - margin)
+                        or (v > 0 and st.alt_deg > target[0] + margin)
+                    ):
+                        await self.stop(
+                            f"altitude {st.alt_deg:.3f} at {v:+.2f} deg/s would coast to"
+                            f" {rest:.2f}, outside the limits"
+                        )
+                        return False
+                # PWI4 accepts a goto beyond its own axis limits, stops there
+                # and reports slewing forever.
+                if (
+                    st.slewing is not True
+                    or stall is None
+                    or (_sep_deg(st.alt_deg, st.az_deg, stall[1], stall[2]) > cfg.stall_move)
+                ):
+                    stall = (now, st.alt_deg, st.az_deg) if st.slewing is True else None
+                elif now - stall[0] >= cfg.stall_time and (
+                    target is None or _sep_deg(st.alt_deg, st.az_deg, *target) >= 0.01
+                ):
+                    await self.stop(
+                        f"PWI reports slewing but the mount has not moved for {now - stall[0]:.1f}"
+                        " s: the target is probably beyond PWI's own axis limits"
+                    )
                     return False
                 if elapsed > cfg.jog_timeout:
                     await self.stop(f"no arrival within jog_timeout {cfg.jog_timeout} s")
@@ -378,7 +468,7 @@ class Jog:
                         return True
                 else:
                     settled_since = None
-                last = st
+                last, last_t = st, now
         except (KeyboardInterrupt, asyncio.CancelledError):
             await self.stop("interrupted")
             raise
@@ -457,6 +547,9 @@ async def run(args: argparse.Namespace, cfg: PWIConfig) -> int:
         if args.command in ("connect", "enable", "disable", "tracking-off"):
             await jog.simple(args.command)
             return 0
+        if args.command == "forget-home":
+            jog.forget_home()
+            return 0
         if args.command == "home":
             axis = None if args.axis == "both" else int(args.axis)
             task = asyncio.ensure_future(jog.home(axis))
@@ -506,6 +599,7 @@ def main(argv: list[str] | None = None) -> None:
     sub.add_parser("tracking-off", help="turn tracking off")
     hm = sub.add_parser("home", help="find home: both axes or one (PWI4 4.1.7+); asks first")
     hm.add_argument("--axis", choices=["0", "1", "both"], required=True, help="0 az, 1 alt")
+    sub.add_parser("forget-home", help="drop robofast's record that the mount is homed")
     aa = sub.add_parser("altaz", help="relative alt/az move, degrees")
     aa.add_argument("--dalt", type=float, default=0.0)
     aa.add_argument("--daz", type=float, default=0.0)
