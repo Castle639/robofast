@@ -97,6 +97,15 @@ def altitude(ra_hours: float, dec_deg: float, lst_hours: float, latitude: float)
     return math.degrees(math.asin(max(-1.0, min(1.0, s))))
 
 
+def azimuth(ra_hours: float, dec_deg: float, lst_hours: float, latitude: float) -> float:
+    """Azimuth (deg, N through E) of ``ra_hours, dec_deg`` at ``lst_hours``."""
+    ha = math.radians((lst_hours - ra_hours) * 15.0)
+    lat, dec = math.radians(latitude), math.radians(dec_deg)
+    y = -math.cos(dec) * math.sin(ha)
+    x = math.sin(dec) * math.cos(lat) - math.cos(dec) * math.cos(ha) * math.sin(lat)
+    return math.degrees(math.atan2(y, x)) % 360.0
+
+
 def separation(ra1_h: float, dec1: float, ra2_h: float, dec2: float) -> float:
     """Angular distance (arcsec) between two positions (RA in hours)."""
     a1, a2 = math.radians(ra1_h * 15.0), math.radians(ra2_h * 15.0)
@@ -226,8 +235,11 @@ class MountGuard(ThreadingHTTPServer):
     Telescope *i* (in the order given) is served as device *i* of each type
     at :attr:`address`. ``limits`` is ``(min_alt, max_alt)``; ``clock`` and
     ``site`` (latitude, longitude) give the altitude of a slew's target at
-    the moment it is commanded. ``events`` (if given) receives ``(time.monotonic(),
-    name, "park" | "unpark" | "slew")``.
+    the moment it is commanded. ``az_windows`` (optional) ``{name: (lo, hi)}``:
+    a slew whose target azimuth at that moment is outside ``lo..hi`` deg is
+    refused (a mount whose mechanical azimuth is kept in 0..360, as PWI4's is
+    with wrap minimum 0, then never leaves the window). ``events`` (if given)
+    receives ``(time.monotonic(), name, "park" | "unpark" | "slew")``.
     """
 
     daemon_threads = True
@@ -241,6 +253,7 @@ class MountGuard(ThreadingHTTPServer):
         site: tuple[float, float],
         clock: Callable[[], datetime],
         events: list[tuple[float, str, str]] | None = None,
+        az_windows: dict[str, tuple[float, float]] | None = None,
         timeout: float = 30.0,
         host: str = "127.0.0.1",
     ) -> None:
@@ -254,6 +267,7 @@ class MountGuard(ThreadingHTTPServer):
                 if ep is not None:
                     self.routes[f"{kind}/{i}"] = _Route(name, kind, ep.url(kind))
         self.limits = limits
+        self.az_windows = dict(az_windows or {})
         self.site = site
         self.clock = clock
         self.timeout = timeout
@@ -342,7 +356,11 @@ class MountGuard(ThreadingHTTPServer):
         return None if not d.get("ErrorNumber") else str(d.get("ErrorMessage"))
 
     def _get(self, route: _Route, member: str) -> Any:
-        r = self._client().get(f"{route.upstream}/{member}")
+        # The same ClientID as the guard's commands: a robofast device server
+        # keeps Connected per client (the preflight connected this one).
+        r = self._client().get(
+            f"{route.upstream}/{member}", params={"ClientID": "1", "ClientTransactionID": "0"}
+        )
         r.raise_for_status()
         d = r.json()
         if d.get("ErrorNumber"):
@@ -385,6 +403,15 @@ class MountGuard(ThreadingHTTPServer):
                 INVALID_VALUE,
                 f"RA {ra:.4f} h Dec {dec:.3f} is at altitude {alt:.1f}: outside {lo}..{hi}",
             )
+        window = self.az_windows.get(route.name)
+        if window is not None:
+            az = azimuth(ra, dec, lst_hours(self.clock(), self.site[1]), self.site[0])
+            if not window[0] <= az <= window[1]:
+                return (
+                    INVALID_VALUE,
+                    f"RA {ra:.4f} h Dec {dec:.3f} is at azimuth {az:.1f}:"
+                    f" outside {route.name}'s window {window[0]:g}..{window[1]:g}",
+                )
         form["_alt"] = f"{alt:.3f}"
         return None
 

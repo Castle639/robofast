@@ -968,6 +968,11 @@ async def test_park_the_long_way_into_an_obstruction_is_stopped(make):
     await tel.call("Park", timeout=T)
     with pytest.raises(Exception, match="no progress"):
         await until(lambda: _not(tel.get("Slewing", timeout=T)), timeout=20, what="park")
+    # The stop reaches the simulator just after robofast reports the stall.
+    for _ in range(50):
+        if not sim.model.state()["slewing"]:
+            break
+        await asyncio.sleep(0.1)
     st = sim.model.state()
     assert not st["slewing"] and abs(st["mech"] - 17.3) < 0.01
     assert not await tel.get("AtPark", timeout=T)
