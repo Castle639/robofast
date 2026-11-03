@@ -307,7 +307,9 @@ async def test_the_clear_faults_action_is_configurable(make_rig):
 # -- the park-before-close interlock (require_park_before_close) ------------------------
 
 INTERLOCK = dict(
-    park_before_close=True, require_park_before_close=True, park_wait=1.0,
+    park_before_close=True,
+    require_park_before_close=True,
+    park_wait=1.0,
     park_interlock_escalate=0.5,
 )
 
