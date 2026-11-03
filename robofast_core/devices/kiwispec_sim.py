@@ -29,12 +29,23 @@ slit-flat LED's and the backlight's rates) while it is logging, and trips
 seconds; the raw frame lands in the camera's buffer (``C:/IMAGES/I`` on the
 PC) and ``save_image`` moves it to the file named by ``set_file_name``.
 
+With ``data_dir`` set, ``save_image`` also writes the raw frame to
+``<data_dir>/<night>/<file>`` the way SI Image does (not legal FITS:
+:func:`robofast_core.devices.kiwispec_fits.write_si_raw`, with SI's
+``PARAMnn`` keywords and a local-time ``DATE-OBS``), and
+``write_header_done`` updates it in place as the real server does (the
+keywords added, ``PARAMnn`` removed, ``DATE-OBS`` to UTC), still not legal
+FITS. ``kill_si_image`` stops the camera server (and its cooler) and
+``start_si_image`` starts it again on the same port. The backlight is an
+LED on an arm (``backlight_arm``: ``in`` over the fiber, or ``out``).
+
 Faults (:meth:`set_fault`): ``hang`` (the spectrograph server reads a command
 and never answers, blocking every later one, as the real single-threaded
 server would), ``garble`` (replies are noise), ``drop`` (connections close
 without a reply), ``camera_hang`` (acquisitions and terminations never
-finish), ``ccd_warm`` (the CCD reads ``ccd_warm_temp``), ``stage_stuck``
-(moves are accepted but the stage does not move). :meth:`crash` stops the
+finish), ``camera_wedged`` (SI Image takes commands and never answers them,
+until it is killed), ``ccd_warm`` (the CCD reads ``ccd_warm_temp``),
+``stage_stuck`` (moves are accepted but the stage does not move). :meth:`crash` stops the
 spectrograph server's listener; :meth:`restart` brings down ``spec``,
 ``camera`` or ``both`` for ``downtime`` seconds and back with fresh state
 (an acquisition in flight is lost, the exposure-meter total starts at 0).
@@ -62,6 +73,7 @@ import struct
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from robofast_core import hwgate
@@ -104,7 +116,9 @@ UNDEFINED = frozenset(
         "set_size",
     }
 )
-FAULTS = frozenset({"hang", "garble", "drop", "camera_hang", "ccd_warm", "stage_stuck"})
+FAULTS = frozenset(
+    {"hang", "garble", "drop", "camera_hang", "camera_wedged", "ccd_warm", "stage_stuck"}
+)
 
 
 @dataclass
@@ -141,6 +155,11 @@ class SimConfig:
     read_timeout: float = 3.0
     crash_on_undefined: bool = True
     backlight_failsafe: float = 60.0
+    #: Where ``save_image`` writes raw frames (None: kept in memory only),
+    #: their size (rows, columns), and the PC's local time (hours from UTC).
+    data_dir: str | None = None
+    image_shape: tuple[int, int] = (64, 96)
+    utc_offset_hours: float = -7.0
 
 
 class _Clock:
@@ -167,6 +186,7 @@ class KiwiSpecSim:
         self.camera_port = camera_port
         self.clock = _Clock()
         self.faults: set[str] = set()
+        self.si_kills = self.si_starts = 0
         self.commands: list[str] = []  # every spectrograph-server command seen
         self.camera_commands: list[int] = []  # every SI function number seen
         self.crashed = False
@@ -201,6 +221,7 @@ class KiwiSpecSim:
         self.led_on = False
         self.led_on_since: float | None = None
         self.backlight_on = False
+        self.backlight_arm = "out"
         self._backlight_request = 0.0
         # exposure meter
         self.expmeter_logging = c.expmeter_enabled
@@ -556,6 +577,7 @@ class KiwiSpecSim:
 
     async def _cmd_backlight_on(self, arg: str) -> str:
         self.backlight_on = True
+        self.backlight_arm = "in"
         self._backlight_request = self.clock()
         self._spawn(self._backlight_failsafe())
         return "success"
@@ -566,9 +588,28 @@ class KiwiSpecSim:
         if self.backlight_on and self._backlight_request == request:
             log.warning("sim: backlight failsafe turned the backlight off")
             self.backlight_on = False
+            self.backlight_arm = "out"
 
     async def _cmd_backlight_off(self, arg: str) -> str:
         self.backlight_on = False
+        self.backlight_arm = "out"
+        return "success"
+
+    async def _cmd_kill_si_image(self, arg: str) -> str:
+        """``taskkill`` SI Image: the camera server goes away, the cooler stops."""
+        self.faults.discard("camera_wedged")
+        self.cooler_on = False
+        self.si_kills += 1
+        if self._camera_server is not None:
+            await self._stop_camera()
+        return "success"
+
+    async def _cmd_start_si_image(self, arg: str) -> str:
+        if self._camera_server is None:
+            self.acquisition = None
+            await self._start_camera()
+            self.cooler_on = True
+            self.si_starts += 1
         return "success"
 
     async def _cmd_get_expmeter_total(self, arg: str) -> str:
@@ -608,7 +649,43 @@ class KiwiSpecSim:
             return "fail"
         self.files[self.file_name] = {**self.buffer_image, "header": {}}
         self.buffer_image = None
+        if self.config.data_dir is not None:
+            self._write_raw(self.file_name)
         return "success"
+
+    def raw_path(self, name: str) -> Path:
+        assert self.config.data_dir is not None
+        return Path(self.config.data_dir) / name.split(".", 1)[0] / name
+
+    def _write_raw(self, name: str) -> None:
+        """The raw frame as SI Image writes it (module doc)."""
+        import numpy as np
+
+        from robofast_core.devices import kiwispec_fits as kf
+
+        f = self.files[name]
+        if "pixels" not in f:
+            ny, nx = self.config.image_shape
+            rng = np.random.default_rng(sum(name.encode()))
+            f["pixels"] = rng.integers(0, 65536, size=(ny, nx), dtype=np.uint16)
+            f["saved_at"] = time.time()
+        fmt = "%Y-%m-%dT%H:%M:%S"
+        cards: dict[str, Any] = {}
+        if f["header"]:  # write_header_done: the keywords in, DATE-OBS to UTC
+            for k, v in f["header"].items():
+                cards[k] = tuple(v) if isinstance(v, list) else v
+            utc = time.strftime(fmt, time.gmtime(f["saved_at"])) + ".000"
+            cards["DATE-OBS"] = (utc, "UTC at exposure start")
+        else:  # SI Image's own header: PARAMnn, DATE-OBS in local time
+            local = f["saved_at"] + self.config.utc_offset_hours * 3600
+            cards["PARAM0"] = (1, "SI Image parameter")
+            cards["DATE-OBS"] = (
+                time.strftime(fmt, time.gmtime(local)) + ".000",
+                kf.SI_DATE_COMMENT,
+            )
+        path = self.raw_path(name)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        kf.write_si_raw(path, f["pixels"], cards)
 
     async def _cmd_write_header(self, arg: str) -> str:
         self.header_buffer += arg
@@ -623,6 +700,8 @@ class KiwiSpecSim:
             f["header"].update(json.loads(text))
         except ValueError:
             return "fail"
+        if self.config.data_dir is not None:
+            self._write_raw(self.file_name)  # in place, as the real server does
         return "success"
 
     # -- the SI camera server ---------------------------------------------------------
@@ -671,6 +750,8 @@ class KiwiSpecSim:
 
     async def _camera_command(self, func: int, params: bytes, w: asyncio.StreamWriter) -> None:
         s = self.acq_settings
+        if "camera_wedged" in self.faults:
+            return  # takes the command, never answers
         if func == FN_TERMINATE:  # no ack
             acq = self.acquisition
             if "camera_hang" in self.faults:

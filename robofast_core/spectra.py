@@ -1,11 +1,13 @@
 """Spectrum metadata: the barycentric correction and the sidecar files.
 
 A spectrum's raw FITS file is written by the spectrograph PC (KiwiSpec's SI
-Image camera; :mod:`robofast_core.devices.kiwispec_service`) and robofast
-never rewrites it (docs/kiwispec.md, open question 10; docs/data.md: no file
-is modified after it is written). What robofast knows about the spectrum and
-the camera does not -- which telescopes fed it, how well each guided, the
-exposure meter's flux-weighted midpoint, the target's astrometry, the site,
+Image camera; :mod:`robofast_core.devices.kiwispec_service`). SI Image's file
+is not legal FITS, so the spectrograph service rewrites it once, in place
+and verified (:mod:`robofast_core.devices.kiwispec_fits`; docs/kiwispec.md,
+"The raw file"); the pixel checksum it records is in the sidecar
+(``fits``). What robofast knows about the spectrum and the camera does not
+-- which telescopes fed it, how well each guided, the flux-weighted
+midpoint (from the FAU guide frames), the target's astrometry, the site,
 and the barycentric correction at that midpoint -- goes into a **sidecar**:
 one JSON file per raw frame, in robofast's data tree::
 
@@ -24,7 +26,8 @@ The barycentric correction
 --------------------------
 :func:`barycentric` computes, with astropy, at the flux-weighted midpoint
 (or, without one, the middle of the exposure; ``midpoint_source`` says
-which):
+which: the flux record's source, ``fau`` or ``expmeter``, or
+``geometric``):
 
 * ``bjd_tdb`` -- the barycentric Julian date (TDB) of the midpoint: the
   midpoint in TDB plus the light travel time from the observatory to the
@@ -181,7 +184,7 @@ class SpectrumRecorder:
         if not target or record.get("kind") != "science":
             return None
         mid = record.get("flux_midpoint_utc")
-        source = "expmeter"
+        source = record.get("flux_source") or "expmeter"
         if mid is None:
             start = record.get("start_utc")
             if start is None:

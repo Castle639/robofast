@@ -16,7 +16,10 @@
     "ROTOFFSET 45) via robofast_core.sites.minerva.guider_calibration.from_sx_legacy(0.025, 45, 0.265). Both are unverified starting points to",
     "compare with POST /calibrate; README.md lists the conflicting alternatives.",
     "The FAU has no fiber hole: a beamsplitter sends a few per cent of the light to it, so the target is a whole",
-    "star and the centroider is a plain one ('com'), not 'annulus' (docs/offset_guiding.md, on_target)."
+    "star and the centroider is a plain one ('com'), not 'annulus' (docs/offset_guiding.md, on_target).",
+    "flux_report: every guide frame's counts inside the fiber's footprint go to the KiwiSpec service (POST /flux)",
+    "for the spectrum's flux-weighted midpoint: light reaching the fiber's position through the beamsplitter,",
+    "a relative flux, not the light coupled into the fiber (docs/kiwispec.md, Flux from the FAU guide frames)."
   ],
   "name": "t2-guider",
   "scope": "t2",
@@ -27,6 +30,7 @@
   "camera": {"kind": "zwo", "index": 0},
   "mount": {"kind": "alpaca", "address": "127.0.0.1:11122", "number": 0, "method": "offset", "max_offset": 30},
   "backlight": {"kind": "kiwispec", "url": "http://127.0.0.1:8130"},
+  "flux_report": {"url": "http://127.0.0.1:8130", "telescope": "T2", "interval": 2.0},
   "guide": {
     "exposure": 1.0,
     "acq_exposure": 1.0,

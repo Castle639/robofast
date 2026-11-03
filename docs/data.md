@@ -73,7 +73,10 @@ name. The link fails if that name already exists; the writer then takes the
 next number, rewrites the header and tries again. Finally the temporary
 name is removed and the directory is fsynced. A reader never sees a partial
 file, and no file is ever modified after it is written. (The legacy
-`fix_fits.py` rewrote raw files in place. Nothing here does that.)
+`fix_fits.py` rewrote raw files in place, unchecked. The one file robofast
+rewrites is KiwiSpec's raw spectrum, which the camera software does not
+write as legal FITS: once, verified before it replaces the original;
+`docs/kiwispec.md`, "The raw file".)
 
 **A frame is never dropped silently.** If a write fails, the sequencer
 raises a critical `frame_write_failed` alarm that describes the frame, and

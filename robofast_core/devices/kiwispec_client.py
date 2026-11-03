@@ -182,6 +182,10 @@ COMMANDS: dict[str, CommandSpec] = {
         CommandSpec("save_image", 30, FILES),
         CommandSpec("write_header", 3, FILES, "text"),
         CommandSpec("write_header_done", 10, FILES, "text"),
+        # SI Image, the camera software: the service restarts it (kill, then
+        # start at once) when it wedges; the CCD cooler stops while it is down.
+        CommandSpec("kill_si_image", 10, POWERS),
+        CommandSpec("start_si_image", 10, POWERS),
     )
 }
 
@@ -211,8 +215,6 @@ FORBIDDEN: dict[str, str] = {
         "raises UnboundLocalError in the server's accept loop when the lamp is off or"
         " its log is missing (kills the listener); the service tracks lamp time itself"
     ),
-    "start_si_image": "starts the camera software on the PC: operator only",
-    "kill_si_image": "kills the camera software (the CCD cooler stops): operator only",
     "safe_close": "not routed by the server (always 'fail')",
     "backlight_power_cycle": "not routed by the server (always 'fail')",
 }
