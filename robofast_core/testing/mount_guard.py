@@ -356,7 +356,11 @@ class MountGuard(ThreadingHTTPServer):
         return None if not d.get("ErrorNumber") else str(d.get("ErrorMessage"))
 
     def _get(self, route: _Route, member: str) -> Any:
-        r = self._client().get(f"{route.upstream}/{member}")
+        # The same ClientID as the guard's commands: a robofast device server
+        # keeps Connected per client (the preflight connected this one).
+        r = self._client().get(
+            f"{route.upstream}/{member}", params={"ClientID": "1", "ClientTransactionID": "0"}
+        )
         r.raise_for_status()
         d = r.json()
         if d.get("ErrorNumber"):
