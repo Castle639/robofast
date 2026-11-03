@@ -47,17 +47,31 @@ the site network; prefer the hop.
 | 7100 | Aqawan 1 PAC (TCP 22004) | `aqawan1_shadow.json`, `aqawan1_control.json` | see the Aqawan caution |
 | 7101 / 7102 | T1 / T2 PWI2 HTTP (44444) | `t1_pwi2.json`, `t2_pwi2.json` | in use by the legacy system today |
 | 7141 / 7142 | T1 / T2 PWI4 HTTP (8220, the PC's loopback: second hop, above) | `t1_pwi4.json`, `t2_pwi4.json` | T1: PWI4 4.1.6 installed; T2: not installed |
-| 7151 / 7152 | T1 / T2 ASCOM Remote (Alpaca: cameras) | `aqawan1.json` cameras | not installed yet |
+| 7151 / 7152 | T1 / T2 ASCOM Remote (Alpaca: cameras, the PC's loopback 11111) | `aqawan1.json` cameras | installed (6.7.1, 32-bit server): camera 0 = science camera, 1 = ZWO; T2 filterwheel 0 |
+| 7162 | T2 PDU through `scripts/snmp_relay.py` on the gateway (below) | `t2_pdu.json` | relay: start it for the session |
 
 Check what is forwarded before starting anything: `ss -ltn | grep ':71'`.
 
 ### What a tunnel cannot carry
 
-* **UDP.** `ssh -L` forwards TCP only. The PDUs are SNMP (UDP 161), so
-  robofast's PDU server cannot reach them through this tunnel, and
-  Alpaca discovery (UDP 32227) does not cross it either. Know which PDU
-  outlet powers what before the session, and how to switch it from the
-  site side (the legacy tools, with JDE); robofast does not do it remotely.
+* **UDP.** `ssh -L` forwards TCP only, and the PDUs speak SNMP on UDP
+  161. `scripts/snmp_relay.py` bridges that: run it on the gateway (it
+  needs only Python 2.7's standard library), listening on the gateway's
+  loopback and relaying to **one** PDU, forward its port, and set
+  `"relay": true` in the PDU server's `pdu` block:
+
+  ```
+  # on the gateway (a user process; it touches nothing but the PDU it names)
+  python snmp_relay.py --listen 127.0.0.1:7237 --target <pdu address>:161
+  # here
+  ssh -N -L 7162:127.0.0.1:7237 <gateway>
+  robofast-pdu-server --config sites/minerva/remote/t2_pdu.json --hardware --status
+  ```
+
+  `--status` reads every outlet; `--check-write N` also sets outlet N to
+  the state it already has, which proves the write community works
+  without switching anything. Alpaca discovery (UDP 32227) still does not
+  cross a tunnel.
 * **Anything the far end does not expose on TCP**: serial devices on a
   site PC stay with that PC's own server.
 

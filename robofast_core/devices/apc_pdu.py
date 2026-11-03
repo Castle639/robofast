@@ -35,6 +35,7 @@ from robofast_core.devices.snmp import (
     Message,
     SNMPClient,
     SNMPError,
+    SNMPTimeout,
     decode_message,
     encode_message,
 )
@@ -62,7 +63,7 @@ class Credentials:
 def load_credentials(path: str | Path) -> Credentials:
     """``{"read": "...", "write": "..."}`` from a file that only its owner
     can read (refused if group or others may)."""
-    p = Path(path)
+    p = Path(path).expanduser()
     mode = p.stat().st_mode
     if os.name == "posix" and mode & (stat.S_IRWXG | stat.S_IRWXO):
         raise PermissionError(f"{p}: SNMP credentials must not be readable by others (chmod 600)")
@@ -84,6 +85,7 @@ class APCPDU:
         timeout: float = 2.0,
         retries: int = 2,
         allow_hardware: bool = False,
+        relay: bool = False,
     ) -> None:
         self.snmp = SNMPClient(
             host,
@@ -93,6 +95,7 @@ class APCPDU:
             timeout=timeout,
             retries=retries,
             allow_hardware=allow_hardware,
+            relay=relay,
         )
 
     async def describe(self) -> str:
@@ -113,6 +116,34 @@ class APCPDU:
     async def reboot(self, outlet: int) -> None:
         """Off, then on after the PDU's own reboot duration."""
         await self.snmp.set(f"{OUTLET_CTL}.{int(outlet)}", REBOOT)
+
+    async def states(self) -> list[bool]:
+        """Every outlet, from ``sPDUMasterState`` ("On On Off ...")."""
+        words = str(await self.snmp.get(MASTER_STATE)).split()
+        if not words or set(words) - {"On", "Off"}:
+            raise SNMPError(f"unexpected master state {' '.join(words)!r}")
+        return [w == "On" for w in words]
+
+    async def check_write(self, outlet: int) -> bool:
+        """Prove the write community works without changing anything: SET
+        ``outlet`` to the state it is already in; returns that state.
+
+        An agent drops a SET it will not accept without answering, so a
+        timeout here while reads work means the write community is wrong or
+        read-only, or (APC access "Write", not "Write+") that someone is
+        logged in to the PDU's web or console interface just now."""
+        v = await self.snmp.get(f"{OUTLET_CTL}.{int(outlet)}")
+        if v not in (ON, OFF):
+            raise SNMPError(f"outlet {outlet}: state {v!r} (rebooting?); not touching it")
+        try:
+            await self.snmp.set(f"{OUTLET_CTL}.{int(outlet)}", v)
+        except SNMPTimeout:
+            raise SNMPError(
+                f"outlet {outlet}: reads work but the SET got no answer: the write community"
+                " is wrong or read-only, or the PDU refuses SNMP writes while someone is"
+                " logged in to its web/console interface (APC 'Write' access; 'Write+' does not)"
+            ) from None
+        return v == ON
 
 
 # -- the simulator ------------------------------------------------------------------------
@@ -140,6 +171,9 @@ class APCPDUSim:
     sets: list[tuple[int, int]] = field(default_factory=list)
     #: Ignore every request (a hung PDU).
     silent: bool = False
+    #: Answer reads but drop every SET unanswered, as an APC does when its
+    #: write community is locked out (:meth:`APCPDU.check_write`).
+    drop_sets: bool = False
 
     def __post_init__(self) -> None:
         self._state = [_Outlet(n) for n in self.outlets]
@@ -188,6 +222,8 @@ class APCPDUSim:
         c = self.credentials
         if self.silent or m.community not in (c.read, c.write):
             return None  # as an agent does: a wrong community gets no answer
+        if m.pdu == SET and self.drop_sets:
+            return None
         if m.pdu == SET and m.community != c.write:
             return self._reply(m, error=16)  # authorizationError (v2c)
         out: list[tuple[str, Any]] = []
