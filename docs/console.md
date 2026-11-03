@@ -432,7 +432,7 @@ closes), a less safe one opens only through the supervisor's own policy.
 A switch is shown as a notice (an alarm at warning level) for an hour.
 Manual control is refused in shadow, which commands nothing.
 
-## The console cannot open the roof
+## The console has no command that opens the roof
 
 Opening happens only one way: the safety supervisor opens when the weather
 has been safe for the reopen hold and a live sequencer holds a lease. The

@@ -475,7 +475,8 @@ class SlewGuard(Protocol):
 
 
 class AllowAllSlews:
-    """The default :class:`SlewGuard`: telescopes that cannot collide."""
+    """The default :class:`SlewGuard`: vets nothing, for telescopes the site has
+    judged cannot collide."""
 
     async def check_slew(self, telescope: str, ra_hours: float, dec_deg: float) -> None:
         return None

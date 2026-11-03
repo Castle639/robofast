@@ -1,6 +1,6 @@
 {
   "_note": [
-    "MINERVA Aqawan 1 (roll-off; holds T1 and T2, which cannot collide).",
+    "MINERVA Aqawan 1 (roll-off; holds T1 and T2; their slews are not vetted against each other).",
     "One file for the enclosure, read by both services (robofast_core/config.py):",
     "  python -m robofast_core.supervisor_service --config sites/minerva/aqawan1.json",
     "  python -m robofast_core.sequencer_service --config sites/minerva/aqawan1.json",

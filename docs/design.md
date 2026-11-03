@@ -287,7 +287,7 @@ process exits, when every telescope's plan is done or it gave up.
 
 **Idle telescopes release the enclosure.** A short idle (a target about to
 rise, a gap between visits) keeps the enclosure open: the telescope stops
-tracking, so it cannot track into a limit, and stays where it is, ready to
+tracking, so it does not track toward a limit, and stays where it is, ready to
 slew; closing and reopening would cost the shutter travel twice and risk a
 reopen hold. Once *every* telescope of the generation has been idle for
 `idle_release_after` (15 min), the generation ends cleanly: the telescopes
@@ -427,8 +427,8 @@ tagged as safe to enter in any weather.
 
 The enclosure sequencer arbitrates its telescopes: one lease per enclosure,
 grants per telescope (`TelescopeUnit`: a telescope and its camera). MINERVA's
-Aqawan 1 holds T1 and T2, which cannot collide; MEarth North's telescopes
-can.
+Aqawan 1 holds T1 and T2, which the site has judged cannot collide, so their
+slews are not vetted against each other; MEarth North's telescopes can collide.
 
 - **Each telescope observes in its own task**, children of the generation's
   task in an asyncio `TaskGroup`. A telescope task catches its own errors
@@ -463,7 +463,7 @@ can.
   one: it vets each target and path against the other telescopes'
   positions and raises `SlewDenied`, which counts as that telescope's
   error. Parking is never vetted (cleanup must always be able to park), so
-  MEarth also needs a park order or park positions that cannot collide.
+  MEarth also needs a park order or park positions the site has verified do not collide.
 
 ### 3.6 Telescopes and pointing models
 

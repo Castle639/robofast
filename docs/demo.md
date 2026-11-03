@@ -138,7 +138,7 @@ prints every check that failed:
   parked T2 alone (T2 parked, T1 not, no roof command meanwhile); the
   console answered with the night's status, sky targets, a log with the
   supervisor's and the sequencer's entries, and a guider image;
-* **safety invariants**: the roof never opens while the weather is unsafe
+* **safety invariants (as checked by the demo)**: the roof never opens while the weather is unsafe
   or within the reopen hold after it clears; no spectrum starts unless
   every telescope it lists is guiding; in every cleanup, every abort (the
   spectrograph and the cameras) comes before the first park; every close
