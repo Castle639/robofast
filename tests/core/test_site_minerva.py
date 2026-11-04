@@ -52,6 +52,7 @@ COVERED = {
     "guider_t2.example.json",
     "instruments.json",
     "kiwispec.example.json",
+    "kiwispec_aux.example.json",
     "request_api.example.json",
     "requests.example.json",
     "sky.example.json",
@@ -187,6 +188,20 @@ def test_kiwispec_config_loads():
     assert not cfg.allow_hardware
     # Moved by name; the live server's positions are authoritative (README).
     assert cfg.stage_positions == {}
+
+
+def test_kiwispec_aux_config_loads():
+    """The aux devices' server (docs/kiwispec_aux.md): placeholders for the
+    bridge, the live server's stage positions, and the stage's scale left
+    unconfirmed (moves refused until it is)."""
+    from robofast_core.devices.kiwispec_aux_server import KiwiSpecAuxConfig
+
+    cfg = KiwiSpecAuxConfig.from_dict(_json("kiwispec_aux.example.json"))
+    assert not cfg.allow_hardware
+    assert cfg.stage is not None and cfg.stage.counts_per_mm is None
+    assert cfg.stage.positions == {"in": 11.0, "flat": 68.0, "out": 102.0}
+    assert cfg.heater is not None
+    assert cfg.heater.setpoint_min < 55.0 < cfg.heater.setpoint_max
 
 
 @pytest.mark.parametrize("tel", ["t1", "t2"])

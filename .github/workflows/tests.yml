@@ -127,7 +127,9 @@ jobs:
   # (scripts/conformu_tres_frontend.py), the 60-inch's calibration-lamp
   # Switch server on its Pulizzi simulator (scripts/conformu_pulizzi.py), and
   # the 60-inch's ADC Rotator/Switch server on its prism-motor simulator
-  # (scripts/conformu_adc.py). The PlaneWave PWI server has its own job
+  # (scripts/conformu_adc.py), and KiwiSpec's auxiliary-device
+  # Switch/FilterWheel/CoverCalibrator server on its serial-device
+  # simulators (scripts/conformu_kiwispec_aux.py). The PlaneWave PWI server has its own job
   # below (conformu-pwi), run in parallel: its two backends take ~20 min.
   conformu:
     name: conformu
@@ -172,6 +174,9 @@ jobs:
       - name: ConformU against the ADC Rotator and Switch server
         if: ${{ !cancelled() }}
         run: python scripts/conformu_adc.py --conformu "$CONFORMU_BIN" --out "${{ runner.temp }}/conformu-adc"
+      - name: ConformU against the KiwiSpec aux Switch, FilterWheel and CoverCalibrator server
+        if: ${{ !cancelled() }}
+        run: python scripts/conformu_kiwispec_aux.py --conformu "$CONFORMU_BIN" --out "${{ runner.temp }}/conformu-kiwispec-aux"
       - name: Upload ConformU logs
         if: always()
         continue-on-error: true
@@ -186,6 +191,7 @@ jobs:
             ${{ runner.temp }}/conformu-tres-frontend
             ${{ runner.temp }}/conformu-pulizzi
             ${{ runner.temp }}/conformu-adc
+            ${{ runner.temp }}/conformu-kiwispec-aux
           if-no-files-found: warn
 
   # ConformU against the PlaneWave PWI Telescope/Focuser/Rotator server on

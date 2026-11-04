@@ -12,7 +12,8 @@ HTTP API, a simulator"):
 | `robofast_core/devices/kiwispec_service.py` | the single owner: HTTP/JSON API, one job at a time, count termination and the flux-weighted midpoint, the raw-file rewrite, SI Image restarts, the hardware-safety gate, and `KiwiSpecRemote` (the abort hook for the sequencer's cleanup) |
 | `robofast_core/devices/kiwispec_flux.py` | the flux record from the FAU guide frames: the per-telescope log and the summed flux-weighted midpoint |
 | `robofast_core/devices/kiwispec_fits.py` | the verified in-place rewrite of SI Image's raw file into legal FITS |
-| `robofast_core/devices/kiwispec_aux.py` | hardware not on the legacy protocol: the chiller (telemetry; simulator only so far) |
+| `robofast_core/devices/kiwispec_aux.py` | the chiller (telemetry), and `AuxRouted`: the heater, iodine stage, backlight and pressures through robofast's own Alpaca server instead of the legacy one (`"aux"`; docs/kiwispec_aux.md) |
+| `robofast_core/devices/kiwispec_aux_server.py` | that Alpaca server: the auxiliary devices driven directly over their serial ports, by URL (docs/kiwispec_aux.md) |
 | `robofast_core/guider/flux_report.py` | each guider's report of its fiber flux to the service (`POST /flux`) |
 | `robofast_core/devices/kiwispec_sim.py` | a TCP simulator of the spectrograph PC (both protocols, legacy quirks included, SI Image's raw files), with fault injection |
 | `tests/core/test_kiwispec.py`, `test_kiwispec_flux.py`, `test_guider_fiber_flux.py` | the fast-tier tests, all against the simulators on loopback |
@@ -474,13 +475,21 @@ switch the pump or its valves.
   legacy server: on/off (`POST /configure` `heater`; the last commanded
   state is `/status` `heater_on`), set point, and the cell's temperature
   (`/status` readings `heater_temp`, `heater_setpoint`).
-* **The chiller** (an Oasis 3): telemetry only, through
-  `robofast_core/devices/kiwispec_aux.py` (`chiller` in the config). Its
-  interface is not known yet, so the only backend is the simulator
-  (`{"kind": "sim"}`); `{"kind": "oasis3"}` names it and reports, as a
-  warning, that its driver is missing. A reading (`temp`, `setpoint`,
-  `flow`, `fault`) is in `/status` readings `chiller`; a temperature off
-  its set point by more than `tolerance` is a warning, a fault an alarm.
+* **The chiller** (an Oasis 3): telemetry only. Its driver is in the aux
+  Alpaca server (docs/kiwispec_aux.md); the service reads it with `"aux":
+  {"chiller": true}`. `chiller: {"kind": "sim"}` is the simulator;
+  `{"kind": "oasis3"}` names it and reports, as a warning, to read it
+  through the aux server. A reading (`temp`, `setpoint`, `flow`, `fault`)
+  is in `/status` readings `chiller`; a temperature off its set point by
+  more than `tolerance` is a warning, a fault an alarm.
+* **Direct control** (docs/kiwispec_aux.md): with `"aux"` in the config the
+  heater, the iodine stage, the backlight, the pressures and the chiller
+  go to robofast's own Alpaca server, which drives their serial ports
+  itself (through a serial-to-TCP bridge on the spectrograph PC), and not
+  to the legacy server.
+* **FITS header:** every frame gets `I2TEMPA` and `I2TEMPS` (the cell's
+  temperature and set point) and the stage's `I2POSAF`/`I2POSAS`/`I2POSSS`;
+  a failed read is written `UNKNOWN`, never left out.
 * **The spectrograph PC's clock** is MST without daylight saving
   (`pc_utc_offset_hours: -7`); SI Image stamps `DATE-OBS` in it.
 
@@ -601,8 +610,9 @@ Answered (JDE, 2026-10-31 to 2026-11-02), and how robofast follows:
 
 Still open:
 
-* The **chiller's** interface (serial or network, its protocol), for a
-  driver in `kiwispec_aux.py`.
+* The auxiliary devices' protocols as robofast drives them directly
+  (docs/kiwispec_aux.md, "To confirm on the hardware"), above all the
+  iodine stage's `counts_per_mm`.
 * The **raw file's** exact form: confirm with one raw file from the
   current SI Image that `kiwispec_fits.read_raw` decodes it (the form is
   taken from legacy `fix_fits.py`), and the data directory's mount on the

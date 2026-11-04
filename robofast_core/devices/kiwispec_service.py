@@ -122,7 +122,14 @@ from urllib.parse import parse_qs, urlparse
 from robofast_core.cancel import isolated, stop_task
 from robofast_core.clock import clock_from_config
 from robofast_core.config import load_device_config, require_keys
-from robofast_core.devices.kiwispec_aux import Chiller, build_chiller
+from robofast_core.devices.kiwispec_aux import (
+    AuxChiller,
+    AuxConfig,
+    AuxDevices,
+    AuxRouted,
+    Chiller,
+    build_chiller,
+)
 from robofast_core.devices.kiwispec_client import (
     CAMERA_PORT,
     SPEC_PORT,
@@ -349,6 +356,12 @@ class KiwiSpecConfig:
     #: The spectrograph's chiller (telemetry only): None, ``{"kind": "sim",
     #: ...}`` or a driver's kind (:mod:`robofast_core.devices.kiwispec_aux`).
     chiller: dict[str, Any] | None = None
+    #: The aux devices' Alpaca server (heater, iodine stage, backlight,
+    #: pressures, chiller) instead of the legacy server for those devices:
+    #: ``{"address": "127.0.0.1:11170", ...}``
+    #: (:class:`~robofast_core.devices.kiwispec_aux.AuxConfig`). None: all on
+    #: the legacy server.
+    aux: dict[str, Any] | None = None
     abort_timeout: float = 30.0
     #: How long a finished frame may wait for the spectrograph server to come
     #: back (to move the raw frame into place).
@@ -400,6 +413,10 @@ class KiwiSpecConfig:
                 raise ValueError(f"raw_fits: unknown keys {sorted(extra)}")
         if d.get("chiller") is not None:
             build_chiller(d["chiller"])  # fail at load, not at the first read
+        if d.get("aux") is not None:
+            aux = AuxConfig.from_dict(d["aux"])
+            if aux.chiller and d.get("chiller") is not None:
+                raise ValueError("chiller: configure it either here or as aux.chiller, not both")
         return cls(**d)
 
     def frame_kinds(self) -> list[str]:
@@ -782,6 +799,21 @@ class KiwiSpec:
                 return f"iodine cell at {temp} C, set point {c.heater_setpoint} C"
             await self._sleep(min(1.0, c.heater_wait))
 
+    async def _heater_readings(self, warnings: list[str]) -> tuple[float | None, float | None]:
+        """The cell's actual and set temperatures; None (with a warning) for
+        a read that fails."""
+        out: list[float | None] = []
+        for what, read in (
+            ("temperature", self.spec.cell_heater_temp),
+            ("set point", self.spec.cell_heater_get_set_temp),
+        ):
+            try:
+                out.append(await read())
+            except (KiwiSpecError, TimeoutError) as exc:
+                out.append(None)
+                warnings.append(f"iodine cell {what} unknown ({exc}); header says UNKNOWN")
+        return out[0], out[1]
+
     async def ensure_camera(self) -> None:
         if self._camera_ready and self.camera.connected:
             return
@@ -1129,7 +1161,6 @@ class KiwiSpec:
         if self.backlight is not False:
             await self.set_backlight(False)
         await self.set_led(led)
-        heater_temp = None
         if f.kind == "science":
             await self.heater(True, c.heater_setpoint)
         where: str | float = stage or (f.iodine if f.iodine is not None else c.default_iodine)
@@ -1138,7 +1169,9 @@ class KiwiSpec:
             w = await self.wait_heater()
             if w:
                 warnings.append(w)
-            heater_temp = await self.spec.cell_heater_temp()
+        # The cell's temperatures go into every frame's header: a failed
+        # read is written as UNKNOWN (with a warning), never dropped.
+        heater_temp, heater_setpoint = await self._heater_readings(warnings)
         if led and self.led_on_since is not None:
             job.phase = f"{f.kind}: LED warm-up"
             await self._sleep(c.led_warmup - (time.monotonic() - self.led_on_since))
@@ -1285,6 +1318,7 @@ class KiwiSpec:
             "iodine": {"requested": str(where), "mm": pos.mm, "name": pos.name},
             "led_on": led,
             "heater_temp": heater_temp,
+            "heater_setpoint": heater_setpoint,
             "ccd_temp": ccd,
             "warnings": warnings,
         }
@@ -1397,8 +1431,14 @@ class KiwiSpec:
             "FIBFEED": [",".join(r["telescopes"]) or "NONE", "Telescopes feeding the fiber"],
             "SWCREATE": ["robofast kiwispec_service", "Software that drove the exposure"],
         }
-        if r["heater_temp"] is not None:
-            h["I2TEMPA"] = [r["heater_temp"], "Iodine Cell Actual Temperature (C)"]
+        h["I2TEMPA"] = [
+            "UNKNOWN" if r.get("heater_temp") is None else r["heater_temp"],
+            "Iodine Cell Actual Temperature (C)",
+        ]
+        h["I2TEMPS"] = [
+            "UNKNOWN" if r.get("heater_setpoint") is None else r["heater_setpoint"],
+            "Iodine Cell Set Temperature (C)",
+        ]
         return json.dumps({k: [clean(x) for x in v] for k, v in h.items()})
 
     # -- abort / stop -------------------------------------------------------------------
@@ -1478,8 +1518,17 @@ class KiwiSpecServer:
         )
         if allow:
             log.warning("HARDWARE MODE: spectrograph PC at %s", spec.host)
+        self.aux: AuxDevices | None = None
+        routed: Any = spec
+        if config.aux is not None:
+            aux_cfg = AuxConfig.from_dict(config.aux)
+            self.aux = AuxDevices(aux_cfg, allow_hardware=allow)
+            routed = AuxRouted(spec, self.aux)
+            log.info("aux devices through the Alpaca server at %s", aux_cfg.address)
         self.config = config
-        self.kiwispec = KiwiSpec(config, spec, camera)
+        self.kiwispec = KiwiSpec(config, routed, camera)
+        if self.aux is not None and self.aux.cfg.chiller:
+            self.kiwispec.chiller = AuxChiller(self.aux, self.aux.cfg.chiller_tolerance)
         host, _, port = config.listen.rpartition(":")
         self.host, self.port = host, int(port)
         self._server: asyncio.Server | None = None
@@ -1498,6 +1547,8 @@ class KiwiSpecServer:
 
     async def stop(self) -> None:
         await self.kiwispec.close()
+        if self.aux is not None:
+            await self.aux.close()
         if self._server is not None:
             self._server.close()
             for w in list(self._writers):

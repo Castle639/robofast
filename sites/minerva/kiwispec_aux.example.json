@@ -1,0 +1,35 @@
+{
+  "_doc": "KiwiSpec's auxiliary devices served as Alpaca devices by robofast_core.devices.kiwispec_aux_server (docs/kiwispec_aux.md). Each port is a serial-to-TCP bridge on the spectrograph PC (RFC 2217); the host and ports here are placeholders until the bridge is deployed.",
+  "name": "kiwispec",
+  "listen": "127.0.0.1:11170",
+  "allow_hardware": false,
+  "heater": {
+    "_doc": "Thorlabs TC200 (legacy I2Heater: 115200 8N1, CR).",
+    "port": {"url": "rfc2217://spectrograph-pc:7001", "baud": 115200},
+    "setpoint_min": 40.0,
+    "setpoint_max": 65.0
+  },
+  "stage": {
+    "_doc": "Thorlabs APT stepper controller (legacy HWTYPE 12, BSC101; USB FTDI 0403:FAF0): 115200 8N1, RTS/CTS. Positions are the live spectrograph_server.ini's [I2POSITIONS] (in 11, flat 68, out 102 mm). counts_per_mm must be confirmed on the hardware before any move (null: positions and moves are refused).",
+    "port": {"url": "rfc2217://spectrograph-pc:7002", "baud": 115200, "rtscts": true},
+    "positions": {"in": 11.0, "flat": 68.0, "out": 102.0},
+    "counts_per_mm": null,
+    "travel": [0.0, 150.0],
+    "move_timeout": 120.0,
+    "home_timeout": 180.0
+  },
+  "backlight": {
+    "_doc": "LED controller (legacy backlight: 9600 8N1, n8/f8) and Dynamixel XM servo (legacy: protocol 2.0, ID 1, 57600). The LED is turned off, and the arm swung out, max_on s after it was turned on.",
+    "led_port": {"url": "rfc2217://spectrograph-pc:7003", "baud": 9600},
+    "servo_port": {"url": "rfc2217://spectrograph-pc:7004", "baud": 57600},
+    "servo_id": 1,
+    "in_deg": -45.0,
+    "out_deg": -90.0,
+    "max_on": 60.0
+  },
+  "telemetry": {
+    "_doc": "Read only. The vacuum gauge controller (legacy gaugeController: 19200 8N1, '#  RDCG1' pump line, '#  RDCG2' spectrograph) and the Oasis chiller (legacy chiller.py: 9600 8N1, CR LF). robofast never controls the pump, the valves or their outlets.",
+    "gauges": {"url": "rfc2217://spectrograph-pc:7005", "baud": 19200},
+    "chiller": {"url": "rfc2217://spectrograph-pc:7006", "baud": 9600}
+  }
+}

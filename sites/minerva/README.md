@@ -14,6 +14,7 @@ only in `instruments.json`, with `"enabled": false`.
 | `request_api.example.json` | `request_api` |
 | `guider_t1.example.json`, `guider_t2.example.json` | `guider.service` (`GuiderServiceConfig`) |
 | `kiwispec.example.json` | `devices.kiwispec_service` (`KiwiSpecConfig`) |
+| `kiwispec_aux.example.json` | `devices.kiwispec_aux_server` (`KiwiSpecAuxConfig`; docs/kiwispec_aux.md): the heater, iodine stage, backlight, gauges and chiller over serial-to-TCP bridges; the bridge's host and ports are placeholders |
 | `sky.example.json` | the dispatch plan's `vetting` entry (`vetting.Vetter`; docs/sky.md) |
 | `target_sheet.example.json` | the target-list Sheet reader (`catalogs.minerva_sheet.SheetConfig`; docs/minerva_sheet.md); placeholders for the key path and sheet keys |
 | `throughput.example.json` | the throughput monitor (`throughput.ThroughputConfig`; docs/throughput.md) |
@@ -24,7 +25,8 @@ only in `instruments.json`, with `"enabled": false`.
 `tests/core/test_site_minerva.py` loads every file here through its real
 loader and checks the copies of a value against `instruments.json`.
 
-Every device address is a `127.0.0.1` placeholder. The legacy files' `HOST`,
+Every device address is a `127.0.0.1` placeholder (the KiwiSpec aux
+server's serial bridges: the placeholder host `spectrograph-pc`). The legacy files' `HOST`,
 `IP`, `SERVER_IP`, PDU, SNMP and credential keys are not copied.
 
 ## Where the values come from
@@ -145,6 +147,23 @@ own `i2stage_get_pos` replies (`/status` `stage_positions_live`).
 only as a cross-check, and only with values **confirmed on the
 spectrograph PC** before any hardware use: a configured value that
 disagrees with the live server raises an alarm (`docs/kiwispec.md`).
+
+### KiwiSpec's auxiliary devices (`kiwispec_aux.example.json`)
+
+| Value | Legacy source |
+|---|---|
+| ports and baud rates | `com.ini` `[I2Heater]` 115200, `[backlight]` 9600, `[backlightmotor]` 57600, `[gaugeController]` 19200; `chiller.ini` 9600; the APT controller 115200 (Thorlabs protocol) |
+| stage positions in 11, flat 68, out 102 mm | the live `spectrograph_server.ini` `[I2POSITIONS]` (`in = 11#145#3.0`: ConfigObj takes `11` and treats `#145#3.0` as a comment) |
+| stage travel 0-150 mm | `spectrograph_server.py` `i2stage_movef` refuses outside 0..150 |
+| arm -45 deg in, -90 deg out; servo ID 1 | `spectrograph_server.py` `backlight_on` / `backlight_off` |
+| LED failsafe 60 s | `spectrograph_server.py` `backlight_failsafe(timeout=60)` |
+| `counts_per_mm`: **null** | not in any legacy file (APT.dll kept the stage's scale): confirm on the hardware (docs/kiwispec_aux.md) |
+
+With direct control the server does need the stage's positions, so they
+are configured here, from the live server's ini. If the KiwiSpec service
+moves the stage through the aux server, `stage_positions` in
+`kiwispec.example.json` stays null: the aux server's names are the ones
+used.
 
 ### Weather (`weather.yaml`)
 
