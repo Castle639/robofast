@@ -25,8 +25,13 @@ Devices (each optional: a device whose section is absent is not served)
   3     ``heater_alarm``        no        0/1: the controller's sensor alarm
   ====  ======================  ========  ====================================
 
-* ``filterwheel/0`` -- **the iodine stage** by named position (Thorlabs
-  APT, :mod:`robofast_core.devices.thorlabs_apt`; IFilterWheelV3):
+* ``filterwheel/0`` -- **the iodine cell selector**: the Thorlabs stage
+  (APT, :mod:`robofast_core.devices.thorlabs_apt`; IFilterWheelV3) that
+  moves the iodine cell into (``in``) and out of (``out``) the light path,
+  and also carries the slit-flat lamp (``flat``; dead at MINERVA, so
+  listed but refused there: ``stage.disabled``). A named-position device
+  is what it is, hence a FilterWheel, not a Focuser; millimetres stay
+  available for diagnostics (``Status``, ``MoveMM``).
   ``Names`` are the configured positions (``in``, ``flat``, ``out``);
   ``Position`` = n starts the move and returns; reading ``Position`` is -1
   while the stage moves, the index of the named position it rests at, or an
@@ -34,18 +39,34 @@ Devices (each optional: a device whose section is absent is not served)
   failed). Actions: ``Status`` (JSON), ``Home`` (**moves the stage**; needed
   once after the controller powers up), ``MoveMM`` (Parameters: millimetres,
   within ``travel``; legacy's ``i2stage_movef``), ``Stop``.
-* ``covercalibrator/0`` -- **the fiber backlight** (ICoverCalibratorV2):
-  the **cover** is the arm a Dynamixel servo swings in over the fiber
-  (:mod:`robofast_core.devices.dynamixel2`): ``CloseCover`` = in the beam
-  (``in_deg``), ``OpenCover`` = out of it (``out_deg``, then torque off);
-  ``HaltCover`` is not implemented. The **calibrator** is the LED
-  (:class:`~robofast_core.devices.kiwispec_serial.BacklightLED`):
-  ``MaxBrightness`` 1. **Failsafe:** the LED heats the spectrograph, so it
-  is turned off, and the arm swung out, ``max_on`` s (default 60, as
-  legacy) after the last ``CalibratorOn``. A servo that does not answer
-  makes ``CoverState`` ``Error`` and each cover command fail with a message
-  naming the servo, the port and what to check; the LED still works.
-* ``switch/1`` (``switch/0`` without a heater) -- **telemetry**, all
+* ``switch/1`` -- **the fiber backlight** (ISwitchV2). An arm, swung by a
+  Dynamixel servo (:mod:`robofast_core.devices.dynamixel2`), flips a disk
+  of LEDs into the fiber beam at the spectrograph end to light the science
+  fiber from behind; at each telescope's FAU that light comes back onto
+  the guide camera and marks where a star must sit to go down the fiber
+  (the guiders' ``locate_fiber``; docs/kiwispec_aux.md). It is a fiber
+  back-illuminator: no Alpaca device type fits it (a CoverCalibrator is a
+  telescope dust cover and flat-field lamp), so it is a generic Switch:
+
+  ====  =================  ========  ======================================
+  id    name               writable  value
+  ====  =================  ========  ======================================
+  0     ``backlight_arm``  yes       1 in the beam (``in_deg``), 0 out
+                                     (``out_deg``, then torque off); out
+                                     turns the LED off first
+  1     ``backlight_led``  yes       1 on, 0 off; **on only with the arm
+                                     in** (else ``InvalidOperation``)
+  2     ``backlight``      yes       both, as the guider uses it: 1 = arm in
+                                     then LED on; 0 = LED off then arm out
+  ====  =================  ========  ======================================
+
+  Each write returns once the arm has arrived (bounded by
+  ``move_timeout``). **Failsafe:** the LED heats the spectrograph, so
+  ``max_on`` s (default 60, as legacy) after it was turned on the server
+  turns it off and swings the arm out. A servo that does not answer makes
+  reading or moving the arm fail with a message naming the servo, the
+  port and what to check; the LED still turns off.
+* ``switch/2`` (numbered after whichever of the above are served) -- **telemetry**, all
   read-only: ``spec_pressure`` and ``pump_pressure`` (mbar; the gauge
   controller's CG2 and CG1), ``chiller_temperature``, ``chiller_setpoint``,
   ``chiller_pump_temperature`` (C), ``chiller_running`` and
@@ -90,7 +111,7 @@ import sys
 import threading
 import time
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from http.server import ThreadingHTTPServer
 from typing import Any
 
@@ -144,11 +165,7 @@ log = logging.getLogger(__name__)
 
 DRIVER_VERSION = "0.1.0"
 TIMEOUT = 0x502
-INTERFACE = {"switch": 2, "filterwheel": 3, "covercalibrator": 2}
-
-# CalibratorStatus and CoverStatus
-CAL_OFF, CAL_READY, CAL_UNKNOWN = 1, 3, 4
-COVER_CLOSED, COVER_MOVING, COVER_OPEN, COVER_UNKNOWN, COVER_ERROR = 1, 2, 3, 4, 5
+INTERFACE = {"switch": 2, "filterwheel": 3}
 
 
 # -- configuration ----------------------------------------------------------------
@@ -195,6 +212,10 @@ class StageConfig:
     #: Named positions (mm), in ``Names`` order: site values. ``null`` =
     #: not yet confirmed: listed but refused.
     positions: dict[str, float | None]
+    #: Named positions that are listed but refused (MINERVA: ``flat``, the
+    #: slit-flat lamp the stage also carries, dead since 2023). A site turns
+    #: one back on by removing it here.
+    disabled: list[str] = field(default_factory=list)
     #: Controller counts per millimetre; ``null`` until confirmed on the
     #: hardware: then the stage is served, but every position and move is
     #: refused (``Status`` still reads counts).
@@ -234,6 +255,8 @@ class StageConfig:
                 not isinstance(mm, int | float) or not math.isfinite(mm) or not lo <= mm <= hi
             ):
                 raise ValueError(f"stage.positions.{name}: {mm!r} is not a number in the travel")
+        if not isinstance(cfg.disabled, list) or set(cfg.disabled) - set(cfg.positions):
+            raise ValueError(f"stage.disabled: names from positions, not {cfg.disabled!r}")
         if cfg.counts_per_mm is not None:
             _positive(cfg, ("counts_per_mm",), "stage")
         if cfg.status_query not in ("update", "bits"):
@@ -270,11 +293,11 @@ class BacklightConfig:
     #: Arm angles (legacy -45 deg in the beam, -90 deg out of it).
     in_deg: float = -45.0
     out_deg: float = -90.0
-    #: The LED's failsafe: off (and the arm out) this long after the last
-    #: ``CalibratorOn``.
+    #: The LED's failsafe: off (and the arm out) this long after it was
+    #: turned on.
     max_on: float = 60.0
     #: Bound on an arm move; arrived within this many counts of the goal.
-    move_timeout: float = 5.0
+    move_timeout: float = 3.0
     tolerance: int = 25
     servo_timeout: float = 0.5
     #: Turn the LED off on the first connect (a known, cool state).
@@ -590,6 +613,11 @@ class Stage:
 
     async def move_to(self, index: int) -> None:
         name = list(self.cfg.positions)[index]
+        if name in self.cfg.disabled:
+            raise AlpacaException(
+                INVALID_OPERATION,
+                f"position {name!r} is disabled in this site's config (stage.disabled)",
+            )
         mm = self.cfg.positions[name]
         if mm is None:
             raise AlpacaException(
@@ -614,6 +642,7 @@ class Stage:
             s["name"] = None if s["moving"] else self.name_at(s["position_mm"])
             s["counts_per_mm"] = self.cfg.counts_per_mm
         s["positions"] = dict(self.cfg.positions)
+        s["disabled"] = list(self.cfg.disabled)
         return s
 
 
@@ -621,7 +650,8 @@ class Stage:
 
 
 class Backlight:
-    """The arm (cover) and the LED (calibrator), with the LED's failsafe."""
+    """The fiber backlight: arm and LED as switches, interlocked, with the
+    LED's failsafe (module doc)."""
 
     def __init__(self, led: BacklightLED, servo: dx.XMServo, cfg: BacklightConfig) -> None:
         self.led = led
@@ -629,58 +659,71 @@ class Backlight:
         self.cfg = cfg
         self.in_counts = dx.degrees_to_counts(cfg.in_deg)
         self.out_counts = dx.degrees_to_counts(cfg.out_deg)
-        self.cover = COVER_UNKNOWN
-        self.cover_error: str | None = None
-        self.brightness = 0
-        self.calibrator = CAL_UNKNOWN
-        self.on_requested: float | None = None
+        self.arm_error: str | None = None
+        self.on_since: float | None = None
         self._connected = False
-        self._move: asyncio.Task | None = None
+        self._lock = asyncio.Lock()
         self._failsafe: asyncio.Task | None = None
         self.failsafe_events: list[float] = []
+        self.switches = [
+            SwitchSpec(
+                "backlight_arm", "Fiber backlight arm (1: in the fiber beam, 0: out)", 0, 1, 1, True
+            ),
+            SwitchSpec(
+                "backlight_led", "Fiber backlight LED (1: on; only with the arm in)", 0, 1, 1, True
+            ),
+            SwitchSpec(
+                "backlight",
+                "Fiber backlight (1: arm in + LED on; 0: LED off + arm out)",
+                0,
+                1,
+                1,
+                True,
+            ),
+        ]
 
     def start(self) -> None:
         self._failsafe = asyncio.ensure_future(self._run_failsafe())
 
     async def shutdown(self) -> None:
-        for task in (self._failsafe, self._move):
-            if task is not None:
-                task.cancel()
-                with contextlib.suppress(asyncio.CancelledError, Exception):
-                    await task
+        if self._failsafe is not None:
+            self._failsafe.cancel()
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await self._failsafe
 
     async def connect(self) -> None:
         if self._connected:
             return
         if self.cfg.led_off_on_connect:
-            await self.led.set(False)
-            self.calibrator, self.brightness = CAL_OFF, 0
+            await self._led(False)
         try:
             await self.servo.ping()
-            self.cover = self._state_at(await self.servo.position())
-            self.cover_error = None
+            self.arm_error = None
         except PortError as exc:
-            self.cover, self.cover_error = COVER_ERROR, str(exc)
+            self.arm_error = str(exc)
             log.error("backlight arm: %s", exc)
         self._connected = True
 
-    def _state_at(self, counts: int) -> int:
+    # -- the parts --------------------------------------------------------------
+
+    async def arm_in(self) -> bool:
+        """True in the beam, False out; an error anywhere else."""
+        counts = await self.servo.position()
         if abs(counts - self.in_counts) <= self.cfg.tolerance:
-            return COVER_CLOSED
+            return True
         if abs(counts - self.out_counts) <= self.cfg.tolerance:
-            return COVER_OPEN
-        return COVER_UNKNOWN
+            return False
+        raise PortError(
+            f"backlight arm at {counts} counts, neither in ({self.in_counts}) nor out"
+            f" ({self.out_counts})"
+        )
 
-    # -- the arm ------------------------------------------------------------------
+    async def _led(self, on: bool) -> None:
+        await self.led.set(on)
+        self.on_since = time.monotonic() if on else None
 
-    def move_cover(self, closed: bool) -> None:
-        if self._move is not None and not self._move.done():
-            raise AlpacaException(INVALID_OPERATION, "the backlight arm is already moving")
-        self.cover = COVER_MOVING
-        self._move = asyncio.ensure_future(self._arm(closed))
-
-    async def _arm(self, closed: bool) -> None:
-        goal = self.in_counts if closed else self.out_counts
+    async def _move_arm(self, into_beam: bool) -> None:
+        goal = self.in_counts if into_beam else self.out_counts
         try:
             async with asyncio.timeout(self.cfg.move_timeout):
                 # Legacy's sequence: torque off, position mode, torque on, goal.
@@ -693,43 +736,65 @@ class Backlight:
                     if abs(pos - goal) <= self.cfg.tolerance and not await self.servo.moving():
                         break
                     await asyncio.sleep(0.05)
-                if not closed:
+                if not into_beam:
                     await asyncio.sleep(0.25)
                     await self.servo.torque(False)
-            self.cover = COVER_CLOSED if closed else COVER_OPEN
-            self.cover_error = None
-            log.info("backlight arm %s", "in the beam" if closed else "out of the beam")
-        except (PortError, TimeoutError) as exc:
-            why = str(exc) or f"the arm did not arrive within {self.cfg.move_timeout:g} s"
-            self.cover, self.cover_error = COVER_ERROR, why
-            log.error("backlight arm: %s", why)
+        except TimeoutError:
+            self.arm_error = f"the arm did not arrive within {self.cfg.move_timeout:g} s"
+            raise PortTimeout(f"backlight arm: {self.arm_error}") from None
+        except PortError as exc:
+            self.arm_error = str(exc)
+            raise
+        self.arm_error = None
+        log.info("backlight arm %s", "IN the fiber beam" if into_beam else "out of the beam")
 
-    async def wait_cover(self, timeout: float) -> None:
-        if self._move is not None:
-            with contextlib.suppress(TimeoutError):
-                await asyncio.wait_for(asyncio.shield(self._move), timeout)
+    # -- the switches (interlocked) -------------------------------------------------
 
-    def cover_state(self) -> int:
-        return self.cover
+    async def set_arm(self, into_beam: bool) -> None:
+        async with self._lock:
+            if not into_beam:
+                await self._led(False)  # never lit with the arm out
+            await self._move_arm(into_beam)
 
-    # -- the LED --------------------------------------------------------------------
+    async def set_led(self, on: bool) -> None:
+        async with self._lock:
+            if on and not await self.arm_in():
+                raise AlpacaException(
+                    INVALID_OPERATION, "the backlight LED turns on only with the arm in the beam"
+                )
+            await self._led(on)
 
-    async def calibrator_on(self, brightness: int) -> None:
-        await self.led.set(brightness > 0)
-        self.brightness = brightness
-        self.calibrator = CAL_READY
-        self.on_requested = time.monotonic() if brightness > 0 else None
+    async def set_backlight(self, on: bool) -> None:
+        """The guider's on/off: arm in then LED on; LED off then arm out."""
+        async with self._lock:
+            if on:
+                await self._move_arm(True)
+                await self._led(True)
+            else:
+                await self._led(False)
+                await self._move_arm(False)
 
-    async def calibrator_off(self) -> None:
-        await self.led.set(False)
-        self.brightness = 0
-        self.calibrator = CAL_OFF
-        self.on_requested = None
+    async def value(self, i: int) -> float:
+        if i == 0:
+            return 1.0 if await self.arm_in() else 0.0
+        led = bool(self.led.on)
+        if i == 1:
+            return 1.0 if led else 0.0
+        return 1.0 if led and await self.arm_in() else 0.0
+
+    async def set(self, i: int, value: float) -> None:
+        on = value >= 0.5
+        if i == 0:
+            await self.set_arm(on)
+        elif i == 1:
+            await self.set_led(on)
+        else:
+            await self.set_backlight(on)
 
     async def _run_failsafe(self) -> None:
         while True:
             await asyncio.sleep(0.5)
-            t = self.on_requested
+            t = self.on_since
             if t is None or time.monotonic() - t <= self.cfg.max_on:
                 continue
             log.error(
@@ -740,21 +805,22 @@ class Backlight:
             )
             self.failsafe_events.append(time.time())
             try:
-                await self.calibrator_off()
+                await self.set_arm(False)  # the LED off first, then the arm out
             except PortError as exc:
-                log.error("backlight failsafe: LED off failed: %s", exc)
-                continue  # try again next tick
-            if self.cover != COVER_ERROR and (self._move is None or self._move.done()):
-                self.move_cover(False)
+                log.error("backlight failsafe: %s", exc)
 
     async def status(self) -> dict[str, Any]:
-        on_for = None if self.on_requested is None else time.monotonic() - self.on_requested
+        on_for = None if self.on_since is None else time.monotonic() - self.on_since
+        try:
+            arm: Any = "in" if await self.arm_in() else "out"
+        except PortError as exc:
+            arm, self.arm_error = None, str(exc)
         return {
             "led_on": self.led.on,
             "led_on_for": None if on_for is None else round(on_for, 1),
             "max_on": self.cfg.max_on,
-            "cover_state": self.cover,
-            "cover_error": self.cover_error,
+            "arm": arm,
+            "arm_error": self.arm_error,
             "arm_counts": {"in": self.in_counts, "out": self.out_counts},
             "failsafe_events": self.failsafe_events[-5:],
         }
@@ -807,16 +873,16 @@ class KiwiSpecAuxServer(ThreadingHTTPServer):
             else None
         )
         self.devices: tuple[str, ...] = ()
-        self.switch_owner: dict[str, Heater | Telemetry] = {}
+        self.switch_owner: dict[str, Heater | Backlight | Telemetry] = {}
         nswitch = 0
         for kind in ("heater", "stage", "backlight", "telemetry"):
             if getattr(config, kind) is None:
                 continue
-            if kind in ("heater", "telemetry"):
+            if kind == "stage":
+                dev = "filterwheel"
+            else:
                 dev = "switch" if nswitch == 0 else f"switch/{nswitch}"
                 nswitch += 1
-            else:
-                dev = {"stage": "filterwheel", "backlight": "covercalibrator"}[kind]
             self.devices += (dev,)
         self._stid = 0
         self._stid_lock = threading.Lock()
@@ -854,7 +920,7 @@ class KiwiSpecAuxServer(ThreadingHTTPServer):
             servo = dx.XMServo(op["backlight servo"], b.servo_id, timeout=b.servo_timeout)
             self.backlight = Backlight(BacklightLED(op["backlight LED"]), servo, b)
             self.backlight.start()
-            devs.pop(0)
+            self.switch_owner[devs.pop(0)] = self.backlight
         if cfg.telemetry is not None:
             t = cfg.telemetry
             gauges = (
@@ -911,12 +977,10 @@ class KiwiSpecAuxServer(ThreadingHTTPServer):
     def _describe(self, device: str) -> tuple[str, str]:
         if device.startswith("switch"):
             owner = self.switch_owner[device]
-            what = "iodine cell heater" if isinstance(owner, Heater) else "telemetry"
-            return "Switch", what
-        return {
-            "filterwheel": ("FilterWheel", "iodine stage"),
-            "covercalibrator": ("CoverCalibrator", "fiber backlight"),
-        }[device]
+            if isinstance(owner, Heater):
+                return "Switch", "iodine cell heater"
+            return "Switch", "fiber backlight" if isinstance(owner, Backlight) else "telemetry"
+        return "FilterWheel", "iodine cell selector"
 
     def management(self, tail: list[str]) -> Any:
         name = self.config.name
@@ -961,7 +1025,7 @@ class KiwiSpecAuxServer(ThreadingHTTPServer):
     def _owner(self, device: str) -> Any:
         if device.startswith("switch"):
             return self.switch_owner[device]
-        return self.stage if device == "filterwheel" else self.backlight
+        return self.stage
 
     def _set_connected(self, device: str, client: int, value: bool) -> None:
         if value:
@@ -1010,9 +1074,7 @@ class KiwiSpecAuxServer(ThreadingHTTPServer):
             raise AlpacaException(NOT_IMPLEMENTED, f"{member} is not implemented")
         if device.startswith("switch"):
             return self._switch(device, verb, member, params, client)
-        if device == "filterwheel":
-            return self._wheel(verb, member, params, client)
-        return self._covercal(verb, member, params, client)
+        return self._wheel(verb, member, params, client)
 
     def _need(self, device: str, member: str, client: int) -> None:
         if not self.connected(device, client):
@@ -1156,64 +1218,6 @@ class KiwiSpecAuxServer(ThreadingHTTPServer):
         if member == "action":
             return self._action("filterwheel", params)
         return self._unknown(verb, member)
-
-    # -- cover calibrator ---------------------------------------------------------------
-
-    def _covercal(self, verb: str, member: str, params: dict[str, str], client: int) -> Any:
-        bl = self.backlight
-        assert bl is not None
-        self._need("covercalibrator", member, client)
-        if verb == "GET":
-            if member == "maxbrightness":
-                return 1
-            if member == "brightness":
-                return bl.brightness
-            if member == "calibratorstate":
-                return bl.calibrator
-            if member == "coverstate":
-                return bl.cover_state()
-            if member == "calibratorchanging":
-                return False
-            if member == "covermoving":
-                return bl.cover_state() == COVER_MOVING
-            if member == "devicestate":
-                return [
-                    {"Name": "Brightness", "Value": bl.brightness},
-                    {"Name": "CalibratorChanging", "Value": False},
-                    {"Name": "CalibratorState", "Value": bl.calibrator},
-                    {"Name": "CoverMoving", "Value": bl.cover_state() == COVER_MOVING},
-                    {"Name": "CoverState", "Value": bl.cover_state()},
-                    {"Name": "TimeStamp", "Value": _now_stamp()},
-                ]
-            return self._unknown(verb, member)
-        if member == "calibratoron":
-            b = _float_param(params, "Brightness")
-            if not b.is_integer() or not 0 <= b <= 1:
-                raise AlpacaException(INVALID_VALUE, f"Brightness {b:g} outside 0..1")
-            log.warning("backlight LED on (brightness %d) by client %d", int(b), client)
-            return self._call(lambda: bl.calibrator_on(int(b)), "CalibratorOn")
-        if member == "calibratoroff":
-            return self._call(bl.calibrator_off, "CalibratorOff")
-        if member in ("opencover", "closecover"):
-            closed = member == "closecover"
-            log.warning(
-                "backlight arm %s by client %d", "IN (over the fiber)" if closed else "out", client
-            )
-            return self._call(lambda: self._start_cover(closed), member)
-        if member == "haltcover":
-            raise AlpacaException(NOT_IMPLEMENTED, "the backlight arm cannot be halted")
-        if member == "action":
-            return self._action("covercalibrator", params)
-        return self._unknown(verb, member)
-
-    async def _start_cover(self, closed: bool) -> None:
-        bl = self.backlight
-        assert bl is not None
-        if bl.cover == COVER_ERROR:
-            # A servo that failed before must answer now, or the command
-            # fails at once with the reason (it does not answer PINGs today).
-            await bl.servo.ping()
-        bl.move_cover(closed)
 
     # -- lifecycle ---------------------------------------------------------------------
 

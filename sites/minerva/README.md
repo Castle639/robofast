@@ -154,6 +154,7 @@ disagrees with the live server raises an alarm (`docs/kiwispec.md`).
 |---|---|
 | ports and baud rates | `com.ini` `[I2Heater]` 115200, `[backlight]` 9600, `[backlightmotor]` 57600, `[gaugeController]` 19200; `chiller.ini` 9600; the APT controller 115200 (Thorlabs protocol) |
 | stage positions in 11, flat 68, out 102 mm | the live `spectrograph_server.ini` `[I2POSITIONS]` (`in = 11#145#3.0`: ConfigObj takes `11` and treats `#145#3.0` as a comment) |
+| `flat` disabled (`stage.disabled`) | the slit-flat lamp the stage carries is dead: `control.specCalib` "Slit flat lamp is dead, skipping slit flats" (2023); kept in `positions` so they stay complete |
 | stage travel 0-150 mm | `spectrograph_server.py` `i2stage_movef` refuses outside 0..150 |
 | arm -45 deg in, -90 deg out; servo ID 1 | `spectrograph_server.py` `backlight_on` / `backlight_off` |
 | LED failsafe 60 s | `spectrograph_server.py` `backlight_failsafe(timeout=60)` |

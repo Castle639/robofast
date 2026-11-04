@@ -799,19 +799,32 @@ class KiwiSpec:
                 return f"iodine cell at {temp} C, set point {c.heater_setpoint} C"
             await self._sleep(min(1.0, c.heater_wait))
 
-    async def _heater_readings(self, warnings: list[str]) -> tuple[float | None, float | None]:
-        """The cell's actual and set temperatures; None (with a warning) for
-        a read that fails."""
+    async def _heater_readings(
+        self, warnings: list[str], fresh_temp: bool
+    ) -> tuple[float | None, float | None]:
+        """The cell's actual and set temperatures for the header: the status
+        loop's last reading when it is recent (no extra traffic on the wire),
+        else a read now; ``fresh_temp`` always reads the temperature now (a
+        science frame). None, with a warning, for a read that fails."""
+        max_age = max(2 * self.config.status_interval, 30.0)
         out: list[float | None] = []
-        for what, read in (
-            ("temperature", self.spec.cell_heater_temp),
-            ("set point", self.spec.cell_heater_get_set_temp),
+        for key, what, read in (
+            ("heater_temp", "temperature", self.spec.cell_heater_temp),
+            ("heater_setpoint", "set point", self.spec.cell_heater_get_set_temp),
         ):
+            r = self.readings.get(key) or {}
+            recent = r.get("ok_at") is not None and time.time() - r["ok_at"] <= max_age
+            if recent and not (fresh_temp and key == "heater_temp"):
+                out.append(r["value"])
+                continue
             try:
-                out.append(await read())
+                value = await read()
             except (KiwiSpecError, TimeoutError) as exc:
                 out.append(None)
                 warnings.append(f"iodine cell {what} unknown ({exc}); header says UNKNOWN")
+                continue
+            self._record(key, value)
+            out.append(value)
         return out[0], out[1]
 
     async def ensure_camera(self) -> None:
@@ -930,6 +943,13 @@ class KiwiSpec:
         if isinstance(value, str):
             if value not in self.stage_names():
                 raise ValueError(f"unknown iodine position {value!r}")
+            if value == "flat" and not self.config.slit_flat_led:
+                # The stage's "flat" position puts the slit-flat lamp in the
+                # beam; at MINERVA that lamp is dead (slit_flat_led false).
+                raise ValueError(
+                    "iodine position 'flat' (the slit-flat lamp) is not in use"
+                    " (slit_flat_led is false)"
+                )
             return value
         return _num(value, "iodine")
 
@@ -1171,7 +1191,9 @@ class KiwiSpec:
                 warnings.append(w)
         # The cell's temperatures go into every frame's header: a failed
         # read is written as UNKNOWN (with a warning), never dropped.
-        heater_temp, heater_setpoint = await self._heater_readings(warnings)
+        heater_temp, heater_setpoint = await self._heater_readings(
+            warnings, fresh_temp=f.kind == "science"
+        )
         if led and self.led_on_since is not None:
             job.phase = f"{f.kind}: LED warm-up"
             await self._sleep(c.led_warmup - (time.monotonic() - self.led_on_since))

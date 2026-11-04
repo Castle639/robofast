@@ -378,7 +378,10 @@ class APTStage:
                     await self._send(self._short(MOT_MOVE_STOP, cfg.channel, 0x02))
             return
         if job.kind == "home":
-            done = snap.homed
+            # A controller that was homed before may still say so for a
+            # moment after MOVE_HOME: not done until it has moved or the
+            # start grace has passed.
+            done = snap.homed and (job.seen_moving or now - job.started > cfg.start_grace)
             why = "homing ended without the stage homed"
         else:
             assert job.target is not None

@@ -6,11 +6,11 @@ Starts ``robofast_core.devices.kiwispec_aux_server`` with every port
 ``"sim"`` (the in-process TC200, APT, Dynamixel, LED, gauge and chiller
 simulators) on a free loopback port, then runs ConformU's ``conformance``
 and ``alpacaprotocol`` checks against its four devices: the iodine cell
-heater (``switch/0``), the iodine stage (``filterwheel/0``), the fiber
-backlight (``covercalibrator/0``) and the read-only telemetry
-(``switch/1``). Exits non-zero if any check reports an error or issue.
-Logs and results go to ``--out``; a summary is appended to
-``$GITHUB_STEP_SUMMARY`` when set.
+heater (``switch/0``), the iodine cell selector (``filterwheel/0``), the
+fiber backlight (``switch/1``) and the read-only telemetry (``switch/2``).
+Exits non-zero if any check reports an error or issue. Logs and results
+go to ``--out``; a summary is appended to ``$GITHUB_STEP_SUMMARY`` when
+set.
 """
 
 from __future__ import annotations
@@ -25,7 +25,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from conformu_aqawan import start
 from conformu_tcsgo import run_check
 
-DEVICES = ("switch/0", "filterwheel/0", "covercalibrator/0", "switch/1")
+DEVICES = ("switch/0", "filterwheel/0", "switch/1", "switch/2")
 
 
 def main() -> None:
@@ -53,7 +53,14 @@ def main() -> None:
                     "poll_interval": 0.05,
                     "status_max_age": 0.05,
                 },
-                "backlight": {"led_port": "sim", "servo_port": "sim"},
+                # The arm starts in the beam: ConformU writes the switches in
+                # order and restores each, so the LED (id 1) is tested with
+                # the arm (id 0) back where it started -- in, as its
+                # interlock requires.
+                "backlight": {
+                    "led_port": "sim",
+                    "servo_port": {"url": "sim", "sim": {"position": 1535}},
+                },
                 "telemetry": {"gauges": "sim", "chiller": "sim"},
             }
         )
@@ -78,7 +85,7 @@ def main() -> None:
         server.wait(10)
 
     failed = False
-    report = ["### ConformU (KiwiSpec aux Switch, FilterWheel, CoverCalibrator vs simulators)", ""]
+    report = ["### ConformU (KiwiSpec aux Switches and FilterWheel vs simulators)", ""]
     for s in summaries:
         bad = s["exit"] != 0 or bool(s.get("errors")) or bool(s.get("issues"))
         failed |= bad

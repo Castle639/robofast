@@ -10,16 +10,17 @@
     "setpoint_max": 65.0
   },
   "stage": {
-    "_doc": "Thorlabs APT stepper controller (legacy HWTYPE 12, BSC101; USB FTDI 0403:FAF0): 115200 8N1, RTS/CTS. Positions are the live spectrograph_server.ini's [I2POSITIONS] (in 11, flat 68, out 102 mm). counts_per_mm must be confirmed on the hardware before any move (null: positions and moves are refused).",
+    "_doc": "The iodine cell selector: a Thorlabs stage on an APT stepper controller (legacy HWTYPE 12, BSC101; USB FTDI 0403:FAF0): 115200 8N1, RTS/CTS. It moves the iodine cell into (in) and out of (out) the light path, and carries the slit-flat lamp (flat), which is dead: listed, but disabled. Positions are the live spectrograph_server.ini's [I2POSITIONS] (in 11, flat 68, out 102 mm). counts_per_mm must be confirmed on the hardware before any move (null: positions and moves are refused).",
     "port": {"url": "rfc2217://spectrograph-pc:7002", "baud": 115200, "rtscts": true},
     "positions": {"in": 11.0, "flat": 68.0, "out": 102.0},
+    "disabled": ["flat"],
     "counts_per_mm": null,
     "travel": [0.0, 150.0],
     "move_timeout": 120.0,
     "home_timeout": 180.0
   },
   "backlight": {
-    "_doc": "LED controller (legacy backlight: 9600 8N1, n8/f8) and Dynamixel XM servo (legacy: protocol 2.0, ID 1, 57600). The LED is turned off, and the arm swung out, max_on s after it was turned on.",
+    "_doc": "The fiber backlight (fiber back-illuminator for the guiders' fiber-position finding; served as a Switch: arm, LED, both). LED controller (legacy backlight: 9600 8N1, n8/f8) and Dynamixel XM servo (legacy: protocol 2.0, ID 1, 57600). The LED lights only with the arm in; it is turned off, and the arm swung out, max_on s after it was turned on.",
     "led_port": {"url": "rfc2217://spectrograph-pc:7003", "baud": 9600},
     "servo_port": {"url": "rfc2217://spectrograph-pc:7004", "baud": 57600},
     "servo_id": 1,

@@ -25,7 +25,7 @@ ports **by URL**, and serves them as standard ASCOM Alpaca devices:
 | `robofast_core/devices/kiwispec_aux_server.py` | the Alpaca server (`robofast-kiwispec-aux-server`) |
 | `robofast_core/devices/kiwispec_aux.py` | `AuxRouted`: the KiwiSpec service's calls for these devices, sent to the Alpaca server |
 | `tests/core/test_kiwispec_aux.py` | fast-tier tests, all against the simulators |
-| `scripts/conformu_kiwispec_aux.py` | ConformU against all four Alpaca devices (CI job `conformu`) |
+| `scripts/conformu_kiwispec_aux.py` | ConformU against all four Alpaca devices (three Switches, one FilterWheel) (CI job `conformu`) |
 | `sites/minerva/kiwispec_aux.example.json` | MINERVA's config (bridge host and ports are placeholders) |
 
 Everything about the hardware below comes from legacy MINERVA's code on the
@@ -42,9 +42,9 @@ config is not served).
 | Alpaca device | Hardware | Why this interface |
 |---|---|---|
 | `switch/0` (ISwitchV2) | iodine cell heater | an on/off output, a set point, a temperature and an alarm bit are exactly a Switch's boolean and analog switches, writable or not |
-| `filterwheel/0` (IFilterWheelV3) | iodine stage | the stage is used only at **named** positions (`in`, `flat`, `out`), which is a filter wheel; `Position` = -1 while moving gives arrival for free. A Focuser would lose the names, needs integer steps and gives no way to say "not homed"; the rare millimetre move (legacy `i2stage_movef`) is an action, `MoveMM` |
-| `covercalibrator/0` (ICoverCalibratorV2) | fiber backlight | the arm that swings the LED disk over the fiber is a cover (closed = over the fiber), the LED is a calibrator (brightness 0 or 1): a flat-panel cover/calibrator is the same mechanism |
-| `switch/1` (ISwitchV2) | vacuum gauges, chiller | read-only telemetry. ObservingConditions has fixed weather members (its `Pressure` is the atmosphere's, in hPa) and no place for a vacuum or a chiller; read-only switches carry any named value |
+| `filterwheel/0` (IFilterWheelV3) | the iodine cell selector (the iodine stage) | the stage selects what is in the light path at **named** positions (`in`: the iodine cell; `out`: no cell; `flat`: the slit-flat lamp it also carries), which is what a filter wheel is; `Position` = -1 while moving gives arrival for free. A Focuser would lose the names, needs integer steps and gives no way to say "not homed"; millimetres stay available for diagnostics (`Status`, and the rare millimetre move, legacy `i2stage_movef`, as `MoveMM`) |
+| `switch/1` (ISwitchV2) | the fiber backlight | **no Alpaca device type fits it.** It is a fiber back-illuminator for the guiders' fiber-position finding (below), not a dust cover or a flat-field lamp, so not a CoverCalibrator. A generic Switch carries its two coupled controls (arm, LED) and the guider's single on/off, with the interlock and the failsafe in the driver |
+| `switch/2` (ISwitchV2) | vacuum gauges, chiller | read-only telemetry. ObservingConditions has fixed weather members (its `Pressure` is the atmosphere's, in hPa) and no place for a vacuum or a chiller; read-only switches carry any named value |
 
 ### `switch/0`: the iodine cell heater
 
@@ -60,7 +60,15 @@ The TC200's only output command, `ens`, is a **toggle**. Writing
 reads it again; if the toggle did not take it says so and does **not**
 toggle again. A set point is written (`tset=`) and read back.
 
-### `filterwheel/0`: the iodine stage
+### `filterwheel/0`: the iodine cell selector
+
+The stage moves the iodine cell into (`in`) and out of (`out`) the light
+path, and also carries the slit-flat lamp (`flat`). The lamp is dead
+(since 2023), so MINERVA's config keeps `flat` in `positions` (the
+positions stay complete) but lists it in `disabled`: it is in `Names`, and
+moving there is refused. A site whose lamp works removes it from
+`disabled`; the KiwiSpec service also refuses `flat` unless its
+`slit_flat_led` is true.
 
 `Names` are the configured positions. `Position = n` starts the move and
 returns; reading `Position` gives -1 while the stage moves, else the index
@@ -82,27 +90,44 @@ A move is bounded by `move_timeout` (120 s); one that overruns is stopped
 and reported. The server never homes or moves the stage on its own (legacy
 power-cycled, homed and moved it on every connect).
 
-### `covercalibrator/0`: the fiber backlight
+### `switch/1`: the fiber backlight
 
-* `CloseCover`: the arm **in** over the fiber (-45 deg); `OpenCover`: out
-  (-90 deg), then the servo's torque off. Each move is legacy's sequence:
-  torque off, operating mode 3 (position), torque on, goal position, wait
-  until it stops (bounded by `move_timeout`, 5 s). `HaltCover` is not
-  implemented (the move takes a fraction of a second).
-* `CalibratorOn(1)` / `CalibratorOff`: the LED (`n8` / `f8`). Its state
-  cannot be read back; the server reports what it last commanded, and
-  turns the LED off on the first connect.
+**What it is.** A Dynamixel servo flips an arm into the fiber beam at the
+spectrograph end; the arm carries a disk of LEDs that lights the science
+fiber from behind. At each telescope's fiber acquisition unit (FAU) that
+light leaves the fiber, passes the 2 % side of the beamsplitter (heading
+away from the camera), goes into a collimator, hits a corner cube, comes
+back through the same lens to a focus, through the 98 % side of the
+beamsplitter and a V-band filter, onto the ZWO guide camera, which is
+confocal with the fiber. The spot it makes is where a star must sit on the
+guide chip to go down the fiber. It is the guiders' fiber-position
+calibration (`POST /locate`, docs/guider.md; docs/offset_guiding.md), not
+a flat lamp. robofast's name for it, everywhere, is the **backlight**.
+
+| Id | Name | Writable | Value |
+|---|---|---|---|
+| 0 | `backlight_arm` | yes | 1 in the fiber beam (-45 deg), 0 out (-90 deg, then the servo's torque off); **out turns the LED off first** |
+| 1 | `backlight_led` | yes | 1 on, 0 off (`n8` / `f8`); **on only with the arm in** (else `InvalidOperation`) |
+| 2 | `backlight` | yes | both, the way the guider uses it (the KiwiSpec service's `POST /backlight`): 1 = arm in, then LED on; 0 = LED off, then arm out. Reads 1 when the LED is on and the arm in |
+
+* Each write returns once the arm has arrived. An arm move is legacy's
+  sequence: torque off, operating mode 3 (position), torque on, goal
+  position, wait until it stops (bounded by `move_timeout`, 3 s; it takes
+  a fraction of a second). Reading the arm between its two positions is
+  an error.
+* The LED's state cannot be read back: the server reports what it last
+  commanded, and turns the LED off on the first connect.
 * **Failsafe:** the LED heats the spectrograph, so `max_on` (60 s, as
-  legacy) after the last `CalibratorOn` the server turns it off and swings
-  the arm out.
+  legacy) after it was turned on the server turns it off and swings the
+  arm out (`Action("Status")` lists the failsafe events).
 * **A servo that does not answer** (as the backlight's servo does today: it
-  does not answer PINGs) leaves `CoverState` = Error; `OpenCover` and
-  `CloseCover` try a PING and fail at once with "Dynamixel ID 1 did not
-  answer PING within 0.5 s on backlight servo: check the servo's power and
-  cable, its ID (1) and baud rate (57600), and the serial bridge". The LED
-  still works.
+  does not answer PINGs): reading or moving the arm fails at once with
+  "Dynamixel ID 1 did not answer READ 132 within 0.5 s on backlight servo:
+  check the servo's power and cable, its ID (1) and baud rate (57600), and
+  the serial bridge". Turning the backlight off still turns the LED off
+  before it fails on the arm.
 
-### `switch/1`: telemetry (read only)
+### `switch/2`: telemetry (read only)
 
 `spec_pressure` (gauge CG2, the spectrograph) and `pump_pressure` (CG1, the
 pump line), mbar; `chiller_temperature`, `chiller_setpoint`,
@@ -219,11 +244,14 @@ Add `"aux"` to the KiwiSpec service's config:
 
     "aux": {"address": "127.0.0.1:11170", "chiller": true}
 
-Then the heater, the iodine stage, the backlight and the pressures (and,
+Then the heater, the iodine cell selector, the backlight and the pressures (and,
 with `chiller`, the chiller) go to the aux server; everything else (the
 camera, file names, headers) still goes to the legacy server. Any device
-can stay on the legacy server: `"heater": null`, `"telemetry": null`,
-`"stage": false`, `"backlight": false`. The service moves the stage by
+can stay on the legacy server: `"heater": null`, `"backlight": null`,
+`"telemetry": null`, `"stage": false` (the numbers are the aux server's
+switch numbers: heater 0, backlight 1, telemetry 2 by default). The
+guider's backlight path is unchanged: `POST /locate` -> the KiwiSpec
+service's `POST /backlight` -> (now) the aux server's `backlight` switch. The service moves the stage by
 name through the aux server's `Names`, and polls `Status` for arrival as it
 did with the legacy server.
 

@@ -1163,7 +1163,7 @@ Each step is a CI-tested deliverable.
     section 4), then the service against the real PC, attended. Its
     auxiliary devices (iodine heater, iodine stage, backlight, vacuum
     gauges, chiller) are also driven directly, over serial URLs, as an
-    Alpaca Switch/FilterWheel/CoverCalibrator server passing ConformU in
+    Alpaca Switch/FilterWheel server passing ConformU in
     CI (built: `robofast_core/devices/kiwispec_aux_server.py`,
     `docs/kiwispec_aux.md`; next, a serial bridge on the PC and the
     hardware checks listed there).

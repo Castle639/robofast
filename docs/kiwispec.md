@@ -466,11 +466,30 @@ switch the pump or its valves.
 
 ### Other hardware
 
-* **The backlight**: an LED disk on an arm that swings in over the fiber
-  (to locate it on the FAU cameras) and out again: `backlight_on` /
-  `backlight_off` on the legacy server, `POST /backlight` here; the server
-  turns it off by itself after 60 s. The simulator models the arm
-  (`backlight_arm`).
+* **The backlight** (a fiber back-illuminator). A Dynamixel servo flips an
+  arm into the fiber beam at the spectrograph end; the arm carries a disk
+  of LEDs that lights the science fiber from behind. At each telescope's
+  FAU (fiber acquisition unit) that light leaves the fiber, passes the 2 %
+  side of the beamsplitter (heading away from the camera), goes into a
+  collimator, hits a corner cube, comes back through the same lens to a
+  focus, through the 98 % side of the beamsplitter and a V-band filter,
+  onto the ZWO guide camera, which is confocal with the fiber. The spot
+  marks where on the guide chip a star must be placed to go down the
+  fiber: it is the guiders' fiber-position calibration (`POST /locate`,
+  docs/guider.md), not a flat lamp. Two coupled controls, the arm (in the
+  beam / out) and the LED (on / off): the LED lights only with the arm in,
+  and the arm goes out only after the LED is off; the LED is turned off
+  (and the arm swung out) 60 s after it was turned on, because it heats
+  the spectrograph. `backlight_on` / `backlight_off` on the legacy server,
+  `POST /backlight` here; with `"aux"`, the aux server's backlight Switch
+  (docs/kiwispec_aux.md: no Alpaca device type fits it). The simulator
+  models the arm (`backlight_arm`).
+* **The iodine stage** is the iodine cell selector: it moves the iodine
+  cell into (`in`) and out of (`out`) the light path, and also carries the
+  slit-flat lamp (`flat`), which is dead. `flat` stays among the named
+  positions, but is unavailable: the service refuses it (a slit flat, or
+  `configure` `iodine: "flat"`) unless the site's config sets
+  `slit_flat_led`, and the aux server lists it in `stage.disabled`.
 * **The iodine cell heater**, through a Thorlabs controller behind the
   legacy server: on/off (`POST /configure` `heater`; the last commanded
   state is `/status` `heater_on`), set point, and the cell's temperature

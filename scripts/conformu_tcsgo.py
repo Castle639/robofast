@@ -35,7 +35,6 @@ SETTINGS = {
     "filterwheel": ROOT / "scripts" / "conformu-filterwheel.settings.json",
     "rotator": ROOT / "scripts" / "conformu-rotator.settings.json",
     "switch": ROOT / "scripts" / "conformu-switch.settings.json",
-    "covercalibrator": ROOT / "scripts" / "conformu-covercalibrator.settings.json",
 }
 
 

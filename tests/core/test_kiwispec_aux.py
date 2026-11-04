@@ -19,6 +19,7 @@ import pytest
 
 from robofast_core.alpaca_client import (
     AlpacaDevice,
+    DriverException,
     InvalidOperationException,
     InvalidValueException,
     NotImplementedException,
@@ -369,11 +370,11 @@ async def connected(server: KiwiSpecAuxServer, kind: str, n: int = 0) -> AlpacaD
 
 
 async def test_server_lists_its_devices(aux_server):
-    assert aux_server.devices == ("switch", "filterwheel", "covercalibrator", "switch/1")
+    assert aux_server.devices == ("switch", "filterwheel", "switch/1", "switch/2")
     async with httpx.AsyncClient() as c:
         r = await c.get(f"http://{aux_server.address}/management/v1/configureddevices")
     kinds = [(d["DeviceType"], d["DeviceNumber"]) for d in r.json()["Value"]]
-    assert kinds == [("Switch", 0), ("FilterWheel", 0), ("CoverCalibrator", 0), ("Switch", 1)]
+    assert kinds == [("Switch", 0), ("FilterWheel", 0), ("Switch", 1), ("Switch", 2)]
 
 
 async def test_heater_switch(aux_server):
@@ -421,6 +422,32 @@ async def test_stage_filterwheel(aux_server):
     await fw.aclose()
 
 
+async def test_a_disabled_position_is_listed_but_refused():
+    cfg = aux_config(
+        stage={
+            "port": {"url": "sim", "sim": {"counts_per_mm": CPM}},
+            "positions": STAGE,
+            "counts_per_mm": CPM,
+            "disabled": ["flat"],
+        },
+        backlight=None,
+        telemetry=None,
+        heater=None,
+    )
+    server = KiwiSpecAuxServer(cfg).start()
+    try:
+        fw = await connected(server, "filterwheel")
+        assert await fw.get("Names", timeout=5) == ["in", "flat", "out"]
+        with pytest.raises(InvalidOperationException, match="disabled"):
+            await fw.put("Position", timeout=5, Position=1)
+        assert server.sim("stage").position_mm == pytest.approx(11.0)
+        await fw.aclose()
+    finally:
+        server.stop()
+    with pytest.raises(ValueError, match="disabled"):
+        aux_config(stage={"port": "sim", "positions": STAGE, "disabled": ["nowhere"]})
+
+
 async def test_stage_without_a_confirmed_scale_is_refused():
     cfg = aux_config(
         stage={"port": "sim", "positions": STAGE, "counts_per_mm": None},
@@ -442,36 +469,47 @@ async def test_stage_without_a_confirmed_scale_is_refused():
         server.stop()
 
 
-async def test_backlight_covercalibrator(aux_server):
+async def wait_value(dev: AlpacaDevice, i: int, want: float, timeout: float = 3.0) -> None:
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            if await dev.get("GetSwitchValue", timeout=5, Id=i) == want:
+                return
+        except DriverException:
+            pass  # the arm between positions
+        assert time.monotonic() < deadline, f"switch {i} never read {want}"
+        await asyncio.sleep(0.05)
+
+
+async def test_backlight_switch_and_its_interlock(aux_server):
     led, servo = aux_server.sim("backlight LED"), aux_server.sim("backlight servo")
-    cc = await connected(aux_server, "covercalibrator")
+    bl = await connected(aux_server, "switch", 1)
     t = 5
+    names = [await bl.get("GetSwitchName", timeout=t, Id=i) for i in range(3)]
+    assert names == ["backlight_arm", "backlight_led", "backlight"]
     assert led.commands == ["f8"]  # the LED off on connect
-    assert await cc.get("CoverState", timeout=t) == 3  # open (arm out)
-    await cc.put("CloseCover", timeout=t)
-    for _ in range(100):
-        if await cc.get("CoverState", timeout=t) == 1:
-            break
-        await asyncio.sleep(0.02)
+    assert await bl.get("GetSwitchValue", timeout=t, Id=0) == 0  # arm out
+    # The LED turns on only with the arm in the beam.
+    with pytest.raises(InvalidOperationException, match="only with the arm"):
+        await bl.put("SetSwitch", timeout=t, Id=1, State=True)
+    assert not led.on
+    await bl.put("SetSwitch", timeout=t, Id=0, State=True)  # returns once there
     assert servo.position == dx.degrees_to_counts(-45) and servo.torque
-    await cc.put("CalibratorOn", timeout=t, Brightness=1)
-    assert led.on and await cc.get("CalibratorState", timeout=t) == 3
-    with pytest.raises(InvalidValueException):
-        await cc.put("CalibratorOn", timeout=t, Brightness=2)
-    await cc.put("CalibratorOff", timeout=t)
-    await cc.put("OpenCover", timeout=t)
-    for _ in range(100):
-        if await cc.get("CoverState", timeout=t) == 3:
-            break
-        await asyncio.sleep(0.02)
+    await bl.put("SetSwitch", timeout=t, Id=1, State=True)
+    assert led.on and await bl.get("GetSwitch", timeout=t, Id=2) is True
+    # Arm out turns the LED off first.
+    await bl.put("SetSwitch", timeout=t, Id=0, State=False)
+    assert not led.on and led.history[-1][1] is False
     assert servo.position == dx.degrees_to_counts(-90) and not servo.torque
-    # Legacy's order: torque off, position mode, torque on, goal.
-    writes = [p[:2] for inst, p in servo.commands if inst == dx.WRITE]
-    addrs = [struct.unpack("<H", w)[0] for w in writes]
+    # The guider's on/off.
+    await bl.put("SetSwitch", timeout=t, Id=2, State=True)
+    assert led.on and servo.position == dx.degrees_to_counts(-45)
+    await bl.put("SetSwitch", timeout=t, Id=2, State=False)
+    assert not led.on and servo.position == dx.degrees_to_counts(-90)
+    # Legacy's order for every arm move: torque off, position mode, torque on, goal.
+    addrs = [struct.unpack("<H", p[:2])[0] for inst, p in servo.commands if inst == dx.WRITE]
     assert addrs[:4] == [64, 11, 64, 116]
-    with pytest.raises(NotImplementedException):
-        await cc.put("HaltCover", timeout=t)
-    await cc.aclose()
+    await bl.aclose()
 
 
 async def test_backlight_failsafe_turns_the_led_off_and_the_arm_out():
@@ -480,23 +518,19 @@ async def test_backlight_failsafe_turns_the_led_off_and_the_arm_out():
     ).start()
     try:
         led = server.sim("backlight LED")
-        cc = await connected(server, "covercalibrator")
-        await cc.put("CloseCover", timeout=5)
-        await asyncio.sleep(0.3)
-        await cc.put("CalibratorOn", timeout=5, Brightness=1)
+        bl = await connected(server, "switch", 1)
+        await bl.put("SetSwitch", timeout=5, Id=2, State=True)
         assert led.on
         await wait_until(lambda: not led.on, 3.0)
-        for _ in range(100):
-            if await cc.get("CoverState", timeout=5) == 3:
-                break
-            await asyncio.sleep(0.05)
-        assert await cc.get("CalibratorState", timeout=5) == 1
-        await cc.aclose()
+        await wait_value(bl, 0, 0.0)
+        status = json.loads(await bl.put("Action", timeout=5, Action="Status", Parameters=""))
+        assert status["failsafe_events"]
+        await bl.aclose()
     finally:
         server.stop()
 
 
-async def test_dead_servo_fails_cleanly_and_the_led_still_works():
+async def test_dead_servo_fails_cleanly_and_the_led_still_turns_off():
     server = KiwiSpecAuxServer(
         aux_config(
             backlight={"led_port": "sim", "servo_port": "sim", "servo_timeout": 0.2},
@@ -508,21 +542,21 @@ async def test_dead_servo_fails_cleanly_and_the_led_still_works():
     server.sim("backlight servo").silent = True
     server.start()
     try:
-        cc = await connected(server, "covercalibrator")
-        assert await cc.get("CoverState", timeout=5) == 5  # Error
+        bl = await connected(server, "switch")
         with pytest.raises(Exception, match="Dynamixel ID 1 did not answer"):
-            await cc.put("CloseCover", timeout=5)
-        await cc.put("CalibratorOn", timeout=5, Brightness=1)
-        assert server.sim("backlight LED").on
-        status = json.loads(await cc.put("Action", timeout=5, Action="Status", Parameters=""))
-        assert "did not answer" in status["cover_error"]
-        await cc.aclose()
+            await bl.get("GetSwitchValue", timeout=5, Id=0)
+        with pytest.raises(Exception, match="Dynamixel ID 1 did not answer"):
+            await bl.put("SetSwitch", timeout=5, Id=2, State=True)
+        assert not server.sim("backlight LED").on
+        status = json.loads(await bl.put("Action", timeout=5, Action="Status", Parameters=""))
+        assert "did not answer" in status["arm_error"] and status["arm"] is None
+        await bl.aclose()
     finally:
         server.stop()
 
 
 async def test_telemetry_is_read_only(aux_server):
-    sw = await connected(aux_server, "switch", 1)
+    sw = await connected(aux_server, "switch", 2)
     t = 5
     n = await sw.get("MaxSwitch", timeout=t)
     names = [await sw.get("GetSwitchName", timeout=t, Id=i) for i in range(n)]
@@ -564,9 +598,9 @@ async def test_server_over_pyserial_urls():
             assert await sw.get("GetSwitchValue", timeout=5, Id=1) == 55.0
             fw = await connected(server, "filterwheel")
             assert await fw.get("Position", timeout=5) == 0
-            cc = await connected(server, "covercalibrator")
-            assert await cc.get("CoverState", timeout=5) == 3
-            tel = await connected(server, "switch", 1)
+            cc = await connected(server, "switch", 1)
+            assert await cc.get("GetSwitchValue", timeout=5, Id=0) == 0  # arm out
+            tel = await connected(server, "switch", 2)
             assert await tel.get("GetSwitchValue", timeout=5, Id=1) == pytest.approx(1.0e3)
             for d in (sw, fw, cc, tel):
                 await d.aclose()
@@ -589,6 +623,7 @@ def test_minerva_example_config_loads_and_needs_the_gate():
     path = ROOT / "sites" / "minerva" / "kiwispec_aux.example.json"
     cfg = KiwiSpecAuxConfig.from_dict(json.loads(path.read_text()))
     assert cfg.stage is not None and list(cfg.stage.positions) == ["in", "flat", "out"]
+    assert cfg.stage.disabled == ["flat"]  # the slit-flat lamp is dead
     assert all(pc.url.startswith("rfc2217://") for _, pc in cfg.ports())
     assert not cfg.allow_hardware
     with pytest.raises(HardwareNotAllowed):
@@ -611,7 +646,7 @@ def test_no_valve_or_pump_control_anywhere():
 
 def test_aux_config():
     cfg = AuxConfig.from_dict({"address": "127.0.0.1:11170", "heater": None})
-    assert cfg.heater is None and cfg.telemetry == 1 and cfg.stage
+    assert cfg.heater is None and cfg.backlight == 1 and cfg.telemetry == 2 and cfg.stage
     with pytest.raises(ValueError, match="address"):
         AuxConfig.from_dict({"heater": 0})
     with pytest.raises(ValueError, match="unknown keys"):
@@ -718,5 +753,19 @@ async def test_legacy_headers_carry_both_heater_keys(legacy_sim):
             header = legacy_sim.files[job["results"][0]["file"]]["header"]
             assert header["I2TEMPS"][0] == legacy_sim.heater_setpoint
             assert isinstance(header["I2TEMPA"][0], float)
+    finally:
+        await service.stop()
+
+
+async def test_the_flat_position_needs_the_slit_flat_lamp(legacy_sim):
+    """'flat' puts the (dead) slit-flat lamp in the beam: refused unless the
+    site turns slit_flat_led on."""
+    service = await KiwiSpecServer(service_config(legacy_sim, slit_flat_led=False)).start(
+        status_loop=False
+    )
+    try:
+        async with httpx.AsyncClient(base_url=service.url, timeout=20) as http:
+            r = await http.post("/configure", json={"iodine": "flat"})
+            assert r.status_code == 400 and "slit-flat" in r.text
     finally:
         await service.stop()

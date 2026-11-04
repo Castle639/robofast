@@ -33,7 +33,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Protocol
@@ -121,14 +120,14 @@ class AuxConfig:
 
     #: The aux Alpaca server, ``host:port``.
     address: str
-    #: Switch device numbers of the heater and of the telemetry (pressures,
-    #: chiller); None: that device stays on the legacy server.
+    #: Switch device numbers of the heater, the fiber backlight and the
+    #: telemetry (pressures, chiller), as the aux server numbers them;
+    #: None: that device stays on the legacy server.
     heater: int | None = 0
-    telemetry: int | None = 1
-    #: The iodine stage (filterwheel/0) and the backlight
-    #: (covercalibrator/0) through the aux server.
+    backlight: int | None = 1
+    telemetry: int | None = 2
+    #: The iodine cell selector (filterwheel/0) through the aux server.
     stage: bool = True
-    backlight: bool = True
     #: Read the chiller through the aux server's telemetry.
     chiller: bool = False
     #: Degrees C either side of the chiller's set point before a warning.
@@ -171,7 +170,7 @@ class AuxDevices:
         self.heater = None if cfg.heater is None else AlpacaDevice(a, "switch", cfg.heater)
         self.telemetry = None if cfg.telemetry is None else AlpacaDevice(a, "switch", cfg.telemetry)
         self.stage = AlpacaDevice(a, "filterwheel", 0) if cfg.stage else None
-        self.backlight = AlpacaDevice(a, "covercalibrator", 0) if cfg.backlight else None
+        self.backlight = None if cfg.backlight is None else AlpacaDevice(a, "switch", cfg.backlight)
         self._ids: dict[int, dict[str, int]] = {}
         self._names: list[str] | None = None
         self._connected: set[int] = set()
@@ -302,38 +301,10 @@ class AuxDevices:
     # -- backlight ----------------------------------------------------------------------
 
     async def set_backlight(self, on: bool) -> None:
-        """On: the arm in over the fiber, then the LED. Off: the LED, then the arm out."""
-        dev = self.backlight
-        t = self.cfg.timeout
-
-        async def wait_cover(want: int) -> None:
-            assert dev is not None
-            deadline = time.monotonic() + self.cfg.arm_timeout
-            while True:
-                state = int(await dev.get("CoverState", timeout=t))
-                if state == want:
-                    return
-                if state == 5:
-                    raise KiwiSpecFailed("aux backlight: the arm reports an error (CoverState 5)")
-                if time.monotonic() > deadline:
-                    raise KiwiSpecTimeout(
-                        f"aux backlight: arm not there after {self.cfg.arm_timeout} s"
-                    )
-                await asyncio.sleep(0.1)
-
-        async def switch() -> None:
-            assert dev is not None
-            if on:
-                await dev.put("CloseCover", timeout=t)
-                await wait_cover(1)
-                await dev.put("CalibratorOn", timeout=t, Brightness=1)
-            else:
-                await dev.put("CalibratorOff", timeout=t)
-                await dev.put("OpenCover", timeout=t)
-                await wait_cover(3)
-
+        """The guider's on/off (the aux server's ``backlight`` switch): arm in
+        then LED on; LED off then arm out. Returns once the arm is there."""
         async with asyncio.timeout(self.cfg.arm_timeout + self.cfg.timeout * 4):
-            await self._do(dev, f"backlight {'on' if on else 'off'}", switch)
+            await self._set(self.backlight, "backlight", 1.0 if on else 0.0)
 
     async def close(self) -> None:
         for dev in (self.heater, self.telemetry, self.stage, self.backlight):

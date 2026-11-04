@@ -128,7 +128,7 @@ jobs:
   # Switch server on its Pulizzi simulator (scripts/conformu_pulizzi.py), and
   # the 60-inch's ADC Rotator/Switch server on its prism-motor simulator
   # (scripts/conformu_adc.py), and KiwiSpec's auxiliary-device
-  # Switch/FilterWheel/CoverCalibrator server on its serial-device
+  # Switch/FilterWheel server on its serial-device
   # simulators (scripts/conformu_kiwispec_aux.py). The PlaneWave PWI server has its own job
   # below (conformu-pwi), run in parallel: its two backends take ~20 min.
   conformu:
@@ -174,7 +174,7 @@ jobs:
       - name: ConformU against the ADC Rotator and Switch server
         if: ${{ !cancelled() }}
         run: python scripts/conformu_adc.py --conformu "$CONFORMU_BIN" --out "${{ runner.temp }}/conformu-adc"
-      - name: ConformU against the KiwiSpec aux Switch, FilterWheel and CoverCalibrator server
+      - name: ConformU against the KiwiSpec aux Switch and FilterWheel server
         if: ${{ !cancelled() }}
         run: python scripts/conformu_kiwispec_aux.py --conformu "$CONFORMU_BIN" --out "${{ runner.temp }}/conformu-kiwispec-aux"
       - name: Upload ConformU logs
