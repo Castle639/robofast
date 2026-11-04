@@ -1160,7 +1160,13 @@ Each step is a CI-tested deliverable.
 11. KiwiSpec spectrograph service, its clients for the legacy spectrograph
     PC and a protocol-faithful simulator (built; `docs/kiwispec.md`, with
     open questions); next, spectra in the sequencer (`docs/kiwispec.md`
-    section 4), then the service against the real PC, attended.
+    section 4), then the service against the real PC, attended. Its
+    auxiliary devices (iodine heater, iodine stage, backlight, vacuum
+    gauges, chiller) are also driven directly, over serial URLs, as an
+    Alpaca Switch/FilterWheel server passing ConformU in
+    CI (built: `robofast_core/devices/kiwispec_aux_server.py`,
+    `docs/kiwispec_aux.md`; next, a serial bridge on the PC and the
+    hardware checks listed there).
 12. FLWO 60" / TRES: an Alpaca Telescope + Focuser (+ Dome, if the TCS
     drives it) server for the 60-inch's DFM TCSGalil ("TCSGO"), with a
     protocol-faithful simulator, passing ConformU in CI, and the

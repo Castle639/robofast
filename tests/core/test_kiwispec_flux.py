@@ -510,7 +510,7 @@ async def test_a_chiller_without_a_driver_only_warns(sim):
         s = server.kiwispec.status()
     finally:
         await server.stop()
-    assert any("no oasis3 chiller driver" in w for w in s["warnings"])
+    assert any("oasis3 chiller is read through the aux server" in w for w in s["warnings"])
     assert not [a for a in s["alarms"] if "chiller" in a]
     with pytest.raises(ValueError, match="chiller kind"):
         build_chiller({"kind": "nope"})

@@ -12,7 +12,8 @@ HTTP API, a simulator"):
 | `robofast_core/devices/kiwispec_service.py` | the single owner: HTTP/JSON API, one job at a time, count termination and the flux-weighted midpoint, the raw-file rewrite, SI Image restarts, the hardware-safety gate, and `KiwiSpecRemote` (the abort hook for the sequencer's cleanup) |
 | `robofast_core/devices/kiwispec_flux.py` | the flux record from the FAU guide frames: the per-telescope log and the summed flux-weighted midpoint |
 | `robofast_core/devices/kiwispec_fits.py` | the verified in-place rewrite of SI Image's raw file into legal FITS |
-| `robofast_core/devices/kiwispec_aux.py` | hardware not on the legacy protocol: the chiller (telemetry; simulator only so far) |
+| `robofast_core/devices/kiwispec_aux.py` | the chiller (telemetry), and `AuxRouted`: the heater, iodine stage, backlight and pressures through robofast's own Alpaca server instead of the legacy one (`"aux"`; docs/kiwispec_aux.md) |
+| `robofast_core/devices/kiwispec_aux_server.py` | that Alpaca server: the auxiliary devices driven directly over their serial ports, by URL (docs/kiwispec_aux.md) |
 | `robofast_core/guider/flux_report.py` | each guider's report of its fiber flux to the service (`POST /flux`) |
 | `robofast_core/devices/kiwispec_sim.py` | a TCP simulator of the spectrograph PC (both protocols, legacy quirks included, SI Image's raw files), with fault injection |
 | `tests/core/test_kiwispec.py`, `test_kiwispec_flux.py`, `test_guider_fiber_flux.py` | the fast-tier tests, all against the simulators on loopback |
@@ -465,22 +466,49 @@ switch the pump or its valves.
 
 ### Other hardware
 
-* **The backlight**: an LED disk on an arm that swings in over the fiber
-  (to locate it on the FAU cameras) and out again: `backlight_on` /
-  `backlight_off` on the legacy server, `POST /backlight` here; the server
-  turns it off by itself after 60 s. The simulator models the arm
-  (`backlight_arm`).
+* **The backlight** (a fiber back-illuminator). A Dynamixel servo flips an
+  arm into the fiber beam at the spectrograph end; the arm carries a disk
+  of LEDs that lights the science fiber from behind. At each telescope's
+  FAU (fiber acquisition unit) that light leaves the fiber, passes the 2 %
+  side of the beamsplitter (heading away from the camera), goes into a
+  collimator, hits a corner cube, comes back through the same lens to a
+  focus, through the 98 % side of the beamsplitter and a V-band filter,
+  onto the ZWO guide camera, which is confocal with the fiber. The spot
+  marks where on the guide chip a star must be placed to go down the
+  fiber: it is the guiders' fiber-position calibration (`POST /locate`,
+  docs/guider.md), not a flat lamp. Two coupled controls, the arm (in the
+  beam / out) and the LED (on / off): the LED lights only with the arm in,
+  and the arm goes out only after the LED is off; the LED is turned off
+  (and the arm swung out) 60 s after it was turned on, because it heats
+  the spectrograph. `backlight_on` / `backlight_off` on the legacy server,
+  `POST /backlight` here; with `"aux"`, the aux server's backlight Switch
+  (docs/kiwispec_aux.md: no Alpaca device type fits it). The simulator
+  models the arm (`backlight_arm`).
+* **The iodine stage** is the iodine cell selector: it moves the iodine
+  cell into (`in`) and out of (`out`) the light path, and also carries the
+  slit-flat lamp (`flat`), which is dead. `flat` stays among the named
+  positions, but is unavailable: the service refuses it (a slit flat, or
+  `configure` `iodine: "flat"`) unless the site's config sets
+  `slit_flat_led`, and the aux server lists it in `stage.disabled`.
 * **The iodine cell heater**, through a Thorlabs controller behind the
   legacy server: on/off (`POST /configure` `heater`; the last commanded
   state is `/status` `heater_on`), set point, and the cell's temperature
   (`/status` readings `heater_temp`, `heater_setpoint`).
-* **The chiller** (an Oasis 3): telemetry only, through
-  `robofast_core/devices/kiwispec_aux.py` (`chiller` in the config). Its
-  interface is not known yet, so the only backend is the simulator
-  (`{"kind": "sim"}`); `{"kind": "oasis3"}` names it and reports, as a
-  warning, that its driver is missing. A reading (`temp`, `setpoint`,
-  `flow`, `fault`) is in `/status` readings `chiller`; a temperature off
-  its set point by more than `tolerance` is a warning, a fault an alarm.
+* **The chiller** (an Oasis 3): telemetry only. Its driver is in the aux
+  Alpaca server (docs/kiwispec_aux.md); the service reads it with `"aux":
+  {"chiller": true}`. `chiller: {"kind": "sim"}` is the simulator;
+  `{"kind": "oasis3"}` names it and reports, as a warning, to read it
+  through the aux server. A reading (`temp`, `setpoint`, `flow`, `fault`)
+  is in `/status` readings `chiller`; a temperature off its set point by
+  more than `tolerance` is a warning, a fault an alarm.
+* **Direct control** (docs/kiwispec_aux.md): with `"aux"` in the config the
+  heater, the iodine stage, the backlight, the pressures and the chiller
+  go to robofast's own Alpaca server, which drives their serial ports
+  itself (through a serial-to-TCP bridge on the spectrograph PC), and not
+  to the legacy server.
+* **FITS header:** every frame gets `I2TEMPA` and `I2TEMPS` (the cell's
+  temperature and set point) and the stage's `I2POSAF`/`I2POSAS`/`I2POSSS`;
+  a failed read is written `UNKNOWN`, never left out.
 * **The spectrograph PC's clock** is MST without daylight saving
   (`pc_utc_offset_hours: -7`); SI Image stamps `DATE-OBS` in it.
 
@@ -601,8 +629,9 @@ Answered (JDE, 2026-10-31 to 2026-11-02), and how robofast follows:
 
 Still open:
 
-* The **chiller's** interface (serial or network, its protocol), for a
-  driver in `kiwispec_aux.py`.
+* The auxiliary devices' protocols as robofast drives them directly
+  (docs/kiwispec_aux.md, "To confirm on the hardware"), above all the
+  iodine stage's `counts_per_mm`.
 * The **raw file's** exact form: confirm with one raw file from the
   current SI Image that `kiwispec_fits.read_raw` decodes it (the form is
   taken from legacy `fix_fits.py`), and the data directory's mount on the
