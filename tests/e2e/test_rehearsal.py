@@ -6,6 +6,7 @@ guard, the end action and the checks without hardware."""
 
 from __future__ import annotations
 
+import json
 import os
 from datetime import UTC, datetime
 from pathlib import Path
@@ -111,4 +112,68 @@ async def test_a_rehearsal_on_fake_real_hardware(tmp_path):
         assert cams[name].exposures_started >= 2, name
     assert all(c == "COMPLETED" for c in outcome.statuses.values()), outcome.statuses
     assert len(outcome.slews) >= 4 and all(r["error_arcsec"] < 1 for r in outcome.slews)
+    assert outcome.why_end == "every request done"
+
+
+async def test_a_rehearsal_with_an_external_kiwispec_and_catalog_guiding(tmp_path):
+    """``--kiwispec URL`` (here a KiwiSpec service on its simulator, started
+    outside the rehearsal: it stands for the real one) and
+    ``--catalog-guide`` (a synthetic catalog around every candidate target:
+    the guiders acquire and guide on its star fields at the real FAU's
+    geometry)."""
+    from robofast.testing.rehearsal import Rehearsal, catalog
+    from robofast.testing.rv_night import SimulatedNight
+    from robofast.testing.sky_fixture import synthetic_fields
+
+    out = Path(os.environ.get("ROBOFAST_E2E_OUT") or tmp_path) / "rehearsal-external"
+    cat_dir = tmp_path / "catalog"
+    synthetic_fields(cat_dir, [(t["ra"], t["dec"], 4.0) for t in catalog()])
+    servers = []
+    real, mounts = {}, {}
+    for name in ("t1", "t2"):
+        mount, _, srvs = serve_real(name)
+        servers += srvs
+        mounts[name] = mount
+        ep = Endpoint.parse(f"{srvs[0].address}/0")
+        real[name] = RealTelescope(ep, Endpoint.parse(f"{srvs[1].address}/0"), ep, ep)
+    # The "external" KiwiSpec: the simulated night's own, on the same clock
+    # file as the rehearsal (the rehearsal rewrites it with its clock).
+    external = SimulatedNight(out)
+    await external._start_spectrograph()
+    url = external._spectrograph_url()
+    settings = RehearsalSettings(
+        real=real,
+        end_action=EndAction.parse("leave"),
+        duration=3600.0,
+        exptime=2.0,
+        images=1,
+        image_exptime=0.5,
+        spectra=2,
+        console_port=None,
+        idle_poll=1.0,
+        start=datetime(2026, 11, 10, 4, 0, tzinfo=UTC),
+        scale=10.0,
+        kiwispec_url=url,
+        catalog_guide={"cache_dir": str(cat_dir), "fetch": False, "bright": False},
+    )
+    night = Rehearsal(out, settings)
+    try:
+        await night.start()
+        outcome = await night.run()
+    finally:
+        await night.close()
+        await external.close()
+        for s in servers:
+            s.stop()
+    print(summary(outcome))
+    problems = check(outcome)
+    assert not problems, "\n".join(problems)
+    assert night.kiwi_sim is None and outcome.spectrograph_files == {}
+    # The spectra were the external service's.
+    assert len([f for f in external.kiwi_sim.files.values() if f.get("kind") != "bias"]) >= 2
+    for name in ("t1", "t2"):
+        cfg = json.loads((out / f"guider_{name}.json").read_text())
+        assert cfg["flux_report"]["url"] == url and "sky" in cfg["sim"]
+        log = (out / f"guider_{name}.log").read_text()
+        assert "target_in_catalog': True" in log, name
     assert outcome.why_end == "every request done"

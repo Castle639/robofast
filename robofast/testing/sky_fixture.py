@@ -46,6 +46,7 @@ from robofast.catalog import (
     pix2ang,
     propagate,
     separation,
+    tiles_in_cone,
 )
 
 __all__ = [
@@ -53,6 +54,7 @@ __all__ = [
     "FIXTURE_FILE",
     "FIXTURE_TILES",
     "read_npz",
+    "synthetic_fields",
     "synthetic_sky",
     "unpack_tiles",
     "write_npz",
@@ -259,3 +261,44 @@ def synthetic_sky(out: str | Path, seed: int = SEED) -> Path:
     b = np.concatenate([*bright, sky])
     np.save(out / BRIGHT_FILE, np.sort(b, order=["g", "source_id"]), allow_pickle=False)
     return out
+
+
+def synthetic_fields(
+    root: str | Path,
+    targets: list[tuple[float, float, float]],
+    *,
+    radius: float = 0.2,
+    per_deg2: float = 2000.0,
+    seed: int = SEED,
+) -> TileCache:
+    """Synthetic Gaia-format tiles (no Gaia data) under ``root`` covering
+    ``radius`` deg around each target ``(ra, dec, g)``, the target itself a
+    star of that G at that position (J2016, no proper motion): a catalog for
+    tests whose fields the test sky does not cover (the hardware
+    rehearsal's ``--catalog-guide``)."""
+    rng = np.random.default_rng(seed)
+    tiles = TileCache(root)
+    level = tiles.level
+    per_tile: dict[int, list[np.ndarray]] = {}
+    for ra, dec, _ in targets:
+        for p in tiles_in_cone(level, ra, dec, radius):
+            per_tile.setdefault(int(p), [])
+    area = 4 * math.pi * (180 / math.pi) ** 2 / (12 * 4**level)
+    cap = 2.0 * math.sqrt(area)
+    for p in per_tile:
+        ra0, dec0 = (float(v[0]) for v in pix2ang(level, np.array([p])))
+        cap_area = math.pi * cap**2
+        rec = _random_stars(rng, int(per_deg2 * cap_area), ra0, dec0, cap, gmin=8.0)
+        per_tile[p].append(rec[ang2pix(level, rec["ra"], rec["dec"]) == p])
+    for ra, dec, g in targets:
+        p = int(ang2pix(level, np.array([ra]), np.array([dec]))[0])
+        t = np.zeros(1, TILE_DTYPE)
+        t["ra"], t["dec"], t["g"], t["bp_rp"] = ra % 360.0, dec, g, 0.0
+        per_tile.setdefault(p, []).append(t)
+    start = 1
+    for p, parts in per_tile.items():
+        rec = np.concatenate(parts)
+        rec["source_id"] = _source_ids(rec["ra"], rec["dec"], start)
+        start += len(rec)
+        tiles.save(p, rec)
+    return tiles

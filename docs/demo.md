@@ -218,6 +218,29 @@ python -m robofast.testing.rehearsal --out /tmp/rehearsal \
   where it is; the default) or `altaz:ALT,AZ` (tracking off, then a slew
   there, within the limits). A `kill -9` skips it: stop the mounts
   yourself then.
+* **`--kiwispec URL`** (opt-in): use an already-running KiwiSpec service
+  (`robofast.devices.kiwispec_service`) -- the **real spectrograph** --
+  instead of starting the simulated one. The guiders' flux reports and the
+  sequencer's spectra go to it, so the spectra are taken by the real
+  spectrograph (the enclosure closed: dark spectra, as intended). Before
+  anything starts the rehearsal sends it `GET /status` and refuses if it
+  does not answer; it logs that KiwiSpec is EXTERNAL. Nothing in the
+  rehearsal sends it `/restart_camera` or `/backlight` (the guiders'
+  backlight stays simulated).
+* **`--catalog-guide`** (opt-in): the simulated FAU guide cameras show the
+  **real catalog star field** around each target (`robofast.catalog`,
+  rendered by `robofast.testing.skysim.GuiderSky` through the guider
+  service's `sim.sky` section) instead of one synthetic star: the real
+  FAU's sensor (ZWO ASI174, 1936 x 1216), plate scale and fiber position
+  (`sites/minerva/guider_tN.example.json`), the target a few pixels off
+  the fiber (a pointing error), full-frame acquisition as on the real FAU.
+  `--catalog-source` (`gaia`, the default; `ucac4` or `2mass`, from IRSA)
+  and `--catalog-dir` (default `$ROBOFAST_CATALOG_DIR`, else
+  `~/.cache/robofast/catalog`) choose the catalog. Before anything starts
+  it queries the catalog around every candidate target (downloading
+  missing tiles, so the guiders never wait) and refuses, naming the
+  target, if the catalog cannot answer; the guiders then read the cache
+  only.
 
 It prints the night as it goes (slews with the pointing error, frames,
 spectra), then a summary: the spectra, the request statuses at the end,

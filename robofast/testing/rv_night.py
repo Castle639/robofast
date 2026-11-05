@@ -466,7 +466,7 @@ class SimulatedNight:
     def _start_guiders(self) -> None:
         # Each guider reports its fiber flux to the KiwiSpec service: the
         # spectra's flux record (docs/kiwispec.md, "Flux from the FAU guide frames").
-        self.kiwispec_url = json.loads(self.kiwispec.first_line())["url"]
+        self.kiwispec_url = self._spectrograph_url()
         for name in NAMES:
             cfg = {
                 "name": f"{name}-guider",
@@ -501,6 +501,7 @@ class SimulatedNight:
                     "tiptilt": {"matrix": [[0.08, 0.03], [-0.03, 0.08]], "units": "steps"}
                 },
             }
+            cfg = self._guider_config(name, cfg)
             path = self.out / f"guider_{name}.json"
             path.write_text(json.dumps(cfg, indent=1))
             svc = Service(
@@ -511,6 +512,14 @@ class SimulatedNight:
             )
             self.services.append(svc)
             self.telescopes[name].guider = svc
+
+    def _spectrograph_url(self) -> str:
+        """The KiwiSpec service's URL (the one started here)."""
+        return json.loads(self.kiwispec.first_line())["url"]
+
+    def _guider_config(self, name: str, cfg: dict[str, Any]) -> dict[str, Any]:
+        """A guider's service config (subclasses adjust it)."""
+        return cfg
 
     def _enclosure(self) -> dict[str, Any]:
         """``sites/minerva/aqawan1.json`` with simulator addresses and

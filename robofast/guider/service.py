@@ -62,7 +62,9 @@ Config (JSON; every key optional except as noted)::
      "offload": null | {"threshold", "period", "min_pixels", "window", "settle"},
      "backlight": null | {"kind": "sim"} | {"kind": <a plug-in's kind>, ...},
      "guide": {...GuideConfig...},
-     "sim": {...the simulated sky, when camera.kind is "sim"...},
+     "sim": {...the simulated sky, when camera.kind is "sim"; an optional "sky"
+             section re-points it at each start's target_radec with real catalog
+             stars (robofast.testing.skysim.GuiderSky; docs/demo.md)...},
      "redis": null | {"host", "port", "channel"},
      "flux_report": null | {"url", "telescope", "interval"?, "timeout"?}}
 
@@ -217,6 +219,7 @@ def build_world(spec: dict[str, Any], clock: Clock) -> SimWorld:
     """The simulated sky from the ``sim`` section (:class:`SimWorld`
     fields; ``jitter`` and ``fiber`` as dicts of their fields)."""
     s = dict(spec)
+    s.pop("sky", None)  # the catalog sky (GuiderService; robofast.testing.skysim.GuiderSky)
     jit = s.pop("jitter", None)
     fib = s.pop("fiber", None)
     ttm = s.pop("tt_matrix", None)
@@ -379,6 +382,19 @@ class GuiderService:
 
             self._solver = SolverConfig.from_dict(config.solver)
             self._catalog = catalog_from_config(config.catalog)
+        #: Opt-in simulator sky from a real catalog (``sim.sky``): re-pointed
+        #: at each start's ``target_radec`` (robofast.testing.skysim.GuiderSky).
+        self._sky: Any = None
+        self.sim_sky: dict[str, Any] | None = None
+        if p.world is not None and config.sim.get("sky"):
+            from robofast.testing.skysim import GuiderSky
+
+            fib = p.world.fiber
+            self._sky = GuiderSky.from_config(
+                config.sim["sky"],
+                sensor=p.world.sensor,
+                fiber=None if fib is None else (fib.x, fib.y),
+            )
         host, _, port = config.listen.rpartition(":")
         self.host, self.port = host, int(port)
         self._server: asyncio.Server | None = None
@@ -525,6 +541,8 @@ class GuiderService:
         s["scope"] = self.config.scope
         s["port"] = self.config.port
         s["busy"] = self._busy
+        if self._sky is not None:
+            s["sim_sky"] = self.sim_sky
         s["flux_report"] = None if self.flux_reporter is None else self.flux_reporter.status()
         s["calibrations"] = {
             "tiptilt": None if self.guider.tt_cal is None else self.guider.tt_cal.as_json(),
@@ -595,6 +613,9 @@ class GuiderService:
                 if "dec" in args and g.mount is not None:
                     g.mount.dec_deg = float(args["dec"])
                 g.clear_offset()
+                if self._sky is not None and args.get("target_radec") is not None:
+                    ra, dec = (float(v) for v in args["target_radec"])
+                    await asyncio.to_thread(self._point_sky, ra, dec)
                 if args.get("offset_guide"):
                     args = self._set_offset(args)
                 self._set_identifier(args)
@@ -643,6 +664,23 @@ class GuiderService:
             return 503, {"error": f"{type(exc).__name__}: {exc}"}
         except (ValueError, TypeError, KeyError) as exc:
             return 400, {"error": f"bad request: {exc!r}"}
+
+    def _point_sky(self, ra: float, dec: float) -> None:
+        """The simulated sky's star field around the target (``sim.sky``).
+        If the catalog cannot answer, a lone star at the same place (the
+        synthetic field), logged."""
+        world = self.parts.world
+        assert world is not None and self._sky is not None
+        try:
+            main, others, info = self._sky.field(ra, dec, datetime.now(UTC), world.flux)
+        except Exception as exc:
+            log.warning("sim sky: no catalog field at RA %.5f Dec %+.5f (%r)", ra, dec, exc)
+            main, others = (*self._sky.centre, world.flux), []
+            info = {"ra": ra, "dec": dec, "error": repr(exc), "field_stars": 0}
+        world.star = (main[0], main[1])
+        world.others = others
+        self.sim_sky = info
+        log.info("sim sky: %s", info)
 
     def _set_offset(self, args: dict[str, Any]) -> dict[str, Any]:
         """Offset guiding for this start (module doc): choose or take the
