@@ -3,7 +3,7 @@
 MEarth ran two arrays of small telescopes, each under one roll-off roof:
 MEarth North at FLWO (Mt. Hopkins) and MEarth South at CTIO (Cerro
 Tololo). The two roofs have different controllers. robofast drives the
-**South** roof (`robofast_core/devices/mearth_roof_*`, site config in
+**South** roof (`robofast/devices/mearth_roof_*`, site config in
 `sites/mearth_south/`); the North roof is described below for later.
 
 What follows is adapted from the MEarth observing system (J. Irwin, used

@@ -1,6 +1,6 @@
-# MEarth South (CTIO) site weather bridge (robofast_core.weather_bridge).
+# MEarth South (CTIO) site weather bridge (robofast.weather_bridge).
 #
-#   python -m robofast_core.weather_bridge --config sites/mearth_south/weather.yaml --shadow
+#   python -m robofast.weather_bridge --config sites/mearth_south/weather.yaml --shadow
 #
 # UNCONFIRMED, NOT READY FOR USE. Limits are adapted from the MEarth
 # observing system (J. Irwin, used with permission): its roof daemon's South

@@ -3,9 +3,9 @@ filters and M3 ports as hard constraints, and allow_partial progress."""
 
 from __future__ import annotations
 
-from robofast_core.dispatch import DispatchScheduler, TelescopeLimits
-from robofast_core.plan import Idle, Observation
-from robofast_core.request_model import Status
+from robofast.dispatch import DispatchScheduler, TelescopeLimits
+from robofast.plan import Idle, Observation
+from robofast.request_model import Status
 from tests.core.test_dispatch import Clock, group, make
 
 

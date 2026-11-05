@@ -2,9 +2,9 @@
   "_note": [
     "MEarth South at CTIO: eight telescopes (tel11-tel18) under one roll-off roof.",
     "Adapted from the MEarth observing system (J. Irwin, used with permission); see docs/mearth_roof.md.",
-    "One file for the enclosure, read by both services (robofast_core/config.py):",
-    "  python -m robofast_core.supervisor_service --config sites/mearth_south/mearth_south.json",
-    "  python -m robofast_core.sequencer_service --config sites/mearth_south/mearth_south.json",
+    "One file for the enclosure, read by both services (robofast/config.py):",
+    "  python -m robofast.supervisor_service --config sites/mearth_south/mearth_south.json",
+    "  python -m robofast.sequencer_service --config sites/mearth_south/mearth_south.json",
     "Every address is a 127.0.0.1 placeholder.",
     "dome: the MEarth roof Alpaca server (roof.json listens on 11150; hardware not allowed there until confirmed on site).",
     "safetymonitor, observingconditions: the weather bridge (weather.yaml listens on 11111). Its station source is a placeholder: no reader for the site's weather station and cloud sensor exists yet, so the bridge reports unsafe and nothing opens.",

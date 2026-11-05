@@ -17,15 +17,15 @@ from dataclasses import dataclass, field
 
 import pytest
 
-from robofast_core import DeviceOwner, SafetyConfig, SafetySupervisor, SequencerConfig, Timeline
-from robofast_core import config as enclosure_config
-from robofast_core.alpaca import alpaca_owner
-from robofast_core.alpaca_client import (
+from robofast import DeviceOwner, SafetyConfig, SafetySupervisor, SequencerConfig, Timeline
+from robofast import config as enclosure_config
+from robofast.alpaca import alpaca_owner
+from robofast.alpaca_client import (
     ActionNotImplementedException,
     InvalidOperationException,
 )
-from robofast_core.devices.aqawan_server import CLOSED, CLOSING, ERROR, OPEN, OPENING
-from robofast_core.devices.mearth_roof_port import (
+from robofast.devices.aqawan_server import CLOSED, CLOSING, ERROR, OPEN, OPENING
+from robofast.devices.mearth_roof_port import (
     CMD_CLOSE,
     CMD_OPEN,
     CMD_STOP,
@@ -40,16 +40,16 @@ from robofast_core.devices.mearth_roof_port import (
     StrobeTiming,
     decode_limits,
 )
-from robofast_core.devices.mearth_roof_server import MEarthRoofConfig, MEarthRoofServer
-from robofast_core.devices.mearth_roof_sim import MEarthSouthRoofSim
-from robofast_core.safety import ENCLOSURE_MEMBERS
-from robofast_core.sequencer_service import build
-from robofast_core.supervisor_service import build as build_supervisor
-from robofast_core.testing.checks import wait_until
-from robofast_core.testing.fakes import FakeSafetyMonitor, FakeWeather
-from robofast_core.testing.processes import ROOT
-from robofast_core.weather_bridge import build_sources, parse_config
-from robofast_core.weather_bridge import load_config as load_weather
+from robofast.devices.mearth_roof_server import MEarthRoofConfig, MEarthRoofServer
+from robofast.devices.mearth_roof_sim import MEarthSouthRoofSim
+from robofast.safety import ENCLOSURE_MEMBERS
+from robofast.sequencer_service import build
+from robofast.supervisor_service import build as build_supervisor
+from robofast.testing.checks import wait_until
+from robofast.testing.fakes import FakeSafetyMonitor, FakeWeather
+from robofast.testing.processes import ROOT
+from robofast.weather_bridge import build_sources, parse_config
+from robofast.weather_bridge import load_config as load_weather
 
 from .conftest import FAST_SAFETY
 
@@ -386,7 +386,7 @@ def test_config_validation_and_the_hardware_gate(tmp_path):
     path = tmp_path / "roof.json"
     path.write_text(json.dumps(real))
     proc = subprocess.run(
-        [sys.executable, "-m", "robofast_core.devices.mearth_roof_server", "--config", str(path)],
+        [sys.executable, "-m", "robofast.devices.mearth_roof_server", "--config", str(path)],
         cwd=ROOT,
         capture_output=True,
         text=True,

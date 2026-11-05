@@ -10,16 +10,16 @@ from datetime import UTC, datetime
 
 import pytest
 
-from robofast_core.guider.base import GuiderError
-from robofast_core.plan import CalibrationPlan, Observation, StaticPlan
-from robofast_core.sky import Site
-from robofast_core.spectra import SpectrumRecorder, barycentric, propagate
-from robofast_core.testing.checks import wait_until
+from robofast.guider.base import GuiderError
+from robofast.plan import CalibrationPlan, Observation, StaticPlan
+from robofast.sky import Site
+from robofast.spectra import SpectrumRecorder, barycentric, propagate
+from robofast.testing.checks import wait_until
 
 
 def tlimits(**kw):
     """TelescopeLimits with the test suite's generic values (no defaults in core)."""
-    from robofast_core.dispatch import TelescopeLimits
+    from robofast.dispatch import TelescopeLimits
 
     return TelescopeLimits(**{"instruments": ["imager"], "min_alt": 21.0, "max_alt": 83.0, **kw})
 
@@ -463,7 +463,7 @@ KIWISPEC = {"spectrograph": {"type": "kiwispec"}}
 
 
 def test_spectrum_configurations_validate_and_round_trip():
-    from robofast_core.request_model import RequestGroup
+    from robofast.request_model import RequestGroup
 
     g = RequestGroup.from_dict(_rv_group("rv", iodine=True, target_counts=2e6))
     c = g.requests[0].configurations[0]
@@ -484,8 +484,8 @@ def test_spectrum_configurations_validate_and_round_trip():
 
 
 async def test_dispatch_reserves_the_feed_and_only_the_leader_counts(tmp_path):
-    from robofast_core.plan_record import PlanRecord, read_record, replay
-    from robofast_core.request_model import Status
+    from robofast.plan_record import PlanRecord, read_record, replay
+    from robofast.request_model import Status
 
     from .test_dispatch import NIGHT, Clock, make
 

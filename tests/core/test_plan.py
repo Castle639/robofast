@@ -7,17 +7,17 @@ from pathlib import Path
 
 import pytest
 
-from robofast_core import supervisor_service
-from robofast_core.config import device_address, load_config
-from robofast_core.plan import (
+from robofast import supervisor_service
+from robofast.config import device_address, load_config
+from robofast.plan import (
     CalibrationPlan,
     CallablePlan,
     Observation,
     StaticPlan,
     plan_from_config,
 )
-from robofast_core.sequencer_service import build, load_plan
-from robofast_core.timeline import Timeline
+from robofast.sequencer_service import build, load_plan
+from robofast.timeline import Timeline
 
 SITES = Path(__file__).resolve().parents[2] / "sites"
 

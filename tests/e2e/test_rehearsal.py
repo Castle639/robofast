@@ -1,4 +1,4 @@
-"""The hardware rehearsal (robofast_core.testing.rehearsal; docs/demo.md) on
+"""The hardware rehearsal (robofast.testing.rehearsal; docs/demo.md) on
 fake mounts and cameras served over Alpaca on loopback *as if* they were the
 real ones: separate servers the rehearsal only knows by address, with a
 faster clock (test only). It covers the external-endpoint path, the mount
@@ -12,10 +12,10 @@ from pathlib import Path
 
 import pytest
 
-from robofast_core.testing.alpaca_server import FakeAlpacaServer
-from robofast_core.testing.fakes import FakeCamera, FakeDevice, FakeFocuser, FakeTelescope
-from robofast_core.testing.mount_guard import Endpoint
-from robofast_core.testing.rehearsal import (
+from robofast.testing.alpaca_server import FakeAlpacaServer
+from robofast.testing.fakes import FakeCamera, FakeDevice, FakeFocuser, FakeTelescope
+from robofast.testing.mount_guard import Endpoint
+from robofast.testing.rehearsal import (
     EndAction,
     RealTelescope,
     RehearsalSettings,

@@ -1,6 +1,6 @@
 # Rotator and position-angle calibration
 
-`robofast_core/rotcal.py` measures, for each telescope and port, how the
+`robofast/rotcal.py` measures, for each telescope and port, how the
 sky lies on the detector -- the image position angle (`pa`, of the
 detector's +y axis, degrees east of north) and parity (`flip`: east to the
 right with north up, a mirror image) -- against the rotator's mechanical
@@ -44,10 +44,10 @@ Three ways to get measurements:
 - **From FITS files already taken**:
 
   ```sh
-  python -m robofast_core.rotcal solve --store /var/lib/robofast/pa_calibration.json \
+  python -m robofast.rotcal solve --store /var/lib/robofast/pa_calibration.json \
       --telescope t2 --port fau --plate-scale 0.2655 --jnow --catalog /var/lib/robofast/catalog \
       /data/n20260423/*.fits
-  python -m robofast_core.rotcal show --store ... --telescope t2 --port fau
+  python -m robofast.rotcal show --store ... --telescope t2 --port fau
   ```
 
   The header's `RA`/`DEC` (degrees or sexagesimal; else `CRVAL1/2`) are

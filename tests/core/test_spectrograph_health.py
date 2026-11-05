@@ -15,10 +15,10 @@ from __future__ import annotations
 
 import asyncio
 
-from robofast_core.console.hold import OperatorHold, send_command
-from robofast_core.devices.kiwispec_client import KiwiSpecBusy
-from robofast_core.plan import Observation, StaticPlan
-from robofast_core.testing.checks import wait_until
+from robofast.console.hold import OperatorHold, send_command
+from robofast.devices.kiwispec_client import KiwiSpecBusy
+from robofast.plan import Observation, StaticPlan
+from robofast.testing.checks import wait_until
 
 from .test_rv_spectra import FakeSpectrograph, events, run_to_end, rv_rig, spectrum_target
 
@@ -108,7 +108,7 @@ async def test_the_recovery_check_brings_the_spectrograph_back(make_rig, tmp_pat
     async def idle_then(telescope, inner=plan.next_observation):
         obs = await inner(telescope)
         if obs is None and telescope == "t1" and not plan.available:
-            from robofast_core.plan import Idle
+            from robofast.plan import Idle
 
             return Idle(0.2, "waiting for the spectrograph")
         return obs

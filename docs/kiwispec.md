@@ -8,14 +8,14 @@ HTTP API, a simulator"):
 
 | robofast module | What it is |
 |---|---|
-| `robofast_core/devices/kiwispec_client.py` | async clients for both legacy services: allowlisted commands, hard timeouts, typed replies, bounded retries |
-| `robofast_core/devices/kiwispec_service.py` | the single owner: HTTP/JSON API, one job at a time, count termination and the flux-weighted midpoint, the raw-file rewrite, SI Image restarts, the hardware-safety gate, and `KiwiSpecRemote` (the abort hook for the sequencer's cleanup) |
-| `robofast_core/devices/kiwispec_flux.py` | the flux record from the FAU guide frames: the per-telescope log and the summed flux-weighted midpoint |
-| `robofast_core/devices/kiwispec_fits.py` | the verified in-place rewrite of SI Image's raw file into legal FITS |
-| `robofast_core/devices/kiwispec_aux.py` | the chiller (telemetry), and `AuxRouted`: the heater, iodine stage, backlight and pressures through robofast's own Alpaca server instead of the legacy one (`"aux"`; docs/kiwispec_aux.md) |
-| `robofast_core/devices/kiwispec_aux_server.py` | that Alpaca server: the auxiliary devices driven directly over their serial ports, by URL (docs/kiwispec_aux.md) |
-| `robofast_core/guider/flux_report.py` | each guider's report of its fiber flux to the service (`POST /flux`) |
-| `robofast_core/devices/kiwispec_sim.py` | a TCP simulator of the spectrograph PC (both protocols, legacy quirks included, SI Image's raw files), with fault injection |
+| `robofast/devices/kiwispec_client.py` | async clients for both legacy services: allowlisted commands, hard timeouts, typed replies, bounded retries |
+| `robofast/devices/kiwispec_service.py` | the single owner: HTTP/JSON API, one job at a time, count termination and the flux-weighted midpoint, the raw-file rewrite, SI Image restarts, the hardware-safety gate, and `KiwiSpecRemote` (the abort hook for the sequencer's cleanup) |
+| `robofast/devices/kiwispec_flux.py` | the flux record from the FAU guide frames: the per-telescope log and the summed flux-weighted midpoint |
+| `robofast/devices/kiwispec_fits.py` | the verified in-place rewrite of SI Image's raw file into legal FITS |
+| `robofast/devices/kiwispec_aux.py` | the chiller (telemetry), and `AuxRouted`: the heater, iodine stage, backlight and pressures through robofast's own Alpaca server instead of the legacy one (`"aux"`; docs/kiwispec_aux.md) |
+| `robofast/devices/kiwispec_aux_server.py` | that Alpaca server: the auxiliary devices driven directly over their serial ports, by URL (docs/kiwispec_aux.md) |
+| `robofast/guider/flux_report.py` | each guider's report of its fiber flux to the service (`POST /flux`) |
+| `robofast/devices/kiwispec_sim.py` | a TCP simulator of the spectrograph PC (both protocols, legacy quirks included, SI Image's raw files), with fault injection |
 | `tests/core/test_kiwispec.py`, `test_kiwispec_flux.py`, `test_guider_fiber_flux.py` | the fast-tier tests, all against the simulators on loopback |
 | `deploy/kiwispec.example.json` | an example config (loopback) |
 
@@ -328,7 +328,7 @@ for a frame -- no guider reported, or the reports cover less than
 `fau_min_coverage` (default half) of the exposure, or the meter failed --
 the frame's `flux_midpoint_*` are `null`, its `midpoint_source` is
 `geometric`, and the barycentric correction uses the middle of the
-exposure (`robofast_core/spectra.py`; the sidecar says which).
+exposure (`robofast/spectra.py`; the sidecar says which).
 
 #### Flux from the FAU guide frames
 
@@ -338,8 +338,8 @@ fiber's position on each guide camera is known (`POST /locate` on the
 guider, `docs/guider.md`). With `guide.fiber_flux` on, the guider sums the
 counts inside the fiber's footprint in every guide frame (a
 `fiber_aperture` radius around the fiber pixel, less the median of an
-annulus: `robofast_core.guider.loop.fiber_counts`), and its `flux_report`
-(`robofast_core/guider/flux_report.py`) sends them every `interval`
+annulus: `robofast.guider.loop.fiber_counts`), and its `flux_report`
+(`robofast/guider/flux_report.py`) sends them every `interval`
 seconds to this service:
 
     POST /flux  {"telescope": "T1", "frames": [[t_start, t_end, counts], ...]}
@@ -352,7 +352,7 @@ keeps each telescope's frames for `fau_max_age` (4 h); `/status`
 
 All four telescopes feed the fiber at the same time, and a spectrum's
 flux is the sum over the telescopes in its `telescopes`
-(`robofast_core/devices/kiwispec_flux.py`, `fau_flux`). Each frame's counts
+(`robofast/devices/kiwispec_flux.py`, `fau_flux`). Each frame's counts
 arrive at a constant rate over the frame; a gap between frames of at most
 `fau_max_gap` (10 s) is bridged (each frame's rate holds until halfway to
 its neighbour), a longer gap is left uncovered. Then
@@ -409,7 +409,7 @@ no midpoint.
 SI Image writes a file that is not legal FITS (the header says `SIMPLE =
 F`, and standard readers refuse it), so the raw file's header is
 rewritten. There is **one copy at rest**: the legal file replaces the raw
-one, and only after it is verified (`robofast_core/devices/kiwispec_fits.py`,
+one, and only after it is verified (`robofast/devices/kiwispec_fits.py`,
 `standardize`). With `raw_fits: {"dir": ...}` (the spectrograph PC's data
 directory as this host mounts it; the file is `<dir>/<night>/<file>`), after
 each frame's header is written the service:
@@ -532,7 +532,7 @@ switch the pump or its valves.
 The raw file is named `n<YYYYMMDD>.<object>.<NNNN>.fits`. The sequencer
 sends the night (`"night"` in `expose` and `calibrate`), from its clock, so
 the raw file, its sidecar's directory and every other night name agree
-(`robofast_core/clock.py`, `docs/rv_night.md`). Without it the service uses
+(`robofast/clock.py`, `docs/rv_night.md`). Without it the service uses
 the legacy label, `n` + the UTC date. Exposure start times come from the
 service's host clock (NTP-disciplined; `docs/deploy.md`); a simulation may
 give it a `clock` (`{"file": "clock.json"}`).
@@ -552,7 +552,7 @@ legacy practice (`minerva-control`: `control.specCalib`, `takeSlitFlat`,
 |---|---|---|---|
 | **Biases** | each calibration run (evening and morning), roof closed | `sites/minerva/calibration.example.json` `spectrograph`: `{"kind": "bias", "n": 11}`; true dark frames, stage `in` | `specCalib(nbias=11)` (taken as light frames: section 3) |
 | **Darks** | same | `{"kind": "dark", "exptime": 300, "n": 11}` | `specCalib(ndark=11, darkexptime=300)` |
-| **B stars through iodine** | at night, a scheduled request, once a night by default | `SPECTRUM` requests with `extra_params.iodine: true` and `extra_params.cadence` (`max_per_night: 1` in `pool: "bstars"`, so one B star a night whichever it is; raise it for more), `BSTAR-*` in `sites/minerva/requests.example.json`, made from the real "B stars" sheet by `robofast_core.sites.minerva.target_sheet` (`docs/minerva_sheet.md`) | a rapidly rotating B star (nearly featureless) observed with the cell in, one per night: `mkschedule` put one at the start of the night, the scheduler weighted B stars up as the night ran out ("weight for 1 Bstar per night") and down once one was observed |
+| **B stars through iodine** | at night, a scheduled request, once a night by default | `SPECTRUM` requests with `extra_params.iodine: true` and `extra_params.cadence` (`max_per_night: 1` in `pool: "bstars"`, so one B star a night whichever it is; raise it for more), `BSTAR-*` in `sites/minerva/requests.example.json`, made from the real "B stars" sheet by `robofast.sites.minerva.target_sheet` (`docs/minerva_sheet.md`) | a rapidly rotating B star (nearly featureless) observed with the cell in, one per night: `mkschedule` put one at the start of the night, the scheduler weighted B stars up as the night ran out ("weight for 1 Bstar per night") and down once one was observed |
 | **Templates** | at night, one-shot requests, good conditions | `SPECTRUM` with `extra_params.iodine: false` (the cell out), no cadence: complete once taken (`TEMPLATE-*`) | targets observed with `i2` false (`template` targets in the schedule) |
 | **Slit flats** | only if the slit-flat LED works (it doesn't: dead since 2023, JDE 2026-11-01) | `slit_flat_led: true` in the KiwiSpec config, then `{"kind": "slitflat", "exptime": 1, "n": 11}` in the calibration plan. **Off by default** | `specCalib` stopped them on 2023-06-12: "Slit flat lamp is dead, skipping slit flats" |
 | ThAr, fiber flats | never | refused: by the KiwiSpec service (not in `lamp_frames`) and by the request API (an `ARC` or `LAMP_FLAT` configuration is refused with the reason, since no MINERVA telescope lists lamps; a lamp in `extra_params` is refused everywhere) | never taken: the lamp calls were commented out, and the server's handlers do not exist |
@@ -568,7 +568,7 @@ nightly biases and darks take about 65 minutes with the 22 s readout
 ## 5. Spectra in the sequencer
 
 KiwiSpec is an instrument type, `kiwispec`
-(`robofast_core/devices/kiwispec_instrument.py`, registered by the devices
+(`robofast/devices/kiwispec_instrument.py`, registered by the devices
 package's built-in plug-in; docs/plugins.md): it takes `SPECTRUM` requests
 with its own `extra_params` `iodine` and `target_counts`, its calibration
 frames are the service's, and an enclosure config's

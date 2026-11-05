@@ -2,7 +2,7 @@
 
 Fast tier: the simulator and the server run in this process (on their own
 threads) and are driven through robofast's own Alpaca client and
-:class:`~robofast_core.owner.DeviceOwner`, then by the safety supervisor and
+:class:`~robofast.owner.DeviceOwner`, then by the safety supervisor and
 the sequencer on the FLWO 60-inch site config. Nothing here leaves loopback.
 """
 
@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 import httpx
 import pytest
 
-from robofast_core import (
+from robofast import (
     DeviceOwner,
     Observation,
     SafetyConfig,
@@ -28,8 +28,8 @@ from robofast_core import (
     SequencerConfig,
     Timeline,
 )
-from robofast_core.alpaca import alpaca_owner
-from robofast_core.alpaca_client import (
+from robofast.alpaca import alpaca_owner
+from robofast.alpaca_client import (
     ActionNotImplementedException,
     AlpacaDevice,
     InvalidOperationException,
@@ -38,9 +38,9 @@ from robofast_core.alpaca_client import (
     NotImplementedException,
     ParkedException,
 )
-from robofast_core.config import device_address, telescopes
-from robofast_core.devices.tcsgo_client import HardwareNotAllowed
-from robofast_core.devices.tcsgo_server import (
+from robofast.config import device_address, telescopes
+from robofast.devices.tcsgo_client import HardwareNotAllowed
+from robofast.devices.tcsgo_server import (
     CLOSED,
     CLOSING,
     OPEN,
@@ -49,18 +49,18 @@ from robofast_core.devices.tcsgo_server import (
     TCSGOServer,
     to_j2000,
 )
-from robofast_core.devices.tcsgo_sim import SIM_SERVER_SITE, TCSGOSim
-from robofast_core.safety import ENCLOSURE_MEMBERS
-from robofast_core.sequencer import TelescopeUnit
-from robofast_core.testing.checks import wait_until
-from robofast_core.testing.fakes import (
+from robofast.devices.tcsgo_sim import SIM_SERVER_SITE, TCSGOSim
+from robofast.safety import ENCLOSURE_MEMBERS
+from robofast.sequencer import TelescopeUnit
+from robofast.testing.checks import wait_until
+from robofast.testing.fakes import (
     FakeCamera,
     FakeDome,
     FakeObservingConditions,
     FakeSafetyMonitor,
     FakeWeather,
 )
-from robofast_core.testing.processes import ROOT
+from robofast.testing.processes import ROOT
 
 from .conftest import FAST_SAFETY, FAST_SEQ
 
@@ -396,7 +396,7 @@ def test_server_refuses_a_non_loopback_tcs(tmp_path):
         json.dumps({"name": "t", **SIM_SERVER_SITE, "tcs": {"host": NOT_LOOPBACK, "port": 5003}})
     )
     proc = subprocess.run(
-        [sys.executable, "-m", "robofast_core.devices.tcsgo_server", "--config", str(path)],
+        [sys.executable, "-m", "robofast.devices.tcsgo_server", "--config", str(path)],
         cwd=ROOT,
         env={**os.environ, "PYTHONPATH": str(ROOT)},
         capture_output=True,

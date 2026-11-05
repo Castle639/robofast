@@ -10,15 +10,15 @@ from pathlib import Path
 
 import pytest
 
-from robofast_core import sky
-from robofast_core.dispatch import (
+from robofast import sky
+from robofast.dispatch import (
     DispatchConfig,
     DispatchScheduler,
     TelescopeLimits,
     dispatch_from_config,
 )
-from robofast_core.plan import Idle, Observation, plan_from_config
-from robofast_core.request_model import RequestGroup, Status, load_request_groups
+from robofast.plan import Idle, Observation, plan_from_config
+from robofast.request_model import RequestGroup, Status, load_request_groups
 
 
 def tlimits(**kw):
@@ -487,7 +487,7 @@ GUIDING = {
 
 
 async def test_guide_auto_follows_the_recommendation(tmp_path):
-    from robofast_core.plan_record import PlanRecord, read_record
+    from robofast.plan_record import PlanRecord, read_record
 
     def auto(gid, mag):
         g = group(gid, ha=-1)
@@ -551,7 +551,7 @@ def test_an_exception_excludes_only_that_target(monkeypatch, caplog):
         return real(self, limits, cand, *args)
 
     monkeypatch.setattr(DispatchScheduler, "_sky_checks", boom)
-    with caplog.at_level(logging.ERROR, logger="robofast_core.dispatch"):
+    with caplog.at_level(logging.ERROR, logger="robofast.dispatch"):
         c = by_id(d)
     assert not c["bad-r"].ok and "ephemeris exploded" in c["bad-r"].reasons[0]
     assert c["good-r"].ok and c["also-good-r"].ok
@@ -929,7 +929,7 @@ def test_a_plug_ins_importer_in_the_plan_entry(tmp_path):
     )
     entry = {
         "site": {"latitude": 31.68, "longitude": -110.88},
-        "plugins": ["robofast_core.sites.minerva"],
+        "plugins": ["robofast.sites.minerva"],
         "imports": [{"type": "minerva.legacy_csv", "path": "targets.csv"}],
         "telescopes": {"t1": {"instruments": ["imager"], "min_alt": 21, "max_alt": 83}},
     }
@@ -956,9 +956,9 @@ def test_requests_inline():
 
 async def test_sequencer_service_builds_a_dispatch_plan(tmp_path):
     """The service wires the plan's preempt callback to the sequencer."""
-    from robofast_core.config import load_config
-    from robofast_core.sequencer_service import build, load_plan
-    from robofast_core.timeline import Timeline
+    from robofast.config import load_config
+    from robofast.sequencer_service import build, load_plan
+    from robofast.timeline import Timeline
 
     _example(tmp_path)
     (tmp_path / "dispatch.json").write_text(

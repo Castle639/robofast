@@ -1,7 +1,7 @@
 {
   "_note": [
     "Calibration frames for the evening and morning runs of deploy/robofast-sequencer@.service:",
-    "  python -m robofast_core.sequencer_service --config aqawan1.json --plan calibration.example.json",
+    "  python -m robofast.sequencer_service --config aqawan1.json --plan calibration.example.json",
     "Every frame is dark (light false), so the sequencer never requests a lease: the enclosure stays",
     "closed and the telescopes parked (docs/design.md 3.4). The process exits when they are done.",
     "spectrograph: KiwiSpec calibrations through the KiwiSpec service (the enclosure config's spectrograph",

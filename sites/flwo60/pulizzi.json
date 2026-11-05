@@ -1,7 +1,7 @@
 {
   "_note": [
     "The TRES calibration lamps on the FLWO 60-inch: Alpaca switch/0 over a Pulizzi IPC power controller (docs/pulizzi.md).",
-    "  python -m robofast_core.devices.pulizzi_server --config sites/flwo60/pulizzi.json --simulate",
+    "  python -m robofast.devices.pulizzi_server --config sites/flwo60/pulizzi.json --simulate",
     "Hardware is NOT allowed: allow_hardware stays false until every item under 'Confirm on the mountain' in docs/pulizzi.md is checked.",
     "Then: allow_hardware true here AND --hardware on the command line, on the computer the unit's serial cable is plugged into.",
     "port.device is a placeholder for that computer's serial device.",

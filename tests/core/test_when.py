@@ -1,4 +1,4 @@
-"""``python -m robofast_core.when``: wait for a Sun altitude (no real waiting)."""
+"""``python -m robofast.when``: wait for a Sun altitude (no real waiting)."""
 
 from __future__ import annotations
 
@@ -8,9 +8,9 @@ from pathlib import Path
 
 import pytest
 
-from robofast_core.config import load_config
-from robofast_core.sky import Site
-from robofast_core.when import main, next_time, site_from_config, sun_altitudes, wait_for_sun
+from robofast.config import load_config
+from robofast.sky import Site
+from robofast.when import main, next_time, site_from_config, sun_altitudes, wait_for_sun
 
 SITES = Path(__file__).resolve().parents[2] / "sites"
 MINERVA = Site(31.680407, -110.878977, 2316.0)

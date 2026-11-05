@@ -1,4 +1,4 @@
-"""Config-defined sequences (robofast_core/sequences.py, docs/sequences.md):
+"""Config-defined sequences (robofast/sequences.py, docs/sequences.md):
 the checks when a config is loaded, and full TRES calibration sequences on
 the simulators -- the TRES front end's server (calibration stage), the lamp
 server on its simulated Pulizzi, and the rig's camera -- including the
@@ -12,17 +12,17 @@ import json
 
 import pytest
 
-from robofast_core.alpaca import alpaca_owner
-from robofast_core.config import load_config
-from robofast_core.devices.pulizzi_server import PulizziServer
-from robofast_core.devices.tres_frontend_server import TRESFrontEndConfig, TRESFrontEndServer
-from robofast_core.lamps import LampSetup
-from robofast_core.plan import CalibrationPlan, Observation, StaticPlan, plan_from_config
-from robofast_core.request_model import NO_LAMPS
-from robofast_core.sequencer_service import check_plan_sequences
-from robofast_core.sequences import SEQUENCE_STEPS, StepType, sequences_from_config
-from robofast_core.testing.checks import wait_until
-from robofast_core.testing.processes import ROOT
+from robofast.alpaca import alpaca_owner
+from robofast.config import load_config
+from robofast.devices.pulizzi_server import PulizziServer
+from robofast.devices.tres_frontend_server import TRESFrontEndConfig, TRESFrontEndServer
+from robofast.lamps import LampSetup
+from robofast.plan import CalibrationPlan, Observation, StaticPlan, plan_from_config
+from robofast.request_model import NO_LAMPS
+from robofast.sequencer_service import check_plan_sequences
+from robofast.sequences import SEQUENCE_STEPS, StepType, sequences_from_config
+from robofast.testing.checks import wait_until
+from robofast.testing.processes import ROOT
 from tests.core.test_pulizzi import LAMPS, lamp_config, switching
 from tests.core.test_request_api import make_api  # noqa: F401 (fixture)
 
@@ -555,7 +555,7 @@ def test_wait_after_pauses_after_a_generic_set_and_is_dropped_when_null():
 
 
 def test_a_plug_in_adds_a_template():
-    from robofast_core.sequences import REQUIRED, SEQUENCE_TEMPLATES, SequenceTemplate
+    from robofast.sequences import REQUIRED, SEQUENCE_TEMPLATES, SequenceTemplate
 
     t = SequenceTemplate("waits", {"s": REQUIRED}, {"steps": [{"wait": "$s"}, {"wait": "$s"}]})
     SEQUENCE_TEMPLATES.register("waits", t)
@@ -580,8 +580,8 @@ def test_rebuild_sets_parameters_and_checks_again():
 
 
 def test_which_sequences_a_request_may_name():
-    from robofast_core.dispatch import TelescopeLimits
-    from robofast_core.sequences import check_request_sequences, requestable
+    from robofast.dispatch import TelescopeLimits
+    from robofast.sequences import check_request_sequences, requestable
 
     seqs = sequences_from_config(
         config(
@@ -612,7 +612,7 @@ def test_which_sequences_a_request_may_name():
 def test_the_shipped_flwo60_sequences_are_the_generic_sets_and_requestable(tmp_path):
     import shutil
 
-    from robofast_core.sequences import check_request_sequences
+    from robofast.sequences import check_request_sequences
 
     cfg = load_config(ROOT / "sites/flwo60/flwo60.json")
     seqs = sequences_from_config(cfg)
@@ -644,7 +644,7 @@ def seq_group(gid="arcs", sequence="set", ctype="ARC", exptime=0.1, count=2, **i
 
 
 def test_a_lamp_request_may_name_a_sequence_instead_of_a_lamp():
-    from robofast_core.request_model import RequestGroup
+    from robofast.request_model import RequestGroup
 
     g = RequestGroup.from_dict(seq_group())
     (c,) = g.configurations()
@@ -661,7 +661,7 @@ def test_a_lamp_request_may_name_a_sequence_instead_of_a_lamp():
 
 
 async def test_dispatch_runs_a_named_sequence_with_the_requests_exptime_and_count():
-    from robofast_core.dispatch import TelescopeLimits
+    from robofast.dispatch import TelescopeLimits
     from tests.core.test_dispatch import NIGHT, Clock, make
 
     seqs = sequences_from_config(

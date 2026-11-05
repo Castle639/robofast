@@ -1,14 +1,14 @@
 {
   "_note": [
-    "A dispatch-scheduler plan entry for the FLWO 60-inch (robofast_core/dispatch.py; docs/design.md 3.7):",
-    "  python -m robofast_core.sequencer_service --config sites/flwo60/flwo60.json --plan sites/flwo60/dispatch.example.json",
+    "A dispatch-scheduler plan entry for the FLWO 60-inch (robofast/dispatch.py; docs/design.md 3.7):",
+    "  python -m robofast.sequencer_service --config sites/flwo60/flwo60.json --plan sites/flwo60/dispatch.example.json",
     "Placeholders: the altitude limit follows tcsgo.json (min_alt 20); instruments names the TRES CCD 'tres'.",
     "calstage: the TRES front end's named positions (tres_frontend.json); lamps: the lamp outlets of the",
     "Pulizzi switch (pulizzi.json). Listing lamps is what allows ARC and LAMP_FLAT requests on this",
     "telescope (docs/pulizzi.md); MINERVA lists none, so they are refused there.",
     "sequences: the site sequences of flwo60.json an ARC or LAMP_FLAT request may name instead of a lamp",
     "(extra_params.sequence; docs/sequences.md): run with the request's exposure time and count.",
-    "instruments: 'tres' is a camera_spectrograph (robofast_core/instruments.py): read out by the telescope's",
+    "instruments: 'tres' is a camera_spectrograph (robofast/instruments.py): read out by the telescope's",
     "camera, with EXPOSE, DARK, BIAS and the lamp calibrations; /instruments lists it as a spectrograph.",
     "state is relative to this file here; use an absolute path in production."
   ],
@@ -21,7 +21,7 @@
       "type": "camera_spectrograph",
       "guiding": {
         "_note": [
-          "When to offset guide (robofast_core/guider/recommend.py; docs/offset_guiding.md): guide 'auto'.",
+          "When to offset guide (robofast/guider/recommend.py; docs/offset_guiding.md): guide 'auto'.",
           "1.5 m Tillinghast; TRES's 2.3 arcsec fiber in a reflective plate seen by the tres-guider Andor Zyla.",
           "plate_scale 0.1646 arcsec/px (0.02533 arcsec/um, measured 2021-10-25); the Andor Zyla 4.2P",
           "guide camera runs 12-bit high-well mode, 0.98 s exposures at a 1 s cadence. The sky fiber is at",

@@ -2,7 +2,7 @@
 
 robofast's request API speaks the LCO Observatory Control System (OCS)
 request language and endpoints (`docs/request_language.md`,
-`robofast_core/request_api.py`), so a [TOM Toolkit](https://tom-toolkit.readthedocs.io/)
+`robofast/request_api.py`), so a [TOM Toolkit](https://tom-toolkit.readthedocs.io/)
 needs no robofast-specific facility module: its generic
 `tom_observations.facilities.ocs.OCSFacility` talks to robofast with
 settings alone. `tests/core/test_tom_ocs.py` drives the API with request
@@ -14,7 +14,7 @@ bodies and calls built exactly as that facility builds them.
    Rapid-Response and Time-Critical requests):
 
    ```
-   python -m robofast_core.request_api tokens add --config /etc/robofast/request_api.json \
+   python -m robofast.request_api tokens add --config /etc/robofast/request_api.json \
        --name my-tom --scope read --scope submit --scope too
    ```
 

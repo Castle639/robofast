@@ -1,4 +1,4 @@
-"""Enclosure operating modes (robofast_core/modes.py, docs/modes.md): the
+"""Enclosure operating modes (robofast/modes.py, docs/modes.md): the
 definitions and their checks, the state file, and the mode honored by the
 supervisor (leases, duty, the watched enclosure), the sequencer (manual and
 shadow), and switched over the supervisor's API."""
@@ -11,19 +11,19 @@ import json
 import httpx
 import pytest
 
-from robofast_core import Observation, SafetyConfig
-from robofast_core.config import load_config
-from robofast_core.modes import (
+from robofast import Observation, SafetyConfig
+from robofast.config import load_config
+from robofast.modes import (
     BUILTIN_MODES,
     ModeGate,
     ModeStore,
     lease_survives,
     modes_from_config,
 )
-from robofast_core.plan import Idle, StaticPlan
-from robofast_core.registry import Telemetry, ValueRegistry
-from robofast_core.testing.checks import wait_until
-from robofast_core.testing.processes import ROOT
+from robofast.plan import Idle, StaticPlan
+from robofast.registry import Telemetry, ValueRegistry
+from robofast.testing.checks import wait_until
+from robofast.testing.processes import ROOT
 
 # -- the definitions -----------------------------------------------------------------
 
@@ -482,8 +482,8 @@ async def test_the_mode_goes_into_the_fits_headers():
 
 
 def test_the_dispatch_scheduler_records_the_mode(tmp_path):
-    from robofast_core.dispatch import dispatch_from_config
-    from robofast_core.plan_record import PlanRecord, read_record
+    from robofast.dispatch import dispatch_from_config
+    from robofast.plan_record import PlanRecord, read_record
 
     rec = PlanRecord(tmp_path, name="e")
     entry = json.loads((ROOT / "sites/minerva/dispatch.example.json").read_text())
@@ -506,7 +506,7 @@ def test_the_dispatch_scheduler_records_the_mode(tmp_path):
 
 @pytest.mark.parametrize("lease_path", ["remote"])
 async def test_the_command_line(make_rig, tmp_path, capsys):
-    from robofast_core.modes import main
+    from robofast.modes import main
 
     rig = make_rig(modes={"mode": "attended"})
     await rig.start(sequencer=False)
@@ -523,9 +523,9 @@ async def test_the_command_line(make_rig, tmp_path, capsys):
 
 
 def test_the_supervisor_service_keeps_the_mode_in_the_data_directory(monkeypatch, tmp_path):
-    from robofast_core import supervisor_service
-    from robofast_core.modes import mode_path
-    from robofast_core.timeline import Timeline
+    from robofast import supervisor_service
+    from robofast.modes import mode_path
+    from robofast.timeline import Timeline
 
     monkeypatch.setenv("ROBOFAST_DATA_DIR", str(tmp_path))
     config = load_config(ROOT / "sites/flwo60/flwo60.json")

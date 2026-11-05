@@ -14,7 +14,7 @@ from datetime import timedelta
 
 import pytest
 
-from robofast_core.plan import Observation
+from robofast.plan import Observation
 from tests.core.test_dispatch import LST, NIGHT
 from tests.core.test_request_api import api, make_api  # noqa: F401 (fixtures)
 

@@ -17,29 +17,29 @@ import time
 
 import pytest
 
-from robofast_core.alpaca import alpaca_owner
-from robofast_core.alpaca_client import (
+from robofast.alpaca import alpaca_owner
+from robofast.alpaca_client import (
     AlpacaDevice,
     DriverException,
     InvalidOperationException,
     InvalidValueException,
     NotConnectedException,
 )
-from robofast_core.config import device_address, telescopes
-from robofast_core.devices.calstage_redis import LegacyKeys, LegacyRedisConfig
-from robofast_core.devices.mearth_roof_port import HardwareNotAllowed
-from robofast_core.devices.pi_gcs import MOVING, GCSAxis, GCSError, GCSTimeout
-from robofast_core.devices.tres_frontend_server import TRESFrontEndConfig, TRESFrontEndServer
-from robofast_core.devices.tres_frontend_sim import C663Sim
-from robofast_core.dispatch import TelescopeLimits
-from robofast_core.plan import StaticPlan
-from robofast_core.request_model import InstrumentConfig
-from robofast_core.resp import RedisError
-from robofast_core.sequencer_service import build_units
-from robofast_core.testing.checks import wait_until
-from robofast_core.testing.processes import ROOT
-from robofast_core.testing.redis_feed import RedisFeed, RedisFeedState
-from robofast_core.timeline import Timeline
+from robofast.config import device_address, telescopes
+from robofast.devices.calstage_redis import LegacyKeys, LegacyRedisConfig
+from robofast.devices.mearth_roof_port import HardwareNotAllowed
+from robofast.devices.pi_gcs import MOVING, GCSAxis, GCSError, GCSTimeout
+from robofast.devices.tres_frontend_server import TRESFrontEndConfig, TRESFrontEndServer
+from robofast.devices.tres_frontend_sim import C663Sim
+from robofast.dispatch import TelescopeLimits
+from robofast.plan import StaticPlan
+from robofast.request_model import InstrumentConfig
+from robofast.resp import RedisError
+from robofast.sequencer_service import build_units
+from robofast.testing.checks import wait_until
+from robofast.testing.processes import ROOT
+from robofast.testing.redis_feed import RedisFeed, RedisFeedState
+from robofast.timeline import Timeline
 
 SITE = ROOT / "sites" / "flwo60"
 POSITIONS = {"out": 0.0, "sky": 10.0, "science": 20.0, "in": None}
@@ -330,7 +330,7 @@ def test_shipped_site_configs():
 
 def test_the_command_line_refuses_hardware_and_runs_the_simulator():
     cfg = str(SITE / "tres_frontend.json")
-    mod = "robofast_core.devices.tres_frontend_server"
+    mod = "robofast.devices.tres_frontend_server"
     p = subprocess.run(
         [sys.executable, "-m", mod, "--config", cfg],
         cwd=ROOT,

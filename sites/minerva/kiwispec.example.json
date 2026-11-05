@@ -1,7 +1,7 @@
 {
   "_note": [
     "The KiwiSpec service (docs/kiwispec.md), on the control computer:",
-    "  python -m robofast_core.devices.kiwispec_service --config sites/minerva/kiwispec.example.json",
+    "  python -m robofast.devices.kiwispec_service --config sites/minerva/kiwispec.example.json",
     "Addresses are 127.0.0.1 placeholders; ports are the legacy servers' (spectrograph.ini SERVER_PORT, CAMERA_PORT).",
     "allow_hardware false: see docs/kiwispec.md before turning it on.",
     "stage_positions: null -- the iodine stage is moved BY NAME and the live spectrograph_server.ini on the",

@@ -1,7 +1,7 @@
 """Fixtures for the OmniSim integration tests (marked ``alpaca_sim``).
 
 OmniSim (ASCOM Alpaca Simulators) provides the telescope, camera and dome;
-our own :mod:`robofast_core.weather_server` provides the SafetyMonitor and
+our own :mod:`robofast.weather_server` provides the SafetyMonitor and
 ObservingConditions, because OmniSim's SafetyMonitor cannot be made unsafe
 through the Alpaca API.
 
@@ -39,7 +39,7 @@ from pathlib import Path
 import httpx
 import pytest
 
-from robofast_core import (
+from robofast import (
     Observation,
     SafetyConfig,
     SafetySupervisor,
@@ -47,12 +47,12 @@ from robofast_core import (
     SequencerConfig,
     Timeline,
 )
-from robofast_core.alpaca import alpaca_owner
-from robofast_core.lease_client import RemoteSupervisor
-from robofast_core.safety import ENCLOSURE_MEMBERS
-from robofast_core.supervisor_service import SupervisorServer
-from robofast_core.testing.faultproxy import FaultProxy
-from robofast_core.weather_server import WeatherServer, WeatherState
+from robofast.alpaca import alpaca_owner
+from robofast.lease_client import RemoteSupervisor
+from robofast.safety import ENCLOSURE_MEMBERS
+from robofast.supervisor_service import SupervisorServer
+from robofast.testing.faultproxy import FaultProxy
+from robofast.weather_server import WeatherServer, WeatherState
 
 pytestmark = pytest.mark.alpaca_sim
 

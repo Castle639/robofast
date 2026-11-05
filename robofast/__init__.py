@@ -1,35 +1,79 @@
-import logging
-from pathlib import Path
-import time
+"""robofast: a de-risking prototype of robofast's control core.
 
-from robofast.daily_dir_file_handler import DailyDirTimedRotatingFileHandler
+This package is deliberately separate from the legacy ``robofast`` package
+(which configures file logging at import time and depends on Windows-only
+modules). Nothing here imports ``robofast``.
 
-log_root = Path(__file__).resolve().parent / "logs"
-logger = logging.getLogger()
+The pieces:
 
-# Create daily-directory rotating handler
-handler = DailyDirTimedRotatingFileHandler(
-    base_dir=log_root,
-    when="midnight",
-    interval=1,
-    utc=True,
-    backupCount=30
+* :mod:`robofast.owner` -- one :class:`DeviceOwner` per physical device.
+  Every command to a device goes through its owner, which serializes them
+  (asyncio, no threads), bounds each with a timeout, records it in the
+  :class:`Timeline`, and refuses commands from revoked :class:`Grant` objects
+  immediately before they are sent.
+* :mod:`robofast.alpaca_client` -- a small asyncio ASCOM Alpaca client
+  (one HTTP client per device, per-call timeouts, no process-wide lock);
+  :mod:`robofast.alpaca` builds owners around it.
+* :mod:`robofast.safety` -- the :class:`SafetySupervisor`, the only
+  component allowed to open or close the enclosure. It fails closed: unsafe,
+  stale, missing or erroring weather all mean "close". It hands out expiring
+  :class:`OpenLease` objects; it reopens only after the weather has been
+  continuously safe for a hold time.
+* :mod:`robofast.sequencer` -- one asyncio :class:`Sequencer` per
+  enclosure. Its observing task is cancelled when the lease is revoked, and
+  cleanup aborts the exposure and parks the telescope.
+* :mod:`robofast.imaging` -- the sequencer's frame pipeline: telemetry
+  into the value registry (:mod:`robofast.registry`), the image
+  download (ImageBytes, :mod:`robofast.imagebytes`), and a bounded
+  background writer of FITS files (:mod:`robofast.fits_writer`;
+  ``docs/data.md``).
+* :mod:`robofast.dispatch` -- the dispatch scheduler, a plan provider
+  that picks the best observable request for a telescope now, and takes
+  targets of opportunity (preempting one telescope through the sequencer);
+  requests are modelled in :mod:`robofast.request_model`, positions
+  come from :mod:`robofast.sky` (astropy); every decision goes to the
+  nightly plan record (:mod:`robofast.plan_record`, replayable).
+* :mod:`robofast.when` -- waits for a Sun altitude, so the night's
+  sequencer starts at dusk (``deploy/robofast-sequencer@.service``).
+* :mod:`robofast.supervisor_service` -- the supervisor as its own
+  process with a small HTTP/JSON lease API (its docstring says how to run
+  it); :mod:`robofast.lease_client` is the sequencer's side of it.
+* :mod:`robofast.heartbeat_watchdog` -- the enclosure hardware
+  heartbeat contract, and a watchdog that adds one to a simulator's dome.
+* :mod:`robofast.weather_server` -- a small Alpaca SafetyMonitor +
+  ObservingConditions server, with fault injection for tests.
+* :mod:`robofast.weather_bridge` -- the site weather bridge: polls the
+  site's weather sources, a Redis server and web pages
+  (:mod:`robofast.weather_sources`, site adapters in
+  :mod:`robofast.sites`), judges them
+  (:mod:`robofast.weather_eval`) and publishes to the weather server;
+  also a shadow mode that only logs (``docs/weather_bridge.md``).
+"""
+
+from robofast.owner import (
+    DeviceError,
+    DeviceOwner,
+    DeviceTimeout,
+    Grant,
+    GrantRevoked,
+    NotAuthorized,
 )
+from robofast.safety import OpenLease, SafetyConfig, SafetySupervisor
+from robofast.sequencer import Observation, Sequencer, SequencerConfig
+from robofast.timeline import Timeline
 
-fmt = "{asctime} [{filename}:{lineno} - {funcName}()] {levelname}: {threadName}: {message}"
-
-datefmt = "%Y-%m-%dT%H:%M:%S"
-formatter = logging.Formatter(fmt,style="{",datefmt=datefmt)
-formatter.converter = time.gmtime
-
-handler.setFormatter(formatter)
-
-console = logging.StreamHandler()
-console.setFormatter(formatter)
-console.setLevel(logging.INFO)
-
-# add a separate logger for the terminal (don't display debug-level messages)
-logger.setLevel(logging.DEBUG)
-logger.addHandler(handler)
-logger.addHandler(console)
-
+__all__ = [
+    "DeviceError",
+    "DeviceOwner",
+    "DeviceTimeout",
+    "Grant",
+    "GrantRevoked",
+    "NotAuthorized",
+    "Observation",
+    "OpenLease",
+    "SafetyConfig",
+    "SafetySupervisor",
+    "Sequencer",
+    "SequencerConfig",
+    "Timeline",
+]

@@ -1,4 +1,4 @@
-"""The test sky (robofast_core/testing/sky_fixture.py): the synthetic sky in
+"""The test sky (robofast/testing/sky_fixture.py): the synthetic sky in
 the repository is what its generator writes, and the fixture .npz format
 round-trips."""
 
@@ -8,8 +8,8 @@ import json
 
 import numpy as np
 
-from robofast_core import catalog as cat
-from robofast_core.testing import sky_fixture
+from robofast import catalog as cat
+from robofast.testing import sky_fixture
 from tests.core.skydata import SYNTHETIC
 
 

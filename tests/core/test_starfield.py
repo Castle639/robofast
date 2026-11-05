@@ -1,11 +1,11 @@
-"""The shared synthetic star-image renderer (robofast_core/testing/starfield.py)."""
+"""The shared synthetic star-image renderer (robofast/testing/starfield.py)."""
 
 from __future__ import annotations
 
 import numpy as np
 import pytest
 
-from robofast_core.testing.starfield import (
+from robofast.testing.starfield import (
     Detector,
     SimOptics,
     Star,

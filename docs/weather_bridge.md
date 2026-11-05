@@ -22,24 +22,24 @@ site pages --HTTP--> (fetch,     (staleness,    (weather_server.py)
 
 | Module | Role |
 |---|---|
-| `robofast_core/weather_sources.py` | `WeatherSource`, `Reading` (values + the data's own time, per field where the data has it), HTTP fetch with basic auth from a credentials file, the Redis source, the Sun as a source, units |
-| `robofast_core/resp.py` | a minimal read-only Redis client (SELECT/MGET only) |
-| `robofast_core/sites/minerva.py` | MINERVA adapter: the ridge station page, the cloud-sensor page, the (disabled) MEarth page; a plug-in (docs/plugins.md), loaded because `sites/minerva/weather.yaml` lists it in `plugins` |
-| `robofast_core/weather_eval.py` | limits (static and dynamic), hysteresis, per-source and per-field staleness, rain (enforced or shadow), required/advisory combiner |
-| `robofast_core/sun.py` | the Sun's altitude, from astropy (offline-safe) |
-| `robofast_core/weather_bridge.py` | config, poll/evaluate/publish loop, command line (shadow mode) |
-| `robofast_core/weather_server.py` | the Alpaca server it publishes to |
-| `robofast_core/testing/redis_feed.py`, `weather_feed.py` | fake Redis and SAO-page servers for tests |
+| `robofast/weather_sources.py` | `WeatherSource`, `Reading` (values + the data's own time, per field where the data has it), HTTP fetch with basic auth from a credentials file, the Redis source, the Sun as a source, units |
+| `robofast/resp.py` | a minimal read-only Redis client (SELECT/MGET only) |
+| `robofast/sites/minerva.py` | MINERVA adapter: the ridge station page, the cloud-sensor page, the (disabled) MEarth page; a plug-in (docs/plugins.md), loaded because `sites/minerva/weather.yaml` lists it in `plugins` |
+| `robofast/weather_eval.py` | limits (static and dynamic), hysteresis, per-source and per-field staleness, rain (enforced or shadow), required/advisory combiner |
+| `robofast/sun.py` | the Sun's altitude, from astropy (offline-safe) |
+| `robofast/weather_bridge.py` | config, poll/evaluate/publish loop, command line (shadow mode) |
+| `robofast/weather_server.py` | the Alpaca server it publishes to |
+| `robofast/testing/redis_feed.py`, `weather_feed.py` | fake Redis and SAO-page servers for tests |
 | `sites/minerva/weather.yaml` | MINERVA's config, each limit commented with its legacy origin |
 
 ## Running
 
 ```
 # Shadow mode: fetch, evaluate, log one line per poll; serve nothing.
-python -m robofast_core.weather_bridge --config sites/minerva/weather.yaml --shadow
+python -m robofast.weather_bridge --config sites/minerva/weather.yaml --shadow
 
 # Serve Alpaca on the config's `listen` address.
-python -m robofast_core.weather_bridge --config sites/minerva/weather.yaml
+python -m robofast.weather_bridge --config sites/minerva/weather.yaml
 ```
 
 `--shadow` is the bridge's own flag: it runs the weather bridge alone, with
@@ -83,7 +83,7 @@ pip install --upgrade "pip>=25.1" && pip install --group core
 # credentials in the config.
 install -m 600 /dev/null ~/.config/robofast/sao-weather.credentials   # then edit it
 
-python -m robofast_core.weather_bridge --config sites/minerva/weather.yaml \
+python -m robofast.weather_bridge --config sites/minerva/weather.yaml \
     --shadow --json >> weather-shadow.jsonl
 ```
 
@@ -171,7 +171,7 @@ it.
 ### Redis sources
 
 `type: redis`, `url: redis://host[:port]/db`. The client
-(`robofast_core/resp.py`, about 100 lines of RESP2 over asyncio streams)
+(`robofast/resp.py`, about 100 lines of RESP2 over asyncio streams)
 sends only `SELECT` and `MGET`, one connection per poll, and refuses any
 other command by construction -- the bridge cannot write to the site's
 Redis. A dependency (redis-py) would have brought a connection pool, retry
@@ -188,7 +188,7 @@ names as its `time`), `time_format` (default `%Y-%m-%d %H:%M:%S`) and
 
 ## The Sun
 
-`robofast_core/sun.py` uses astropy (`get_body("sun")` -> `AltAz` at the
+`robofast/sun.py` uses astropy (`get_body("sun")` -> `AltAz` at the
 site's `EarthLocation`), so the bridge's number agrees exactly with the same
 calculation made elsewhere with the same parameters (JDE 2026-10-31). The
 Sun source reports `altitude` (apparent, refracted) and
@@ -209,7 +209,7 @@ PyEphem's numbers astropy agrees with PyEphem 4.2.1 within 0.002 deg from
 apart at +3.3 deg, 0.15 at +1, and below the horizon astropy keeps adding
 ~0.14-0.17 deg where PyEphem stops refracting).
 
-**Offline.** Importing `robofast_core.sun` sets
+**Offline.** Importing `robofast.sun` sets
 `astropy.utils.iers.conf.auto_download = False` and `auto_max_age = None`:
 astropy never downloads IERS or leap-second tables (a download could stall
 or fail an evaluation) and accepts the bundled predictions however old

@@ -18,16 +18,16 @@ from typing import Any, ClassVar
 import httpx
 import pytest
 
-from robofast_core.console.aggregate import Aggregator, ConsoleEnclosure, alarm_id
-from robofast_core.notifier.core import Notification, Notifier, Settings, SinkWorker, next_daily
-from robofast_core.notifier.service import build, main, send_test
-from robofast_core.notifier.sinks import (
+from robofast.console.aggregate import Aggregator, ConsoleEnclosure, alarm_id
+from robofast.notifier.core import Notification, Notifier, Settings, SinkWorker, next_daily
+from robofast.notifier.service import build, main, send_test
+from robofast.notifier.sinks import (
     CommandSink,
     EmailSink,
     WebhookSink,
     check_secret_file,
 )
-from robofast_core.notifier.sources import AcksFile, AggregatorSource, ConsoleHealth
+from robofast.notifier.sources import AcksFile, AggregatorSource, ConsoleHealth
 
 REPO = Path(__file__).resolve().parents[2]
 #: 2026-10-30 20:00 UTC.
@@ -685,4 +685,4 @@ def test_example_config_and_unit_exist() -> None:
     text = json.dumps(cfg)
     assert "example.org" in text and "127.0.0.1" in text
     unit = (REPO / "deploy/robofast-notifier.service").read_text()
-    assert "robofast_core.notifier --config" in unit
+    assert "robofast.notifier --config" in unit

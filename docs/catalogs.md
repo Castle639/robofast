@@ -1,7 +1,7 @@
 # Catalog importers: TRES / FLWO 60-inch telshell catalogs
 
-`robofast_core/sites/flwo60/catalogs/` (site code, docs/design.md 3.10;
-the intermediate form is core's `robofast_core/catalogs/model.py`) reads the target lists of the FLWO 60-inch's
+`robofast/sites/flwo60/catalogs/` (site code, docs/design.md 3.10;
+the intermediate form is core's `robofast/catalogs/model.py`) reads the target lists of the FLWO 60-inch's
 legacy TCS software ("telshell", by T. Groner, FLWO; proper-motion handling
 by J. Irwin, 2022) into a small intermediate form, turns them into robofast
 request groups, and writes them back in the legacy format so the legacy
@@ -15,11 +15,11 @@ live TRES catalog directory. Until then, the intermediate form is what an
 imported catalog is (section 4).
 
 ```
-python -m robofast_core.sites.flwo60.catalogs import prog.mct                   # intermediate form (JSON)
-python -m robofast_core.sites.flwo60.catalogs import prog.mct --to-requests \
+python -m robofast.sites.flwo60.catalogs import prog.mct                   # intermediate form (JSON)
+python -m robofast.sites.flwo60.catalogs import prog.mct --to-requests \
     --telescope tillinghast --instrument tres                      # request groups for the 60-inch
-python -m robofast_core.sites.flwo60.catalogs check prog.mct box.off            # validate, with warnings
-python -m robofast_core.sites.flwo60.catalogs export prog.json -o prog.mct      # back to the legacy format
+python -m robofast.sites.flwo60.catalogs check prog.mct box.off            # validate, with warnings
+python -m robofast.sites.flwo60.catalogs export prog.json -o prog.mct      # back to the legacy format
 ```
 
 `--to-requests` needs `--telescope` and `--instrument` (the names in the
@@ -164,7 +164,7 @@ because robofast does not yet limit who can see a request's coordinates.
 
 ## 4. The intermediate form and the target model
 
-`robofast_core/catalogs/model.py` holds dataclasses with a JSON form
+`robofast/catalogs/model.py` holds dataclasses with a JSON form
 (`"format": "robofast-catalog/1"`). They map one to one onto the proposed
 target model:
 

@@ -2,7 +2,7 @@
 
     python scripts/conformu_adc.py --conformu PATH [--out DIR]
 
-Starts ``robofast_core.devices.adc_server --simulate`` (the in-process
+Starts ``robofast.devices.adc_server --simulate`` (the in-process
 simulator of the two prism motors, trusted as referenced, no telescope
 input) on a free loopback port, then runs ConformU's ``conformance`` and
 ``alpacaprotocol`` checks against its two Rotators (prism A, prism B) and
@@ -56,7 +56,7 @@ def main() -> None:
         )
     )
     server, hello = start(
-        ["robofast_core.devices.adc_server", "--config", str(config), "--simulate"],
+        ["robofast.devices.adc_server", "--config", str(config), "--simulate"],
         out / "server.log",
     )
     summaries = []

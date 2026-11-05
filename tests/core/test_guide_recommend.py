@@ -1,4 +1,4 @@
-"""When to offset guide (robofast_core.guider.recommend): the photon-noise
+"""When to offset guide (robofast.guider.recommend): the photon-noise
 model against the guide loop itself on simulated frames, across a
 magnitude grid, and the choice it makes."""
 
@@ -11,12 +11,12 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from robofast_core.guider import offset as og
-from robofast_core.guider import recommend as rc
-from robofast_core.guider.base import VirtualClock
-from robofast_core.guider.calibration import Calibration
-from robofast_core.guider.loop import GuideConfig, Guider
-from robofast_core.guider.sim import Fiber, SimCamera, SimTipTilt, SimWorld
+from robofast.guider import offset as og
+from robofast.guider import recommend as rc
+from robofast.guider.base import VirtualClock
+from robofast.guider.calibration import Calibration
+from robofast.guider.loop import GuideConfig, Guider
+from robofast.guider.sim import Fiber, SimCamera, SimTipTilt, SimWorld
 
 SITES = Path(__file__).resolve().parents[2] / "sites"
 FIBER = (320.0, 240.0)

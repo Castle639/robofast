@@ -8,11 +8,11 @@ import time
 import httpx
 import pytest
 
-from robofast_core import DeviceOwner, SafetyConfig, SafetySupervisor, Timeline
-from robofast_core.heartbeat_watchdog import HeartbeatWatchdog
-from robofast_core.testing.alpaca_server import FakeAlpacaServer
-from robofast_core.testing.checks import wait_until
-from robofast_core.testing.fakes import FakeDeviceError, FakeDome
+from robofast import DeviceOwner, SafetyConfig, SafetySupervisor, Timeline
+from robofast.heartbeat_watchdog import HeartbeatWatchdog
+from robofast.testing.alpaca_server import FakeAlpacaServer
+from robofast.testing.checks import wait_until
+from robofast.testing.fakes import FakeDeviceError, FakeDome
 
 HEARTBEAT = dict(heartbeat_interval=0.05, heartbeat_timeout=0.4, heartbeat_max_loop_age=0.3)
 
@@ -114,7 +114,7 @@ async def test_watchdog_closes_a_dome_without_a_heartbeat():
 
 async def test_supervisor_stops_and_closes_when_its_loops_lose_their_cancels(make_rig):
     """A cancel landing inside an httpx request can be lost (the request
-    returns normally; robofast_core.cancel). Every supervisor loop loses one
+    returns normally; robofast.cancel). Every supervisor loop loses one
     here. Stopping must still end within its bound, stop the heartbeat pings
     (they would keep the hardware from closing by itself), send the final
     close, and pass the stopper's cancellation on."""

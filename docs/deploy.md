@@ -1,6 +1,6 @@
 # Deploying robofast on a control host
 
-How to install and run `robofast_core` on a modern Linux control host:
+How to install and run `robofast` on a modern Linux control host:
 users, directories, the systemd units in `deploy/`, secrets, the firewall,
 logs, time, backups, upgrades and rollback, and checking that what runs is
 what is in the repository. Everything here is generic: host names are
@@ -96,7 +96,7 @@ Point the configs at these paths (`status_file`, `operator_control`,
 `state`, `too_dropbox`, `record`, the focus `store`, `acks`, `audit_log`,
 `data_root`, `mode_file`). A new enclosure starts in its config's `mode`
 (the shipped sites: `attended`) until an operator switches it
-(`python -m robofast_core.modes ... set`, or the console); the switch is
+(`python -m robofast.modes ... set`, or the console); the switch is
 kept in `mode_file` across restarts and upgrades. Each process writes its files atomically, through a temporary
 file next to the target, so it needs write access to the *directory*: that
 is why each writer has its own directory rather than files in
@@ -127,7 +127,7 @@ there.
 ## The systemd units
 
 `deploy/` holds one example unit per control-host service. They run
-`/opt/robofast/current/venv/bin/python -m robofast_core....` with
+`/opt/robofast/current/venv/bin/python -m robofast....` with
 `WorkingDirectory=/opt/robofast/current` (the code is run from the checkout,
 not installed) and read `/etc/robofast/`. Install them as files, not
 symlinks into a release, so a release switch never changes a unit behind
@@ -316,7 +316,7 @@ if there is one):
   monotonic clock, but the status snapshot's age, the plan record, the
   console, the notifier's escalation and the request API compare wall-clock
   times written by different processes, and the Sun-based starts
-  (`robofast_core.when`, the timer) use the wall clock. A clock that steps
+  (`robofast.when`, the timer) use the wall clock. A clock that steps
   makes services look stale or start at the wrong time.
 
 Check:
@@ -399,7 +399,7 @@ directory.) Before switching, check the new release against the live
 configs, as the service users:
 
 ```
-sudo -u robofast-notifier /opt/robofast/releases/$TAG/venv/bin/python -m robofast_core.notifier \
+sudo -u robofast-notifier /opt/robofast/releases/$TAG/venv/bin/python -m robofast.notifier \
     --config /etc/robofast/notifier.json --check
 ```
 

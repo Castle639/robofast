@@ -1,6 +1,4 @@
-# Lint for robofast_core. The legacy `robofast/` directory is excluded (see
-# [tool.ruff] in pyproject.toml); it is kept for reference, not packaged or
-# refactored.
+# Lint for robofast ([tool.ruff] in pyproject.toml).
 default_install_hook_types: [pre-commit]
 repos:
 -   repo: https://github.com/astral-sh/ruff-pre-commit
@@ -8,6 +6,6 @@ repos:
     hooks:
     -   id: ruff-check
         args: [--fix, --fixable, I]
-        files: ^(robofast_core|tests|scripts)/
+        files: ^(robofast|tests|scripts)/
     -   id: ruff-format
-        files: ^(robofast_core|tests|scripts)/
+        files: ^(robofast|tests|scripts)/

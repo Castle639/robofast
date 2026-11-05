@@ -11,12 +11,12 @@ import time
 
 import pytest
 
-from robofast_core import Observation, SafetyConfig, SafetySupervisor, Sequencer, SequencerConfig
-from robofast_core.alpaca import alpaca_owner
-from robofast_core.safety import ENCLOSURE_MEMBERS
-from robofast_core.sequencer import TelescopeUnit
-from robofast_core.testing.checks import assert_fenced_after_cancel, await_until, wait_until
-from robofast_core.timeline import Timeline
+from robofast import Observation, SafetyConfig, SafetySupervisor, Sequencer, SequencerConfig
+from robofast.alpaca import alpaca_owner
+from robofast.safety import ENCLOSURE_MEMBERS
+from robofast.sequencer import TelescopeUnit
+from robofast.testing.checks import assert_fenced_after_cancel, await_until, wait_until
+from robofast.timeline import Timeline
 
 from .conftest import BOUND, COMMAND_TIMEOUT, SIM_SAFETY, SIM_SEQ, SimRig
 

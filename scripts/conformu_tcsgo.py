@@ -3,8 +3,8 @@ the TCSGalil simulator.
 
     python scripts/conformu_tcsgo.py --conformu PATH [--out DIR] [--devices telescope,...]
 
-Starts ``robofast_core.devices.tcsgo_sim`` and
-``robofast_core.devices.tcsgo_server`` (with its TCS-controlled dome
+Starts ``robofast.devices.tcsgo_sim`` and
+``robofast.devices.tcsgo_server`` (with its TCS-controlled dome
 enabled) on free loopback ports, then runs ConformU's ``conformance`` and
 ``alpacaprotocol`` checks on each device. Exits non-zero if any check reports
 an error or an issue. Logs and results go to ``--out``; a summary is appended
@@ -25,7 +25,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(1, str(Path(__file__).resolve().parents[1]))
 from conformu_aqawan import start
 
-from robofast_core.devices.tcsgo_sim import SIM_SERVER_SITE
+from robofast.devices.tcsgo_sim import SIM_SERVER_SITE
 
 ROOT = Path(__file__).resolve().parents[1]
 SETTINGS = {
@@ -78,7 +78,7 @@ def main() -> None:
 
     sim, line = start(
         [
-            "robofast_core.devices.tcsgo_sim",
+            "robofast.devices.tcsgo_sim",
             *("--port", "0", "--slew-rate", "15", "--shutter-time", "2"),
             *("--focus-rate", "5000", "--dome-rate", "20", "--min-alt", "0"),
             *("--dec-min", "-89", "--ha-limit", "11.9"),
@@ -106,7 +106,7 @@ def main() -> None:
     summaries = []
     try:
         server, hello = start(
-            ["robofast_core.devices.tcsgo_server", "--config", str(config)], out / "server.log"
+            ["robofast.devices.tcsgo_server", "--config", str(config)], out / "server.log"
         )
         procs.append(server)
         base = json.loads(hello)["url"]

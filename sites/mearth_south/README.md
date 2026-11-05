@@ -8,9 +8,9 @@ weather bridge has no real station source yet.
 
 | File | What | Run |
 |---|---|---|
-| `roof.json` | the roof's Alpaca Dome server (`docs/mearth_roof.md`); `allow_hardware: false` | `python -m robofast_core.devices.mearth_roof_server --config sites/mearth_south/roof.json --simulate` |
-| `mearth_south.json` | the enclosure: supervisor and sequencer | `python -m robofast_core.supervisor_service --config sites/mearth_south/mearth_south.json` |
-| `weather.yaml` | the weather bridge, legacy South limits; a placeholder station source (unsafe until replaced) | `python -m robofast_core.weather_bridge --config sites/mearth_south/weather.yaml --shadow` |
+| `roof.json` | the roof's Alpaca Dome server (`docs/mearth_roof.md`); `allow_hardware: false` | `python -m robofast.devices.mearth_roof_server --config sites/mearth_south/roof.json --simulate` |
+| `mearth_south.json` | the enclosure: supervisor and sequencer | `python -m robofast.supervisor_service --config sites/mearth_south/mearth_south.json` |
+| `weather.yaml` | the weather bridge, legacy South limits; a placeholder station source (unsafe until replaced) | `python -m robofast.weather_bridge --config sites/mearth_south/weather.yaml --shadow` |
 
 ## Policy
 

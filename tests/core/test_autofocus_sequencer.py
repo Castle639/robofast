@@ -9,17 +9,17 @@ from pathlib import Path
 
 import pytest
 
-from robofast_core.autofocus import AutofocusSetup, FocusModel, FocusStore
-from robofast_core.autofocus_plan import AutofocusTriggers, TriggerConfig
-from robofast_core.config import load_config
-from robofast_core.owner import DeviceOwner
-from robofast_core.plan import CallablePlan, Idle, Observation, StaticPlan
-from robofast_core.registry import ValueRegistry
-from robofast_core.request_model import RequestGroup, load_request_groups
-from robofast_core.sequencer_service import build
-from robofast_core.testing.checks import wait_until
-from robofast_core.testing.focus_sim import SimFocuser, StarfieldCamera
-from robofast_core.timeline import Timeline
+from robofast.autofocus import AutofocusSetup, FocusModel, FocusStore
+from robofast.autofocus_plan import AutofocusTriggers, TriggerConfig
+from robofast.config import load_config
+from robofast.owner import DeviceOwner
+from robofast.plan import CallablePlan, Idle, Observation, StaticPlan
+from robofast.registry import ValueRegistry
+from robofast.request_model import RequestGroup, load_request_groups
+from robofast.sequencer_service import build
+from robofast.testing.checks import wait_until
+from robofast.testing.focus_sim import SimFocuser, StarfieldCamera
+from robofast.timeline import Timeline
 
 from .test_autofocus import OPTICS, TRUE_FOCUS, _calibration_store, scene, tolerance
 from .test_imaging import attach, headers, run_night

@@ -1,6 +1,6 @@
 # The Aqawan enclosure: confirmed facts and policy
 
-The Aqawan's Alpaca Dome server (`robofast_core/devices/aqawan_server.py`)
+The Aqawan's Alpaca Dome server (`robofast/devices/aqawan_server.py`)
 drives the enclosure's PAC controller. The wire protocol, and everything
 about it that is still a guess, is described in the module docs of
 `aqawan_pac.py` and `aqawan_sim.py`. This page records what the MINERVA team

@@ -47,8 +47,8 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from robofast_core import catalog as cat
-from robofast_core.testing import sky_fixture
+from robofast import catalog as cat
+from robofast.testing import sky_fixture
 
 
 def _fields(args: argparse.Namespace) -> list[tuple[float, float, float]]:

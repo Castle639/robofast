@@ -1,7 +1,7 @@
 {
  "_note": [
   "MINERVA T2, FAU port (port 1), night n20260423, filter V: the legacy autofocus sweeps.",
-  "hfd_px: robofast_core.starmeasure on each FAU frame (ZWO ASI174, 5.86 um pixels, 0.265 arcsec/px; CDK700 f/6.5); positions are FOCPOS (um).",
+  "hfd_px: robofast.starmeasure on each FAU frame (ZWO ASI174, 5.86 um pixels, 0.265 arcsec/px; CDK700 f/6.5); positions are FOCPOS (um).",
   "legacy_hfr_arcsec: the legacy autorecord's median SExtractor FLUX_RADIUS times the plate scale; legacy_guess and legacy_new are its starting guess and result.",
   "Derived from the frames for docs/autofocus.md section 9; the frames themselves are not in the repository."
  ],

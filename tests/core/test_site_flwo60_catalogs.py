@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 
-from robofast_core.catalogs import (
+from robofast.catalogs import (
     CatalogTarget,
     OffsetPattern,
     PrivateCatalog,
@@ -25,9 +25,9 @@ from robofast_core.catalogs import (
     from_dict,
     to_requests,
 )
-from robofast_core.request_model import load_request_groups
-from robofast_core.sequencer_service import load_plan
-from robofast_core.sites.flwo60.catalogs import (
+from robofast.request_model import load_request_groups
+from robofast.sequencer_service import load_plan
+from robofast.sites.flwo60.catalogs import (
     CatalogError,
     kind_of,
     load,
@@ -439,7 +439,7 @@ def test_requests_run_on_the_flwo60_dispatch_plan(tmp_path):
 
 def _cli(*args: str, cwd: Path) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        [sys.executable, "-m", "robofast_core.sites.flwo60.catalogs", *args],
+        [sys.executable, "-m", "robofast.sites.flwo60.catalogs", *args],
         cwd=cwd,
         capture_output=True,
         text=True,

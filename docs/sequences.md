@@ -4,7 +4,7 @@ A site's or instrument's routine that is only an ordering of operations
 robofast already drives -- the calibration stage, a lamp on and off, a
 wait, frames -- is a **sequence**: a named step list in the enclosure
 config, run as an observation of kind `sequence`
-(`robofast_core/sequences.py`; design.md 3.10 (c)). Adding one is
+(`robofast/sequences.py`; design.md 3.10 (c)). Adding one is
 configuration: no code, no fork. What needs new code is a plug-in
 (docs/plugins.md), which can also add step types.
 
@@ -33,7 +33,7 @@ In the enclosure config (the file the supervisor and the sequencer read):
 * `cleanup` -- run after the steps, always (below);
 * `telescopes` -- the telescopes it may run on (default: every one);
 * `instrument` -- the instrument type its frames are taken with
-  (`robofast_core/instruments.py`; default `imager`): its frame types are
+  (`robofast/instruments.py`; default `imager`): its frame types are
   checked against what that type takes;
 * `description` -- for people; keys starting with `_` are comments.
 
@@ -112,14 +112,14 @@ replaces it for that enclosure:
 stands for parameter `name`'s value (the whole string only, so a number
 stays a number); a `$name` that is not a parameter is refused at load.
 Parameters may not be named `template` or `telescopes`. A plug-in registers
-a template in `robofast_core.sequences.SEQUENCE_TEMPLATES` (a
+a template in `robofast.sequences.SEQUENCE_TEMPLATES` (a
 `SequenceTemplate`; docs/plugins.md).
 
 ## The steps
 
 A step is an object whose one step-type key names it; its other keys are
 the step's options. Each step type is an entry of
-`robofast_core.sequences.SEQUENCE_STEPS` (a registry, so a plug-in adds its
+`robofast.sequences.SEQUENCE_STEPS` (a registry, so a plug-in adds its
 own: subclass `StepType`, register it).
 
 | Step | Does | Needs on the telescope | In a cleanup? |

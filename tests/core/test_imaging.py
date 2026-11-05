@@ -1,4 +1,4 @@
-"""The sequencer saving frames (robofast_core.imaging) on fake devices."""
+"""The sequencer saving frames (robofast.imaging) on fake devices."""
 
 from __future__ import annotations
 
@@ -12,9 +12,9 @@ from pathlib import Path
 import pytest
 from astropy.io import fits
 
-from robofast_core.imaging import Imaging, ImagingConfig
-from robofast_core.plan import StaticPlan
-from robofast_core.testing.checks import wait_until
+from robofast.imaging import Imaging, ImagingConfig
+from robofast.plan import StaticPlan
+from robofast.testing.checks import wait_until
 
 SITE = {"latitude": 31.68, "longitude": -110.88, "elevation": 2316.0}
 SITES = Path(__file__).resolve().parents[2] / "sites" / "minerva"
@@ -228,9 +228,9 @@ async def test_without_imaging_nothing_changes(make_rig):
 
 
 async def test_the_service_builds_the_pipeline_from_the_config(tmp_path):
-    from robofast_core.config import load_config
-    from robofast_core.sequencer_service import build, snapshot
-    from robofast_core.timeline import Timeline
+    from robofast.config import load_config
+    from robofast.sequencer_service import build, snapshot
+    from robofast.timeline import Timeline
 
     config = load_config(SITES / "aqawan1.json")
     assert "images" in config  # the example saves frames

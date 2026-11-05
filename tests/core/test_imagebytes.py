@@ -9,15 +9,15 @@ import httpx
 import numpy as np
 import pytest
 
-from robofast_core import imagebytes as ib
-from robofast_core.alpaca_client import (
+from robofast import imagebytes as ib
+from robofast.alpaca_client import (
     AlpacaDevice,
     AlpacaProtocolError,
     AlpacaServerError,
     InvalidOperationException,
 )
-from robofast_core.imaging import download_timeout
-from robofast_core.owner import DeviceTimeout
+from robofast.imaging import download_timeout
+from robofast.owner import DeviceTimeout
 
 
 def header(**kw) -> bytes:

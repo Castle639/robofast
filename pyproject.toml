@@ -1,12 +1,10 @@
-# Packaging for robofast_core, the new core (distribution name `robofast`).
+# Packaging for robofast (the `robofast` package).
 #
 #   pip install .                          # the package and its console scripts
 #   pip install ".[guider-hardware]"       # plus the guider's hardware backends
 #   pip install --group test               # test dependencies, run from the repo
 #
-# Only `robofast_core*` is packaged. The legacy `robofast/` directory (the old
-# Windows-era code) stays in the repository but is not installed. Everything
-# also runs uninstalled from the repository root (`python -m robofast_core...`,
+# Only `robofast*` is packaged. Everything also runs uninstalled from the repository root (`python -m robofast...`,
 # `pythonpath` below), which is how the tests and the deploy recipe use it.
 
 [build-system]
@@ -49,43 +47,43 @@ Homepage = "https://github.com/jdeast/robofast"
 # The long-running services and device servers. Each is also
 # `python -m <module>`; the two spellings run the same main().
 [project.scripts]
-robofast-supervisor = "robofast_core.supervisor_service:main"
-robofast-mode = "robofast_core.modes:main"
-robofast-sequencer = "robofast_core.sequencer_service:main"
-robofast-when = "robofast_core.when:main"
-robofast-weather-bridge = "robofast_core.weather_bridge:main"
-robofast-weather-server = "robofast_core.weather_server:main"
-robofast-request-api = "robofast_core.request_api:main"
-robofast-console = "robofast_core.console.server:main"
-robofast-notifier = "robofast_core.notifier.service:main"
-robofast-guider = "robofast_core.guider.service:main"
-robofast-kiwispec = "robofast_core.devices.kiwispec_service:main"
-robofast-aqawan-server = "robofast_core.devices.aqawan_server:main"
-robofast-tcsgo-server = "robofast_core.devices.tcsgo_server:main"
-robofast-mearth-roof-server = "robofast_core.devices.mearth_roof_server:main"
-robofast-tres-frontend-server = "robofast_core.devices.tres_frontend_server:main"
-robofast-pdu-server = "robofast_core.devices.pdu_server:main"
-robofast-pulizzi-server = "robofast_core.devices.pulizzi_server:main"
-robofast-adc-server = "robofast_core.devices.adc_server:main"
-robofast-kiwispec-aux-server = "robofast_core.devices.kiwispec_aux_server:main"
-robofast-pwi-server = "robofast_core.devices.pwi_server:main"
-robofast-pwi-jog = "robofast_core.devices.pwi_jog:main"
+robofast-supervisor = "robofast.supervisor_service:main"
+robofast-mode = "robofast.modes:main"
+robofast-sequencer = "robofast.sequencer_service:main"
+robofast-when = "robofast.when:main"
+robofast-weather-bridge = "robofast.weather_bridge:main"
+robofast-weather-server = "robofast.weather_server:main"
+robofast-request-api = "robofast.request_api:main"
+robofast-console = "robofast.console.server:main"
+robofast-notifier = "robofast.notifier.service:main"
+robofast-guider = "robofast.guider.service:main"
+robofast-kiwispec = "robofast.devices.kiwispec_service:main"
+robofast-aqawan-server = "robofast.devices.aqawan_server:main"
+robofast-tcsgo-server = "robofast.devices.tcsgo_server:main"
+robofast-mearth-roof-server = "robofast.devices.mearth_roof_server:main"
+robofast-tres-frontend-server = "robofast.devices.tres_frontend_server:main"
+robofast-pdu-server = "robofast.devices.pdu_server:main"
+robofast-pulizzi-server = "robofast.devices.pulizzi_server:main"
+robofast-adc-server = "robofast.devices.adc_server:main"
+robofast-kiwispec-aux-server = "robofast.devices.kiwispec_aux_server:main"
+robofast-pwi-server = "robofast.devices.pwi_server:main"
+robofast-pwi-jog = "robofast.devices.pwi_jog:main"
 
 # Entry-point group `robofast.plugins`: a site package's plug-ins (plan types,
 # observation kinds, instrument types, weather sources), each a function that
-# registers its entries; robofast_core.plugins runs them (docs/plugins.md).
+# registers its entries; robofast.plugins runs them (docs/plugins.md).
 # robofast declares none here: core's own entries register without it, so
 # they also work uninstalled.
 
 [tool.setuptools.packages.find]
-include = ["robofast_core*"]
+include = ["robofast*"]
 
 [dependency-groups]
 # pyyaml: site configs (sites/*/weather.yaml) are YAML so every limit can
 # carry a comment saying where it came from (design.md 3.10).
-# astropy: the Sun's altitude for the weather bridge (robofast_core/sun.py),
+# astropy: the Sun's altitude for the weather bridge (robofast/sun.py),
 # so it agrees exactly with the same calculation made elsewhere; and target
-# positions for the dispatch scheduler (robofast_core/sky.py).
+# positions for the dispatch scheduler (robofast/sky.py).
 core = ["astropy>=6.1", "httpx>=0.27", "pyyaml>=6"]
 # The guider's real-hardware backends (docs/guider.md), on the guide
 # computer only: SX AO (serial), PI E-518 (GCS), ZWO ASI cameras, and the
@@ -93,10 +91,10 @@ core = ["astropy>=6.1", "httpx>=0.27", "pyyaml>=6"]
 # simulators and the tests need none of them.
 guider-hardware = ["pyserial>=3.5", "pipython>=2.10", "zwoasi>=0.2", "redis>=5"]
 # The live fetch of MINERVA's target-list Google Sheet
-# (robofast_core/sites/minerva/target_sheet.py, docs/minerva_sheet.md), on the
+# (robofast/sites/minerva/target_sheet.py, docs/minerva_sheet.md), on the
 # host that fetches it only. Optional imports; the tests use a fake client.
 sheets = ["gspread>=6", "google-auth>=2"]
-# Serial ports by URL (robofast_core/devices/serial_url.py): the KiwiSpec
+# Serial ports by URL (robofast/devices/serial_url.py): the KiwiSpec
 # aux server's real ports (rfc2217://, socket://, local devices). Its "sim"
 # ports need nothing.
 serial = ["pyserial>=3.5"]
@@ -128,8 +126,6 @@ log_level = "INFO"
 [tool.ruff]
 line-length = 100
 target-version = "py312"
-# The legacy package is out of scope for the prototype's lint.
-extend-exclude = ["robofast/**"]
 force-exclude = true
 
 [tool.ruff.lint]
@@ -140,6 +136,6 @@ ignore = ["RUF001", "RUF002", "RUF003", "ASYNC109", "ASYNC110"]
 
 [tool.ruff.lint.per-file-ignores]
 # The console page's inline JavaScript and CSS (no build step, docs/console.md).
-"robofast_core/console/page.py" = ["E501"]
+"robofast/console/page.py" = ["E501"]
 # Runs on the MINERVA gateway's Python 2.7 as well as 3 (docs/remote.md): no pyupgrade.
 "scripts/snmp_relay.py" = ["UP"]

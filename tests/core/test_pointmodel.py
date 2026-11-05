@@ -1,4 +1,4 @@
-"""robofast's pointing model (robofast_core/pointmodel.py, docs/pointing_model.md):
+"""robofast's pointing model (robofast/pointmodel.py, docs/pointing_model.md):
 term selection, cross-validation, persistence, the local correction, drift,
 and a pointing run on the catalog-based sky simulator with injected truth."""
 
@@ -11,10 +11,10 @@ from datetime import UTC, datetime, timedelta
 import numpy as np
 import pytest
 
-from robofast_core import pointing as pm
-from robofast_core.astrometry import SolverConfig
-from robofast_core.catalog import separation
-from robofast_core.pointmodel import (
+from robofast import pointing as pm
+from robofast.astrometry import SolverConfig
+from robofast.catalog import separation
+from robofast.pointmodel import (
     SIDEREAL_DEG_PER_S,
     BuiltModel,
     DriftMonitor,
@@ -29,9 +29,9 @@ from robofast_core.pointmodel import (
     sky_grid,
     solve_sample,
 )
-from robofast_core.testing.pointing_sim import SyntheticCatalog
-from robofast_core.testing.skysim import SkyCamera, SkyScene, lst_deg
-from robofast_core.testing.starfield import Detector
+from robofast.testing.pointing_sim import SyntheticCatalog
+from robofast.testing.skysim import SkyCamera, SkyScene, lst_deg
+from robofast.testing.starfield import Detector
 
 LAT, LON = 31.680407, -110.878977
 EQ = {"IH": 120.0, "ID": -45.0, "CH": 30.0, "NP": -12.0, "MA": 40.0, "ME": -25.0, "TF": 15.0}

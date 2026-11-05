@@ -1,7 +1,7 @@
 {
   "_note": [
     "Synthetic example request groups for MINERVA's dispatch scheduler, in the OCS request language",
-    "(robofast_core/request_model.py; field by field in docs/request_language.md). The legacy MINERVA",
+    "(robofast/request_model.py; field by field in docs/request_language.md). The legacy MINERVA",
     "target lists are not in the public minerva-control repository, so these are illustrative:",
     "well-known RV-standard stars (J2000 coordinates, rounded; ra and dec in degrees) as legacy observed",
     "them -- standing requests (extra_params.cadence) at least 3 h apart, at most 2 visits a night (the",
@@ -13,13 +13,13 @@
     "  night', from its 'B stars' sheet, not in the public repository). The cadence is the knob: max_per_night",
     "  1 in pool 'bstars' here, one B star a night whichever it is; raise it for more; ipp_value sets how hard",
     "  the scheduler tries. limit soft: past that, another B star is still taken rather than idle (legacy",
-    "  divided its weight by 1e6). robofast_core.sites.minerva.target_sheet makes these from the real sheet.",
+    "  divided its weight by 1e6). robofast.sites.minerva.target_sheet makes these from the real sheet.",
     "  TEMPLATE-*: an RV star with the iodine cell OUT (extra_params.iodine false), one-shot (no cadence):",
     "  it completes once taken. One per RV star; good seeing and low airmass matter most.",
     "Lamp calibrations (type ARC or LAMP_FLAT) are refused here: KiwiSpec has none (no telescope lists lamps).",
-    "Convert a real legacy targets.csv with robofast_core.sites.minerva.legacy_csv.from_legacy_csv, or import it",
+    "Convert a real legacy targets.csv with robofast.sites.minerva.legacy_csv.from_legacy_csv, or import it",
     "in the dispatch plan entry: \"imports\": [{\"type\": \"minerva.legacy_csv\", \"path\": \"targets.csv\"}]",
-    "(with plugins [\"robofast_core.sites.minerva\"]; sites/minerva/dispatch.example.json)."
+    "(with plugins [\"robofast.sites.minerva\"]; sites/minerva/dispatch.example.json)."
   ],
   "groups": [
     {

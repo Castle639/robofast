@@ -2,12 +2,12 @@
 
 Focusing a telescope by *computing* the focus from star sizes measured on
 one known side of it, rather than by searching for the smallest star.
-`robofast_core/autofocus.py` (the methods and the runner),
-`robofast_core/starmeasure.py` (star sizes), `robofast_core/focusfit.py`
-(the fits), `robofast_core/autofocus_plan.py` (when to focus), and the
+`robofast/autofocus.py` (the methods and the runner),
+`robofast/starmeasure.py` (star sizes), `robofast/focusfit.py`
+(the fits), `robofast/autofocus_plan.py` (when to focus), and the
 sequencer's `kind="autofocus"` observations (design.md section 3.4).
 Tests run on a simulated focuser and star field
-(`robofast_core/testing/starfield.py`, `robofast_core/testing/focus_sim.py`).
+(`robofast/testing/starfield.py`, `robofast/testing/focus_sim.py`).
 
 ## 1. Why it can be deterministic
 
@@ -201,7 +201,7 @@ know which way the focus moves the focal plane:
 
 ## 5. Star measurement
 
-`robofast_core/starmeasure.py`, numpy only:
+`robofast/starmeasure.py`, numpy only:
 
 1. Background: clipped means of tiles, interpolated bilinearly, computed
    twice, the second time with the sources masked. A median of integer,
@@ -256,14 +256,14 @@ altitude (degrees):
 ```
 
 (legacy `telescope_N.ini` C2 and G0, focuser steps = microns;
-`robofast_core.sites.minerva.focus_model.legacy_model` converts a whole legacy set). The
+`robofast.sites.minerva.focus_model.legacy_model` converts a whole legacy set). The
 sequencer publishes `{tel}.focuser.temperature` and `{tel}.tel.alt` before
 each run, and every result records them (and any model terms) whether the
 model uses them or not, so the terms can be **fitted from the autofocus
 history** -- the calibration routine:
 
 ```sh
-python -m robofast_core.focusmodel --store /var/lib/robofast/focus_t2.json --key t2/imager/- \
+python -m robofast.focusmodel --store /var/lib/robofast/focus_t2.json --key t2/imager/- \
     --term "{tel}.focuser.temperature" --term "sin:{tel}.tel.alt"
 ```
 

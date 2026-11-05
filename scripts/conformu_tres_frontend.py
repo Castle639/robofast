@@ -2,7 +2,7 @@
 
     python scripts/conformu_tres_frontend.py --conformu PATH [--out DIR]
 
-Starts ``robofast_core.devices.tres_frontend_server`` with ``port.type``
+Starts ``robofast.devices.tres_frontend_server`` with ``port.type``
 "sim" (the in-process PI C-663 simulator, referenced, 50 mm/s) on a free
 loopback port, then runs ConformU's ``conformance`` and ``alpacaprotocol``
 checks against its FilterWheel (the calibration stage by named position)
@@ -56,7 +56,7 @@ def main() -> None:
         )
     )
     server, hello = start(
-        ["robofast_core.devices.tres_frontend_server", "--config", str(config)],
+        ["robofast.devices.tres_frontend_server", "--config", str(config)],
         out / "server.log",
     )
     summaries = []

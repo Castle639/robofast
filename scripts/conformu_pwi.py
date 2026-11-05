@@ -3,10 +3,10 @@ by the PWI4 and PWI2 simulators.
 
     python scripts/conformu_pwi.py --conformu PATH [--out DIR] [--backends pwi4,pwi2]
 
-For each backend, starts ``robofast_core.devices.pwi_sim`` (connected,
+For each backend, starts ``robofast.devices.pwi_sim`` (connected,
 enabled and homed, PWI4 reporting it: ConformU must be able to slew; the
 server's FindHome is allowed here) and
-``robofast_core.devices.pwi_server`` on free loopback ports, then runs
+``robofast.devices.pwi_server`` on free loopback ports, then runs
 ConformU's ``conformance`` and ``alpacaprotocol`` checks on each device.
 Exits non-zero if any check reports an error or an issue. Logs and results
 go to ``--out``; a summary is appended to ``$GITHUB_STEP_SUMMARY`` when set.
@@ -25,7 +25,7 @@ sys.path.insert(1, str(Path(__file__).resolve().parents[1]))
 from conformu_aqawan import start
 from conformu_tcsgo import run_check
 
-from robofast_core.devices.pwi_sim import SIM_LATITUDE, SIM_LONGITUDE
+from robofast.devices.pwi_sim import SIM_LATITUDE, SIM_LONGITUDE
 
 
 def main() -> None:
@@ -45,7 +45,7 @@ def main() -> None:
         try:
             sim, line = start(
                 [
-                    "robofast_core.devices.pwi_sim",
+                    "robofast.devices.pwi_sim",
                     *("--api", backend, "--port", "0", "--ready", "--homed", "--report-homed"),
                     *("--slew-rate", "6", "--home-time", "1", "--m3-time", "0.5"),
                 ],
@@ -80,7 +80,7 @@ def main() -> None:
                 )
             )
             server, hello = start(
-                ["robofast_core.devices.pwi_server", "--config", str(config)],
+                ["robofast.devices.pwi_server", "--config", str(config)],
                 out / f"{backend}-server.log",
             )
             procs.append(server)

@@ -1,6 +1,6 @@
 # The request language
 
-robofast's observing requests (`robofast_core/request_model.py`) use the
+robofast's observing requests (`robofast/request_model.py`) use the
 field names, nesting and units of the LCO **Observatory Control System**
 (OCS) observation portal
 ([observatorycontrolsystem/observation-portal](https://github.com/observatorycontrolsystem/observation-portal)),

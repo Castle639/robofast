@@ -1,6 +1,0 @@
-[Setup]
-host = 'tel11'
-port = 3040
-hardware_abstraction_layer = 'paramount'
-instrument = ''
-

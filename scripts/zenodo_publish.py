@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Upload a data bundle to Zenodo as a DRAFT, verify it, and stop.
 
-This is the upload side of ``robofast_core/zenodo.py`` (which only
+This is the upload side of ``robofast/zenodo.py`` (which only
 downloads). Adapted from EXOZIPPy's ``scripts/zenodo_publish.py`` (BSD
 3-Clause, same author). The workflow it serves is documented in
 ``docs/zenodo.md``:
@@ -32,7 +32,7 @@ community --record ID --community SLUG
     metadata names. robofast has no community yet, so its records name none.
 pin --record ID [--update-registry] [--name KEY]
     Read a PUBLISHED record's public API (no token) and print its
-    ZenodoRecord entry for robofast_core/zenodo_assets.py (matched to the
+    ZenodoRecord entry for robofast/zenodo_assets.py (matched to the
     existing entry by concept record, else ``--name``); --update-registry
     writes that one entry in place, verified by reading it back.
 
@@ -89,7 +89,7 @@ REQUIRED_METADATA = (
     "upload_type",
 )
 
-# Transport retries: Zenodo 5xx-es under load (see robofast_core/zenodo.py).
+# Transport retries: Zenodo 5xx-es under load (see robofast/zenodo.py).
 ATTEMPTS = 5
 BACKOFF = 2.0  # seconds; doubles each attempt
 TIMEOUT = 120.0  # seconds of socket silence, per read/write, not per transfer
@@ -671,7 +671,7 @@ def finish(client: Client, dep: dict, files: dict, args) -> None:
     ]
     if community:
         lines += [community.rstrip("\n"), "to put it in its communities (publishing does not),"]
-    lines += [f"  {pin}", "to write its entry in robofast_core/zenodo_assets.py (docs/zenodo.md)."]
+    lines += [f"  {pin}", "to write its entry in robofast/zenodo_assets.py (docs/zenodo.md)."]
     print("\n".join(lines))
     maybe_publish(client, dep, args)
 
@@ -772,9 +772,9 @@ def cmd_upload(args) -> None:
     finish(client, dep, files, args)
 
 
-# --- the asset registry (robofast_core/zenodo_assets.py) --------------------
+# --- the asset registry (robofast/zenodo_assets.py) --------------------
 
-DEFAULT_REGISTRY = Path(__file__).resolve().parent.parent / "robofast_core" / "zenodo_assets.py"
+DEFAULT_REGISTRY = Path(__file__).resolve().parent.parent / "robofast" / "zenodo_assets.py"
 _LINE = 100  # the repository's ruff line-length
 _ENTRY_INDENT = " " * 8  # a key of the RECORDS dict literal
 

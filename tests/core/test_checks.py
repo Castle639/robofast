@@ -6,8 +6,8 @@ import time
 
 import pytest
 
-from robofast_core.testing.checks import assert_fenced_after_cancel, assert_generations_disjoint
-from robofast_core.timeline import Timeline
+from robofast.testing.checks import assert_fenced_after_cancel, assert_generations_disjoint
+from robofast.timeline import Timeline
 
 
 def _base() -> Timeline:

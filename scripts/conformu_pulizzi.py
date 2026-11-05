@@ -2,7 +2,7 @@
 
     python scripts/conformu_pulizzi.py --conformu PATH [--out DIR]
 
-Starts ``robofast_core.devices.pulizzi_server --simulate`` (the in-process
+Starts ``robofast.devices.pulizzi_server --simulate`` (the in-process
 Pulizzi simulator) on a free loopback port with two lamp outlets (writable)
 and one other outlet (read-only), then runs ConformU's ``conformance``
 check (with the switch-writing tests enabled by
@@ -51,7 +51,7 @@ def main() -> None:
         )
     )
     server, hello = start(
-        ["robofast_core.devices.pulizzi_server", "--config", str(config), "--simulate"],
+        ["robofast.devices.pulizzi_server", "--config", str(config), "--simulate"],
         out / "server.log",
     )
     try:

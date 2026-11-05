@@ -4,7 +4,7 @@ The 60-inch (Tillinghast) telescope has an atmospheric dispersion
 corrector: two prisms in the beam, each turned by its own stepper motor.
 It is part of the telescope and feeds both of its instruments, TRES and
 FAST, so robofast serves it as a telescope device, independent of the
-instrument (`robofast_core/devices/adc_server.py`). The instrument can
+instrument (`robofast/devices/adc_server.py`). The instrument can
 change only an input: the wavelength band of the optional refraction model
 and, if ever needed, a position-angle offset.
 
@@ -54,7 +54,7 @@ From its source unless marked *inferred*.
   (`swap_prisms` in robofast's config). Which one runs on the mountain is
   to be confirmed; the production one is the default.
 
-## 2. Protocol (`robofast_core/devices/adc_mdrive.py`)
+## 2. Protocol (`robofast/devices/adc_mdrive.py`)
 
 | Item | Value |
 |---|---|
@@ -74,7 +74,7 @@ each bounded; a move outside 0..3999 steps is refused before anything is
 sent. There is no stop command (the legacy daemon has none), so a move is
 bounded by `move_timeout` and watched for stalls instead.
 
-## 3. The math (`robofast_core/devices/adc_math.py`)
+## 3. The math (`robofast/devices/adc_math.py`)
 
 1. **Parallactic angle and zenith distance** from the mount's altitude and
    azimuth (the TCSGO server's `DeviceState`): ERFA `ae2hd` then `hd2pa`
@@ -221,7 +221,7 @@ because both motors share one serial line.
 
 A telescope entry's `adc` (the switch's address, `host:port/0`) gives the
 sequencer an ADC. Core finds the switches **by name** (`MaxSwitch`,
-`GetSwitchName`; `robofast_core/adc.py`), never by id: `Tracking`,
+`GetSwitchName`; `robofast/adc.py`), never by id: `Tracking`,
 `Settled`, `Deflection`, `PrismA` and `PrismB`, this server's names. An ADC
 that names them differently says so in the entry,
 `"adc": {"device": "host:port/0", "switches": {"tracking": "...",
@@ -243,7 +243,7 @@ that needs it (a warning; the frames go ahead).
 ## 7. Running and testing
 
 ```
-python -m robofast_core.devices.adc_server --config sites/flwo60/adc.json --simulate
+python -m robofast.devices.adc_server --config sites/flwo60/adc.json --simulate
 ```
 
 `sites/flwo60/adc.json` (listens on 11180; reads the TCSGO server on

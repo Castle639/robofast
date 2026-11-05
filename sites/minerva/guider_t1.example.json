@@ -1,7 +1,7 @@
 {
   "_note": [
     "The guider service for T1's FAU (docs/guider.md), on the computer the FAU camera is plugged into:",
-    "  python -m robofast_core.guider.service --config sites/minerva/guider_t1.example.json",
+    "  python -m robofast.guider.service --config sites/minerva/guider_t1.example.json",
     "Hardware-shaped but locked: allow_hardware is false, so nothing is opened until it is true AND --hardware is given,",
     "which needs JDE's approval (docs/guider.md, Commissioning). Addresses are 127.0.0.1 placeholders.",
     "From minerva-control (sites/minerva/README.md has the table): fau_t1.ini -- ZWO ASI174,",

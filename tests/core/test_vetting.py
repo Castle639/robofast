@@ -15,12 +15,12 @@ from datetime import UTC, datetime
 import numpy as np
 import pytest
 
-from robofast_core.catalog import catalog_at
-from robofast_core.dispatch import dispatch_from_config
-from robofast_core.photometry import PortPhotometry, SkyConditions
-from robofast_core.request_model import RequestGroup
-from robofast_core.testing import TEST_OPTICS
-from robofast_core.vetting import PortGeometry, Vetter, VettingConfig, vet
+from robofast.catalog import catalog_at
+from robofast.dispatch import dispatch_from_config
+from robofast.photometry import PortPhotometry, SkyConditions
+from robofast.request_model import RequestGroup
+from robofast.testing import TEST_OPTICS
+from robofast.vetting import PortGeometry, Vetter, VettingConfig, vet
 from tests.core.skydata import sky_dir
 
 WHEN = datetime(2026, 7, 1, 6, 0, tzinfo=UTC)
@@ -90,7 +90,7 @@ def test_saturation_faintness_and_few_stars(catalog, nu):
 
 
 def test_high_proper_motion_and_not_in_catalog(catalog):
-    from robofast_core.catalog import TILE_DTYPE, Catalog, Stars
+    from robofast.catalog import TILE_DTYPE, Catalog, Stars
 
     rec = np.array(
         [(1, 10.0, 10.0, 3000.0, 0.0, 9.0, 0.8), (2, 10.02, 10.0, 0.0, 0.0, 12.0, 0.8),
@@ -114,7 +114,7 @@ def test_high_proper_motion_and_not_in_catalog(catalog):
 
 
 def test_fiber_contamination(catalog):
-    from robofast_core.catalog import TILE_DTYPE, Catalog, Stars
+    from robofast.catalog import TILE_DTYPE, Catalog, Stars
 
     rec = np.array(
         [(1, 10.0, 10.0, 0, 0, 9.0, 0.8), (2, 10.0, 10.0 + 1.5 / 3600, 0, 0, 11.0, 0.8)],
@@ -211,15 +211,15 @@ def test_vetter_from_config_file(tmp_path):
 
 
 def _twin_rig(catalog, nu, select: str):
-    from robofast_core.astrometry import SolverConfig
-    from robofast_core.guider.base import VirtualClock
-    from robofast_core.guider.calibration import Calibration
-    from robofast_core.guider.identify import catalog_identifier
-    from robofast_core.guider.loop import GuideConfig, Guider
-    from robofast_core.guider.sim import SimCamera, SimMount, SimWorld
-    from robofast_core.guider.tiptilt import MountOffset
-    from robofast_core.testing.skysim import SkyCamera, SkyScene, sky_world_stars
-    from robofast_core.testing.starfield import Detector
+    from robofast.astrometry import SolverConfig
+    from robofast.guider.base import VirtualClock
+    from robofast.guider.calibration import Calibration
+    from robofast.guider.identify import catalog_identifier
+    from robofast.guider.loop import GuideConfig, Guider
+    from robofast.guider.sim import SimCamera, SimMount, SimWorld
+    from robofast.guider.tiptilt import MountOffset
+    from robofast.testing.skysim import SkyCamera, SkyScene, sky_world_stars
+    from robofast.testing.starfield import Detector
 
     pa = 30.0
     cam = SkyCamera((1216, 1936), 0.265, pa=pa, detector=Detector(shape=(1216, 1936)))

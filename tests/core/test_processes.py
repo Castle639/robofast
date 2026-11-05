@@ -19,11 +19,11 @@ from pathlib import Path
 import httpx
 import pytest
 
-from robofast_core import DeviceOwner, Observation, Sequencer, SequencerConfig, Timeline
-from robofast_core.lease_client import RemoteSupervisor
-from robofast_core.testing.alpaca_server import FakeAlpacaServer
-from robofast_core.testing.checks import wait_until
-from robofast_core.testing.fakes import (
+from robofast import DeviceOwner, Observation, Sequencer, SequencerConfig, Timeline
+from robofast.lease_client import RemoteSupervisor
+from robofast.testing.alpaca_server import FakeAlpacaServer
+from robofast.testing.checks import wait_until
+from robofast.testing.fakes import (
     FakeCamera,
     FakeDome,
     FakeObservingConditions,
@@ -31,7 +31,7 @@ from robofast_core.testing.fakes import (
     FakeTelescope,
     FakeWeather,
 )
-from robofast_core.testing.processes import SequencerProcess, Service, SupervisorProcess
+from robofast.testing.processes import SequencerProcess, Service, SupervisorProcess
 
 from .conftest import FAST_REMOTE, FAST_SAFETY, FAST_SEQ
 
@@ -232,7 +232,7 @@ async def test_supervisor_restart(site):
 async def test_lease_request_is_idempotent(make_rig):
     """Repeating a lease request (e.g. after a lost answer) returns the same
     lease instead of stranding it."""
-    from robofast_core.supervisor_service import SupervisorServer
+    from robofast.supervisor_service import SupervisorServer
 
     rig = make_rig(safety=dict(reopen_hold=0.1))
     await rig.start(sequencer=False)
@@ -422,9 +422,7 @@ async def test_sequencer_service_gives_up_needs_operator(site):
 def test_sequencer_service_bad_config_exits_2(tmp_path):
     bad = tmp_path / "enclosure.json"
     bad.write_text(json.dumps({"name": "x", "telescopes": {}, "plan": {"type": "static"}}))
-    proc = Service(
-        "robofast_core.sequencer_service", "--config", str(bad), log_path=tmp_path / "log"
-    )
+    proc = Service("robofast.sequencer_service", "--config", str(bad), log_path=tmp_path / "log")
     assert proc.proc.wait(20) == 2
     proc.stop()
     assert "no telescopes" in proc.log_path.read_text()

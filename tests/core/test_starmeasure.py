@@ -1,5 +1,5 @@
-"""Star measurement (robofast_core.starmeasure) and the focus fits
-(robofast_core.focusfit), on synthetic images and curves."""
+"""Star measurement (robofast.starmeasure) and the focus fits
+(robofast.focusfit), on synthetic images and curves."""
 
 from __future__ import annotations
 
@@ -10,15 +10,15 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from robofast_core.focusfit import (
+from robofast.focusfit import (
     FitError,
     fit_hyperbola,
     fit_line,
     fit_parabola,
     two_point,
 )
-from robofast_core.starmeasure import MeasureConfig, background, measure
-from robofast_core.testing.starfield import Detector, SimOptics, Star, random_stars, render
+from robofast.starmeasure import MeasureConfig, background, measure
+from robofast.testing.starfield import Detector, SimOptics, Star, random_stars, render
 
 OPTICS = SimOptics(pixel_scale=1.0, pixel_size=13.5, f_ratio=6.5, obstruction=0.47)
 K = math.sqrt((1 + 0.47**2) / 2)  # HFD of the annulus / its diameter

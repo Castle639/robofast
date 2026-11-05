@@ -12,9 +12,9 @@ import time
 
 import pytest
 
-from robofast_core.plan import CallablePlan, Observation, StaticPlan
-from robofast_core.sequencer import SlewDenied
-from robofast_core.testing.checks import (
+from robofast.plan import CallablePlan, Observation, StaticPlan
+from robofast.sequencer import SlewDenied
+from robofast.testing.checks import (
     assert_fenced_after_cancel,
     assert_generations_disjoint,
     wait_until,

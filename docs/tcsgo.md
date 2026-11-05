@@ -2,7 +2,7 @@
 
 The FLWO 60-inch (Tillinghast) telescope, which feeds TRES, is run by a DFM
 Engineering telescope control system, TCSGalil ("TCSGO"). robofast reaches
-it through three modules in `robofast_core/devices/`:
+it through three modules in `robofast/devices/`:
 
 - `tcsgo_client.py`: an asyncio client for TCSGalil's external command port
   (allowlist, hard timeouts, bounded retries, one command at a time);

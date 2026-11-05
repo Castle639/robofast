@@ -1,6 +1,3 @@
-/robofast/credentials/*
-/robofast/data/*
-/robofast/logs/*
 venv/*
 .idea/*
 __pycache__/

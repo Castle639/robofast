@@ -1,6 +1,6 @@
 {
   "_note": [
-    "The throughput monitor (docs/throughput.md; robofast_core/throughput.py).",
+    "The throughput monitor (docs/throughput.md; robofast/throughput.py).",
     "store: every frame's zero point, append-only JSON lines; status: what the console (and so the notifier) reads.",
     "sky: the per-port photometry (efficiency chains, the measured T2 FAU zero point) the expected zero point comes from.",
     "expected 'chain': efficiency is measured against the efficiency chain alone (whose factors are ESTIMATED: the ratio",
@@ -9,7 +9,7 @@
     "file_ports: a legacy frame's port from its file name (legacy MINERVA names FAU frames nYYYYMMDD.T2.FAU.*.fits).",
     "extinction: mag per airmass, ESTIMATED (0.15 is a typical V value at ~2.3 km; Gaia G and the imager filters differ);",
     "fit_extinction fits it per series from steady nights with an airmass range and uses the fit once it is good",
-    "(python -m robofast_core.throughput --config ... extinction prints it).",
+    "(python -m robofast.throughput --config ... extinction prints it).",
     "Thresholds are the defaults (alarm 10 % below the baseline; step up 5 % on 2 steady nights; step down 10 % on 4)."
   ],
   "store": "/var/lib/robofast/throughput/throughput.jsonl",

@@ -15,19 +15,19 @@ import sys
 
 import pytest
 
-from robofast_core import hwgate
-from robofast_core.devices.aqawan_server import AqawanConfig, AqawanServer
-from robofast_core.devices.aqawan_sim import AqawanSim
-from robofast_core.devices.kiwispec_client import SICameraClient, SpecServerClient
-from robofast_core.devices.pdu_server import PDUConfig, PDUServer
-from robofast_core.devices.snmp import SNMPClient, SNMPError
-from robofast_core.devices.tcsgo_client import TCSClient
-from robofast_core.devices.tcsgo_server import TCSGOConfig, TCSGOServer
-from robofast_core.devices.tcsgo_sim import SIM_SERVER_SITE
-from robofast_core.devices.tres_frontend_server import TRESFrontEndConfig, TRESFrontEndServer
-from robofast_core.guider.base import check_address
-from robofast_core.testing.alpaca_server import FakeAlpacaServer
-from robofast_core.testing.tunnel import FakeTunnel
+from robofast import hwgate
+from robofast.devices.aqawan_server import AqawanConfig, AqawanServer
+from robofast.devices.aqawan_sim import AqawanSim
+from robofast.devices.kiwispec_client import SICameraClient, SpecServerClient
+from robofast.devices.pdu_server import PDUConfig, PDUServer
+from robofast.devices.snmp import SNMPClient, SNMPError
+from robofast.devices.tcsgo_client import TCSClient
+from robofast.devices.tcsgo_server import TCSGOConfig, TCSGOServer
+from robofast.devices.tcsgo_sim import SIM_SERVER_SITE
+from robofast.devices.tres_frontend_server import TRESFrontEndConfig, TRESFrontEndServer
+from robofast.guider.base import check_address
+from robofast.testing.alpaca_server import FakeAlpacaServer
+from robofast.testing.tunnel import FakeTunnel
 
 pytestmark = pytest.mark.skipif(
     not sys.platform.startswith("linux"), reason="simulator verification reads /proc"
@@ -80,7 +80,7 @@ def test_registration_for_another_port_does_not_count(tunnel):
 def test_simulator_in_another_process_is_verified():
     code = (
         "import socket, sys, time\n"
-        "from robofast_core import hwgate\n"
+        "from robofast import hwgate\n"
         "s = socket.socket(); s.bind(('127.0.0.1', 0)); s.listen()\n"
         "r = hwgate.SimulatorRegistration(s.getsockname()[1])\n"
         "print(s.getsockname()[1], flush=True); sys.stdin.read()\n"

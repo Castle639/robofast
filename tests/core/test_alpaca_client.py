@@ -13,11 +13,11 @@ from urllib.parse import parse_qsl
 import httpx
 import pytest
 
-from robofast_core import DeviceError, DeviceTimeout, Timeline
-from robofast_core import alpaca_client as ac
-from robofast_core.alpaca import alpaca_owner
-from robofast_core.alpaca_client import AlpacaDevice
-from robofast_core.weather_server import WeatherServer, WeatherState
+from robofast import DeviceError, DeviceTimeout, Timeline
+from robofast import alpaca_client as ac
+from robofast.alpaca import alpaca_owner
+from robofast.alpaca_client import AlpacaDevice
+from robofast.weather_server import WeatherServer, WeatherState
 
 # -- protocol, against a mock transport -------------------------------------------
 

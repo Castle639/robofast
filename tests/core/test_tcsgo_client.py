@@ -12,7 +12,7 @@ import time
 
 import pytest
 
-from robofast_core.devices.tcsgo_client import (
+from robofast.devices.tcsgo_client import (
     ALLOWED,
     COMMANDS,
     EAST,
@@ -27,7 +27,7 @@ from robofast_core.devices.tcsgo_client import (
     encode,
     parse_reply,
 )
-from robofast_core.devices.tcsgo_sim import TCSGOSim, altaz_to_hadec, hadec_to_altaz
+from robofast.devices.tcsgo_sim import TCSGOSim, altaz_to_hadec, hadec_to_altaz
 
 NOT_LOOPBACK = "192.0.2.1"  # RFC 5737 documentation address; never contacted
 FAST = dict(connect_timeout=1.0, command_timeout=1.0, ack_window=0.05, min_interval=0.01)

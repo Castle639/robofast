@@ -10,7 +10,7 @@ CSV with a Google service account (`downloadList`) and read the CSV
 (`rdlist`, `mkdict`) for its scheduler (`scheduler.py`) and its nightly
 schedule (`rv_control.mkschedule`).
 
-`robofast_core/sites/minerva/target_sheet.py` reads the same tabs with the
+`robofast/sites/minerva/target_sheet.py` reads the same tabs with the
 same service account and a **read-only** scope, keeps a timestamped
 snapshot of every fetch, and turns each active row into one request group
 in the request language (`docs/request_language.md`), ready for the
@@ -20,11 +20,11 @@ row that legacy would misread, or that robofast cannot honour, is
 **refused** with its sheet row number and the reason; nothing is guessed.
 
 ```
-python -m robofast_core.sites.minerva.target_sheet fetch  --config target_sheet.json   # live -> snapshot
-python -m robofast_core.sites.minerva.target_sheet check  --config target_sheet.json   # validate, list refusals
-python -m robofast_core.sites.minerva.target_sheet export --config target_sheet.json -o minerva-requests.json
-python -m robofast_core.sites.minerva.target_sheet check  --instrument spectrograph --csv targets=targets.csv --csv bstars=bstars.csv
-python -m robofast_core.sites.minerva.target_sheet export --config target_sheet.json --snapshot /var/lib/robofast/data/minerva_sheet/20261101T120000Z
+python -m robofast.sites.minerva.target_sheet fetch  --config target_sheet.json   # live -> snapshot
+python -m robofast.sites.minerva.target_sheet check  --config target_sheet.json   # validate, list refusals
+python -m robofast.sites.minerva.target_sheet export --config target_sheet.json -o minerva-requests.json
+python -m robofast.sites.minerva.target_sheet check  --instrument spectrograph --csv targets=targets.csv --csv bstars=bstars.csv
+python -m robofast.sites.minerva.target_sheet export --config target_sheet.json --snapshot /var/lib/robofast/data/minerva_sheet/20261101T120000Z
 ```
 
 `check` and `export` take one source: `--config` (fetch live; if the Sheet
@@ -54,7 +54,7 @@ filled in there:
 | `lists.<name>.limit` | the cadence's nightly limit: `hard` (default: refused once reached) or `soft` (still taken, but only when nothing else is observable). MINERVA's B stars: `soft` |
 | `lists.<name>.enabled` | `false` skips the list |
 | `offset_check` | how acquisition offsets are checked against the star catalog (below, "Acquisition offsets"): `tolerance` (arcsec, 3), `g_bright`, `g_faint` (catalog magnitude, 7 and 14.5), `search` (arcsec, 60), `action` (`refuse`, the default, or `flag`), `catalog` (a catalog entry, docs/sky.md; default the default catalog). On by default; `false` turns it off |
-| `snapshot_dir`, `keep` | where snapshots go (default `$ROBOFAST_DATA_DIR/minerva_sheet`, see `robofast_core.zenodo.data_dir`) and how many are kept (30) |
+| `snapshot_dir`, `keep` | where snapshots go (default `$ROBOFAST_DATA_DIR/minerva_sheet`, see `robofast.zenodo.data_dir`) and how many are kept (30) |
 
 The live fetch needs `gspread` and `google-auth`: `pip install --group
 sheets` (from the repository) or `pip install ".[sheets]"`. They are optional imports; nothing else in robofast needs them.
@@ -147,7 +147,7 @@ its reason.
 Legacy trusted `acquisition_offset_north`/`_east` as typed. robofast
 checks each one against the star catalog (`docs/sky.md`) before the row
 becomes a request (`verify_offsets`; the check itself is
-`robofast_core.guider.offset.check_offset_star`, usable for any explicit
+`robofast.guider.offset.check_offset_star`, usable for any explicit
 offset). The guide star the offset implies is the target, moved along its
 proper motion from J2000 to the date of the import, plus the offset; the
 catalog's stars are moved to the same date. The row passes when a catalog

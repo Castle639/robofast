@@ -5,7 +5,7 @@ telescope, has a front end at the telescope: the fiber head, a guide
 camera with a tip/tilt stage, and a **calibration stage** ("calstage") that
 puts calibration light into, or blocks, the science and sky fibers.
 robofast serves the calibration stage as standard Alpaca devices
-(`robofast_core/devices/tres_frontend_server.py`), so the sequencer drives
+(`robofast/devices/tres_frontend_server.py`), so the sequencer drives
 it directly, with leases, the device owner's fencing, a simulator and
 ConformU like every other device, and no message broker.
 
@@ -21,8 +21,8 @@ mountain".
 | Mechanism | Hardware and protocol (from the code) | robofast |
 |---|---|---|
 | Calibration stage | PI **L-505** linear stage on a PI **C-663** Mercury Step controller. The front end connects to it as a serial port (the controller's USB, 115200 baud; an older version found it by its USB serial number) and drives it with PI's GCS command set through PI's `pipython`: on connect it switches the servo on and **references to the negative limit** (`FNL`); a move is `MOV 1 <mm>`, waited for with `waitontarget`; travel limits come from the controller (`TMN?`/`TMX?`). Named positions (`out`, `sky`, `science`, `block_sky`, `block_science`) are millimetre values in its config. (The live system reports the stage as a PI M-112.22S1.) | this server: `filterwheel/0` + `focuser/0` |
-| Calibration-stage power | an outlet on the front end's own APC switched PDU (SNMP), which also powers the tip/tilt controller, the guide camera, the front-end computer and the star projector. The front end can power-cycle the stage. | robofast's APC PDU server (`robofast_core/devices/pdu_server.py`) can serve it; not configured here yet |
-| Calibration lamps (ThAr, incandescent) | **not** the front end: the legacy TCS window switches them itself, on a Pulizzi power switch, through a separate program | the lamp Switch server (`robofast_core/devices/pulizzi_server.py`, `docs/pulizzi.md`); `ARC`/`LAMP_FLAT` requests on the 60-inch |
+| Calibration-stage power | an outlet on the front end's own APC switched PDU (SNMP), which also powers the tip/tilt controller, the guide camera, the front-end computer and the star projector. The front end can power-cycle the stage. | robofast's APC PDU server (`robofast/devices/pdu_server.py`) can serve it; not configured here yet |
+| Calibration lamps (ThAr, incandescent) | **not** the front end: the legacy TCS window switches them itself, on a Pulizzi power switch, through a separate program | the lamp Switch server (`robofast/devices/pulizzi_server.py`, `docs/pulizzi.md`); `ARC`/`LAMP_FLAT` requests on the 60-inch |
 | Tip/tilt | PI S-340 platform on an E-518 controller (GCS) | the guider service (`docs/guider.md`), which already has an E-518 backend |
 | Star projector | three Zaber axes (X, Y, rotation; the rotation's homing is noted as broken), an artificial star for daytime guider tests | not served (an engineering tool; a Focuser per axis if it is wanted) |
 | Telescope focus | the front end focuses the telescope itself, through the TCS (the secondary's focus commands, via the relay), and has its own autofocus routine | the TCSGO server's `focuser/0` (`docs/tcsgo.md`) and robofast's autofocus |
@@ -68,7 +68,7 @@ move, a failed move, or a hand move); setting a named position works from
 anywhere. A position whose millimetre value is `null` in the config (not yet
 confirmed) is listed in `Names` but refused.
 
-## 3. Protocol (PI GCS 2.0 subset; `robofast_core/devices/pi_gcs.py`)
+## 3. Protocol (PI GCS 2.0 subset; `robofast/devices/pi_gcs.py`)
 
 One command per line (LF). Setting commands have no reply: robofast reads
 `ERR?` after each (the last error code, cleared by the read) and raises on a
@@ -95,7 +95,7 @@ refused: not referenced or servo off), 7 (position out of limits), 10
   in the config **and** `--hardware` on the command line; the shipped
   `sites/flwo60/tres_frontend.json` has it false. `"sim"` (or
   `--simulate`) runs the simulated controller
-  (`robofast_core/devices/tres_frontend_sim.py`).
+  (`robofast/devices/tres_frontend_sim.py`).
 * **Starting, connecting to, reading and stopping the server never move the
   stage.** Unlike the legacy front end, robofast does not reference on
   connect: referencing is an explicit `Action("Reference")`, and until then
@@ -143,7 +143,7 @@ refused: not referenced or servo off), 7 (position out of limits), 10
 
 While the legacy TCS window still issues `calstage` commands, the server
 can keep the legacy Redis keys working
-(`robofast_core/devices/calstage_redis.py`; config `legacy_redis`):
+(`robofast/devices/calstage_redis.py`; config `legacy_redis`):
 
 * **Mirror**: `calstage_status` set to the stage's state when it changes
   (the position's name, `moving`, the position in mm such as `12.500`, or
@@ -166,7 +166,7 @@ robofast itself never needs Redis.
 ## 7. Running and testing
 
 ```
-python -m robofast_core.devices.tres_frontend_server --config sites/flwo60/tres_frontend.json --simulate
+python -m robofast.devices.tres_frontend_server --config sites/flwo60/tres_frontend.json --simulate
 ```
 
 prints `{"url": ..., "port": "simulator"}`. Tests:

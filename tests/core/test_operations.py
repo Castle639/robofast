@@ -10,11 +10,11 @@ from pathlib import Path
 
 import pytest
 
-from robofast_core.config import load_config
-from robofast_core.plan import CalibrationPlan, Idle, Observation, StaticPlan
-from robofast_core.sequencer_service import build, build_units, load_plan
-from robofast_core.testing.checks import wait_until
-from robofast_core.timeline import Timeline
+from robofast.config import load_config
+from robofast.plan import CalibrationPlan, Idle, Observation, StaticPlan
+from robofast.sequencer_service import build, build_units, load_plan
+from robofast.testing.checks import wait_until
+from robofast.timeline import Timeline
 
 BOUND = 3.0
 SITES = Path(__file__).resolve().parents[2] / "sites" / "minerva"

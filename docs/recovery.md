@@ -2,7 +2,7 @@
 
 When a telescope's device fails, the sequencer makes the telescope safe
 (abort, park) and then, if the telescope has a `recovery` entry for that
-device, climbs its **recovery ladder** (`robofast_core/recovery.py`) before
+device, climbs its **recovery ladder** (`robofast/recovery.py`) before
 the usual backoff. It replaces legacy `cdk700.recover()`, `killPWI` /
 `restartPWI` and `powercycle`, which were called ad hoc.
 
@@ -53,10 +53,10 @@ its own guards (below).
 
 ## The PDU server
 
-`python -m robofast_core.devices.pdu_server --config pdu.json [--hardware | --simulate]`
+`python -m robofast.devices.pdu_server --config pdu.json [--hardware | --simulate]`
 is an Alpaca **Switch** (ISwitchV2; ConformU-clean in CI,
 `scripts/conformu_pdu.py`) for an APC switched PDU over SNMP
-(`robofast_core/devices/snmp.py`: a small v1/v2c GET/SET client, no
+(`robofast/devices/snmp.py`: a small v1/v2c GET/SET client, no
 dependency; `apc_pdu.py`: PowerNet-MIB `sPDUOutletCtl`, as legacy
 `minerva_library/pdu.py`).
 

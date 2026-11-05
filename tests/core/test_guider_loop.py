@@ -14,15 +14,15 @@ import time
 import numpy as np
 import pytest
 
-from robofast_core.guider.base import ROI, HardwareNotAllowed, RealClock, VirtualClock
-from robofast_core.guider.calibration import Calibration
-from robofast_core.guider.loop import Backlight, GuideConfig, Guider
-from robofast_core.guider.offload import OffloadConfig, Offloader
-from robofast_core.guider.redis_pub import TrackingPublisher
-from robofast_core.guider.service import GuiderRemote, GuiderService, GuiderServiceConfig
-from robofast_core.guider.sim import Fiber, Jitter, SimCamera, SimMount, SimTipTilt, SimWorld
-from robofast_core.guider.tiptilt import MountOffset
-from robofast_core.registry import ValueRegistry
+from robofast.guider.base import ROI, HardwareNotAllowed, RealClock, VirtualClock
+from robofast.guider.calibration import Calibration
+from robofast.guider.loop import Backlight, GuideConfig, Guider
+from robofast.guider.offload import OffloadConfig, Offloader
+from robofast.guider.redis_pub import TrackingPublisher
+from robofast.guider.service import GuiderRemote, GuiderService, GuiderServiceConfig
+from robofast.guider.sim import Fiber, Jitter, SimCamera, SimMount, SimTipTilt, SimWorld
+from robofast.guider.tiptilt import MountOffset
+from robofast.registry import ValueRegistry
 
 TARGET = (320.0, 240.0)
 #: Where the closed-loop table goes when set (CI step summary, the report).
@@ -620,7 +620,7 @@ async def test_cli_rejects_hardware_config_without_flag(tmp_path):
     proc = await asyncio.create_subprocess_exec(
         sys.executable,
         "-m",
-        "robofast_core.guider.service",
+        "robofast.guider.service",
         "--config",
         str(cfg),
         "--listen",

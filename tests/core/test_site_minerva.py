@@ -15,25 +15,25 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from robofast_core import config as enclosure_config
-from robofast_core.autofocus import AutofocusSetup
-from robofast_core.autofocus_plan import TriggerConfig
-from robofast_core.devices.kiwispec_service import KiwiSpecConfig
-from robofast_core.fits_writer import Optics
-from robofast_core.guider.base import HardwareNotAllowed, RealClock
-from robofast_core.guider.calibration import Calibration, sky_matrix
-from robofast_core.guider.loop import GuideConfig
-from robofast_core.guider.service import GuiderServiceConfig, build_parts
-from robofast_core.imaging import ImagingConfig
-from robofast_core.plan import plan_from_config
-from robofast_core.request_model import load_request_groups
-from robofast_core.sequencer_service import build, load_plan
-from robofast_core.sites.minerva.guider_calibration import from_sx_legacy
-from robofast_core.sites.minerva.legacy_csv import from_legacy_csv
-from robofast_core.supervisor_service import build as build_supervisor
-from robofast_core.timeline import Timeline
-from robofast_core.weather_bridge import build_sources, parse_config
-from robofast_core.weather_bridge import load_config as load_weather
+from robofast import config as enclosure_config
+from robofast.autofocus import AutofocusSetup
+from robofast.autofocus_plan import TriggerConfig
+from robofast.devices.kiwispec_service import KiwiSpecConfig
+from robofast.fits_writer import Optics
+from robofast.guider.base import HardwareNotAllowed, RealClock
+from robofast.guider.calibration import Calibration, sky_matrix
+from robofast.guider.loop import GuideConfig
+from robofast.guider.service import GuiderServiceConfig, build_parts
+from robofast.imaging import ImagingConfig
+from robofast.plan import plan_from_config
+from robofast.request_model import load_request_groups
+from robofast.sequencer_service import build, load_plan
+from robofast.sites.minerva.guider_calibration import from_sx_legacy
+from robofast.sites.minerva.legacy_csv import from_legacy_csv
+from robofast.supervisor_service import build as build_supervisor
+from robofast.timeline import Timeline
+from robofast.weather_bridge import build_sources, parse_config
+from robofast.weather_bridge import load_config as load_weather
 from tests.core.skydata import sky_dir
 
 SITE = Path(__file__).resolve().parents[2] / "sites" / "minerva"
@@ -143,7 +143,7 @@ async def test_plans_load(tmp_path):
 
 
 def test_request_api_config_loads(tmp_path):
-    from robofast_core.request_api import build_enclosures, load_api_config
+    from robofast.request_api import build_enclosures, load_api_config
 
     for name in ("aqawan1.json", "dispatch.example.json", "requests.example.json"):
         shutil.copy(SITE / name, tmp_path / name)
@@ -162,7 +162,7 @@ def test_request_api_config_loads(tmp_path):
 
 
 def test_console_config_loads(tmp_path):
-    from robofast_core.console.server import build_enclosures, load_console_config
+    from robofast.console.server import build_enclosures, load_console_config
 
     for name in ("aqawan1.json", "dispatch.example.json", "requests.example.json"):
         shutil.copy(SITE / name, tmp_path / name)
@@ -194,7 +194,7 @@ def test_kiwispec_aux_config_loads():
     """The aux devices' server (docs/kiwispec_aux.md): placeholders for the
     bridge, the live server's stage positions, and the stage's scale left
     unconfirmed (moves refused until it is)."""
-    from robofast_core.devices.kiwispec_aux_server import KiwiSpecAuxConfig
+    from robofast.devices.kiwispec_aux_server import KiwiSpecAuxConfig
 
     cfg = KiwiSpecAuxConfig.from_dict(_json("kiwispec_aux.example.json"))
     assert not cfg.allow_hardware
@@ -353,7 +353,7 @@ def test_kiwispec_agrees():
 def test_sky_config_loads():
     """sky.example.json: the vetting config (docs/sky.md), with T2's measured
     FAU zero point and the fiber's 98 %."""
-    from robofast_core.vetting import Vetter
+    from robofast.vetting import Vetter
 
     cfg = _json("sky.example.json")
     cfg["catalog"] = {"cache_dir": str(sky_dir()), "fetch": False}
@@ -373,7 +373,7 @@ def test_sky_config_loads():
 def test_throughput_config_loads():
     """throughput.example.json: the throughput monitor (docs/throughput.md),
     its expected zero points from sky.example.json's ports."""
-    from robofast_core.throughput import ThroughputConfig
+    from robofast.throughput import ThroughputConfig
 
     cfg = ThroughputConfig.load(SITE / "throughput.example.json")
     assert cfg.store.is_absolute() and cfg.status is not None
@@ -388,9 +388,9 @@ def test_throughput_config_loads():
 
 def test_target_sheet_config_loads():
     """target_sheet.example.json: the Google Sheet reader
-    (robofast_core.sites.minerva.target_sheet; docs/minerva_sheet.md), with
+    (robofast.sites.minerva.target_sheet; docs/minerva_sheet.md), with
     placeholders for the sheet keys and a key path outside the repository."""
-    from robofast_core.sites.minerva.target_sheet import SheetConfig, _placeholder
+    from robofast.sites.minerva.target_sheet import SheetConfig, _placeholder
 
     cfg = SheetConfig.load(SITE / "target_sheet.example.json")
     assert set(cfg.enabled()) == {"targets", "bstars"}

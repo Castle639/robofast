@@ -10,7 +10,7 @@ import math
 import numpy as np
 import pytest
 
-from robofast_core.guider.base import (
+from robofast.guider.base import (
     ROI,
     Frame,
     HardwareNotAllowed,
@@ -20,15 +20,15 @@ from robofast_core.guider.base import (
     check_address,
     range_fraction,
 )
-from robofast_core.guider.calibration import (
+from robofast.guider.calibration import (
     Calibration,
     CalibrationStore,
     fit_matrix,
     measure,
     sky_matrix,
 )
-from robofast_core.guider.camera import AlpacaCamera, FrameGrabberCamera, ZWOCamera
-from robofast_core.guider.centroid import (
+from robofast.guider.camera import AlpacaCamera, FrameGrabberCamera, ZWOCamera
+from robofast.guider.centroid import (
     AnnulusCentroider,
     GaussianFit,
     QuadraticPeak,
@@ -36,8 +36,8 @@ from robofast_core.guider.centroid import (
     find_stars,
     make_centroider,
 )
-from robofast_core.guider.controller import Controller, Gains
-from robofast_core.guider.sim import (
+from robofast.guider.controller import Controller, Gains
+from robofast.guider.sim import (
     Fiber,
     Jitter,
     SimCamera,
@@ -46,7 +46,7 @@ from robofast_core.guider.sim import (
     SimWorld,
     render_window,
 )
-from robofast_core.guider.tiptilt import (
+from robofast.guider.tiptilt import (
     PIGCS,
     POS_OUT_OF_LIMITS,
     SXAO,
@@ -58,11 +58,11 @@ from robofast_core.guider.tiptilt import (
     alpaca_telescope,
     open_pi_gcs,
 )
-from robofast_core.sites.flwo60.guider_calibration import from_tres_legacy
-from robofast_core.sites.minerva.guider_calibration import from_sx_legacy
-from robofast_core.testing.alpaca_server import FakeAlpacaServer
-from robofast_core.testing.fakes import FakeCamera
-from robofast_core.testing.tunnel import FakeTunnel
+from robofast.sites.flwo60.guider_calibration import from_tres_legacy
+from robofast.sites.minerva.guider_calibration import from_sx_legacy
+from robofast.testing.alpaca_server import FakeAlpacaServer
+from robofast.testing.fakes import FakeCamera
+from robofast.testing.tunnel import FakeTunnel
 
 ROI32 = ROI(100, 200, 32, 32)
 

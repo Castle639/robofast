@@ -7,10 +7,10 @@ import asyncio
 
 import pytest
 
-from robofast_core.alpaca import alpaca_owner
-from robofast_core.plan import StaticPlan
-from robofast_core.sequencer import Sequencer, SequencerConfig, TelescopeUnit
-from robofast_core.timeline import Timeline
+from robofast.alpaca import alpaca_owner
+from robofast.plan import StaticPlan
+from robofast.sequencer import Sequencer, SequencerConfig, TelescopeUnit
+from robofast.timeline import Timeline
 
 from .conftest import COMMAND_TIMEOUT, SIM_SEQ, _Plain
 

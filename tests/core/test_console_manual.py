@@ -12,19 +12,19 @@ from datetime import UTC, datetime
 import httpx
 import pytest
 
-from robofast_core import sky
-from robofast_core.api_auth import TokenStore
-from robofast_core.console.hold import ManualSession, OperatorHold, read_holds, send_command
-from robofast_core.console.server import (
+from robofast import sky
+from robofast.api_auth import TokenStore
+from robofast.console.hold import ManualSession, OperatorHold, read_holds, send_command
+from robofast.console.server import (
     Console,
     ConsoleHttpServer,
     build_enclosures,
     load_console_config,
 )
-from robofast_core.plan import CallablePlan, Observation, StaticPlan
-from robofast_core.sequencer_service import write_snapshot
-from robofast_core.supervisor_service import SupervisorServer
-from robofast_core.testing.checks import wait_until
+from robofast.plan import CallablePlan, Observation, StaticPlan
+from robofast.sequencer_service import write_snapshot
+from robofast.supervisor_service import SupervisorServer
+from robofast.testing.checks import wait_until
 
 from . import test_console as _console
 from .test_console import Recorder, write_site
@@ -248,7 +248,7 @@ async def test_manual_needs_operator_control_and_the_operator_scope(make_console
 
 
 def test_the_page_has_manual_control():
-    from robofast_core.console.page import render_page
+    from robofast.console.page import render_page
 
     page = render_page("n")
     assert 'id="manual"' in page and 'id="mc-take"' in page and "/console/api/manual" in page

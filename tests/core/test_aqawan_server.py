@@ -2,7 +2,7 @@
 
 Fast tier: the simulator and the server run in this process (on their own
 threads) and are driven through robofast's own Alpaca client and
-:class:`~robofast_core.owner.DeviceOwner`, then by the safety supervisor,
+:class:`~robofast.owner.DeviceOwner`, then by the safety supervisor,
 in-process and as its own (killed) process. Nothing here leaves loopback.
 """
 
@@ -22,7 +22,7 @@ from pathlib import Path
 import httpx
 import pytest
 
-from robofast_core import (
+from robofast import (
     DeviceOwner,
     NotAuthorized,
     Observation,
@@ -32,16 +32,16 @@ from robofast_core import (
     SequencerConfig,
     Timeline,
 )
-from robofast_core.alpaca import alpaca_owner
-from robofast_core.alpaca_client import (
+from robofast.alpaca import alpaca_owner
+from robofast.alpaca_client import (
     AlpacaDevice,
     DriverException,
     InvalidOperationException,
     NotConnectedException,
     NotImplementedException,
 )
-from robofast_core.devices.aqawan_pac import HardwareNotAllowed, parse_status
-from robofast_core.devices.aqawan_server import (
+from robofast.devices.aqawan_pac import HardwareNotAllowed, parse_status
+from robofast.devices.aqawan_server import (
     CLOSED,
     CLOSING,
     ERROR,
@@ -51,20 +51,20 @@ from robofast_core.devices.aqawan_server import (
     AqawanServer,
     aggregate,
 )
-from robofast_core.devices.aqawan_sim import AqawanSim
-from robofast_core.lease_client import RemoteSupervisor
-from robofast_core.safety import AUTO_CLEAR_PREFIX, ENCLOSURE_MEMBERS, mentions_estop
-from robofast_core.supervisor_service import SupervisorServer
-from robofast_core.testing.alpaca_server import FakeAlpacaServer
-from robofast_core.testing.checks import wait_until
-from robofast_core.testing.fakes import (
+from robofast.devices.aqawan_sim import AqawanSim
+from robofast.lease_client import RemoteSupervisor
+from robofast.safety import AUTO_CLEAR_PREFIX, ENCLOSURE_MEMBERS, mentions_estop
+from robofast.supervisor_service import SupervisorServer
+from robofast.testing.alpaca_server import FakeAlpacaServer
+from robofast.testing.checks import wait_until
+from robofast.testing.fakes import (
     FakeCamera,
     FakeObservingConditions,
     FakeSafetyMonitor,
     FakeTelescope,
     FakeWeather,
 )
-from robofast_core.testing.processes import ROOT, Service, SupervisorProcess
+from robofast.testing.processes import ROOT, Service, SupervisorProcess
 
 from .conftest import FAST_REMOTE, FAST_SAFETY, FAST_SEQ
 
@@ -239,7 +239,7 @@ async def test_close_cancels_an_open_sequence(make_rig):
 
 
 async def test_abortslew_sends_stop(make_rig, caplog):
-    caplog.set_level("INFO", logger="robofast_core.devices.aqawan_server")
+    caplog.set_level("INFO", logger="robofast.devices.aqawan_server")
     rig = make_rig({"heartbeat_timeout": None, "open_time": 1.0})
     dome = rig.dome()
     await dome.call("OpenShutter")
@@ -315,7 +315,7 @@ async def test_read_only_server_sends_only_queries(make_rig):
         with pytest.raises(InvalidOperationException, match="read-only"):
             await dome.call("Action", action, "test")
     # The client refuses too, whatever the caller.
-    from robofast_core.devices.aqawan_pac import PACReadOnly
+    from robofast.devices.aqawan_pac import PACReadOnly
 
     with pytest.raises(PACReadOnly):
         await rig.server.aqawan.pac.command("HEARTBEAT")
@@ -382,7 +382,7 @@ async def test_fault_is_a_separate_axis_from_position(make_rig):
 
 
 async def test_clear_faults_is_privileged_and_needs_the_enclosure_closed(make_rig, caplog):
-    caplog.set_level("INFO", logger="robofast_core.devices.aqawan_server")
+    caplog.set_level("INFO", logger="robofast.devices.aqawan_server")
     rig = make_rig({"heartbeat_timeout": None})
     owner = rig.owner()
     safety = owner.grant("safety", privileged=True)
@@ -544,7 +544,7 @@ def test_server_refuses_a_non_loopback_pac(tmp_path):
         )
     )
     proc = subprocess.run(
-        [sys.executable, "-m", "robofast_core.devices.aqawan_server", "--config", str(path)],
+        [sys.executable, "-m", "robofast.devices.aqawan_server", "--config", str(path)],
         cwd=ROOT,
         env={**os.environ, "PYTHONPATH": str(ROOT)},
         capture_output=True,

@@ -11,9 +11,9 @@ import time
 import httpx
 import pytest
 
-from robofast_core.clock import ScaledClock
-from robofast_core.devices.kiwispec_client import KiwiSpecBusy
-from robofast_core.devices.kiwispec_service import KiwiSpecRemote, KiwiSpecServer
+from robofast.clock import ScaledClock
+from robofast.devices.kiwispec_client import KiwiSpecBusy
+from robofast.devices.kiwispec_service import KiwiSpecRemote, KiwiSpecServer
 
 from .test_kiwispec import http, run_job, service, service_config, sim  # noqa: F401
 

@@ -11,8 +11,8 @@ from EXOZIPPy's tooling (BSD 3-Clause, same author):
 
 | Piece | What it does |
 |---|---|
-| `robofast_core/zenodo.py` | the download side: fetch, check size and md5, cache in the data directory; `python -m robofast_core.zenodo fetch` / `status` |
-| `robofast_core/zenodo_assets.py` | the ONE table of records and pins (`RECORDS`), and the records the code expects (`EXPECTED`; `PENDING` = expected but not pinned) |
+| `robofast/zenodo.py` | the download side: fetch, check size and md5, cache in the data directory; `python -m robofast.zenodo fetch` / `status` |
+| `robofast/zenodo_assets.py` | the ONE table of records and pins (`RECORDS`), and the records the code expects (`EXPECTED`; `PENDING` = expected but not pinned) |
 | `scripts/zenodo_publish.py` | the upload side: creates a **draft**, uploads, verifies, and **stops** |
 
 Records:
@@ -81,7 +81,7 @@ redirects, and every message the script prints passes through a redactor.
    `zenodo_publish.py community --record <id> --community <slug>` after
    publishing (Zenodo ignores `communities` on publish).
 
-4. **Pin**: every pin lives in `robofast_core/zenodo_assets.py`.
+4. **Pin**: every pin lives in `robofast/zenodo_assets.py`.
 
    ```sh
    python scripts/zenodo_publish.py pin --record <id> --name gaia_extracts --update-registry

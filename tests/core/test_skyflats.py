@@ -1,4 +1,4 @@
-"""Twilight sky flats (robofast_core/skyflats.py, docs/skyflats.md): exposure
+"""Twilight sky flats (robofast/skyflats.py, docs/skyflats.md): exposure
 times predicted on the sky simulator's twilight, evening and morning, the
 level guards, the request type, and the sequencer taking them."""
 
@@ -11,12 +11,12 @@ from datetime import UTC, datetime
 import numpy as np
 import pytest
 
-from robofast_core.photometry import PortPhotometry, SkyConditions
-from robofast_core.plan import Observation, StaticPlan
-from robofast_core.skyflats import FlatConfig, flat_spot, take_flats, twilight_rate
-from robofast_core.testing import TEST_OPTICS
-from robofast_core.testing.skysim import SkyCamera, SkyScene
-from robofast_core.testing.starfield import Detector
+from robofast.photometry import PortPhotometry, SkyConditions
+from robofast.plan import Observation, StaticPlan
+from robofast.skyflats import FlatConfig, flat_spot, take_flats, twilight_rate
+from robofast.testing import TEST_OPTICS
+from robofast.testing.skysim import SkyCamera, SkyScene
+from robofast.testing.starfield import Detector
 
 FILTERS = {"B": 0.35, "V": 1.0, "R": 1.6}
 
@@ -28,7 +28,7 @@ class Twilight:
 
     def __init__(self, alt0: float, rate: float, overhead: float = 15.0) -> None:
         cam = SkyCamera((64, 64), 1.0, detector=Detector(shape=(64, 64), gain=1.5, bias=1000))
-        from robofast_core.catalog import Stars
+        from robofast.catalog import Stars
 
         self.sky = SkyScene(
             Stars.empty(), cam, PortPhotometry(**TEST_OPTICS, zero_point=24.0, gain=1.5), seed=2
@@ -117,7 +117,7 @@ def test_model_and_flat_spot():
 def test_sky_flat_request_dispatches():
     import asyncio
 
-    from robofast_core.request_model import load_request_groups
+    from robofast.request_model import load_request_groups
 
     from .test_dispatch import group, make
 
@@ -134,9 +134,9 @@ def test_sky_flat_request_dispatches():
 
 
 async def test_the_sequencer_takes_flats_through_the_filter_wheel(make_rig, tmp_path):
-    from robofast_core.owner import DeviceOwner
-    from robofast_core.testing.focus_sim import SimFocuser, StarfieldCamera
-    from robofast_core.testing.skysim import SkyFocusScene
+    from robofast.owner import DeviceOwner
+    from robofast.testing.focus_sim import SimFocuser, StarfieldCamera
+    from robofast.testing.skysim import SkyFocusScene
 
     from .test_imaging import headers
     from .test_pointmodel_sequencer import run, sky_rig
@@ -148,7 +148,7 @@ async def test_the_sequencer_takes_flats_through_the_filter_wheel(make_rig, tmp_
     imaging.set_clock(rig.sequencer.clock)
     unit.pointing = None
     sky = scn.sky
-    from robofast_core.catalog import Stars
+    from robofast.catalog import Stars
 
     sky.catalog = Stars.empty()
     sky.conditions = SkyConditions(sun_alt=-6.9, target_alt=75.0)
@@ -156,7 +156,7 @@ async def test_the_sequencer_takes_flats_through_the_filter_wheel(make_rig, tmp_
     sky.photometry = PortPhotometry(**TEST_OPTICS, zero_point=24.0, gain=1.5)
     cam = StarfieldCamera(SimFocuser(position=20000), SkyFocusScene(sky, mount, lambda: when))
     unit.camera = DeviceOwner("t1.camera", lambda: cam, rig.timeline, default_timeout=5)
-    from robofast_core.testing.fakes import FakeFilterWheel
+    from robofast.testing.fakes import FakeFilterWheel
 
     wheel = FakeFilterWheel(("V", "R"), move_time=0.01)
     unit.filterwheel = DeviceOwner("t1.filterwheel", lambda: wheel, rig.timeline, default_timeout=5)

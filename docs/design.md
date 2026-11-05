@@ -1,7 +1,7 @@
 # robofast design
 
 Status: draft, 2026-10-30. Decision: build robofast's own core on ASCOM Alpaca,
-starting from the `robofast_core` prototype, and borrow ideas from existing
+starting from the `robofast` prototype, and borrow ideas from existing
 frameworks rather than build on one of them.
 
 ## 1. Goals
@@ -98,7 +98,7 @@ their good ideas instead (section 9).
 - **Non-Alpaca instruments** (the spectrograph, iodine cell, exposure meter)
   follow the same pattern: one owning service, a small typed HTTP API, a
   simulator. Not a parallel framework.
-  KiwiSpec is the first (`robofast_core/devices/kiwispec_service.py`,
+  KiwiSpec is the first (`robofast/devices/kiwispec_service.py`,
   `docs/kiwispec.md`): it alone talks to the spectrograph PC's legacy server
   and SI camera server, runs one job at a time with every step bounded,
   terminates on the flux record's counts (the FAU guide frames' flux, not
@@ -106,7 +106,7 @@ their good ideas instead (section 9).
   raises. Like the Aqawan server, it refuses anything but a verified
   simulator without `allow_hardware` in the config and `--hardware`
   (below, "The hardware gate").
-- **The guider** (`robofast_core/guider/`, `docs/guider.md`) is one such
+- **The guider** (`robofast/guider/`, `docs/guider.md`) is one such
   service per guide camera, run on the computer the camera is plugged into
   so frames never cross the network in the loop: camera, centroider,
   PI(D) controller, a measured device-to-pixel calibration, and a
@@ -114,7 +114,7 @@ their good ideas instead (section 9).
   offloading to the mount and fiber acquisition. Every real backend is
   behind the same `allow_hardware` + `--hardware` gate.
 - **PlaneWave CDK700s under PWI** (MINERVA) have robofast's own Alpaca
-  Telescope + Focuser + Rotator server (`robofast_core/devices/pwi_*`,
+  Telescope + Focuser + Rotator server (`robofast/devices/pwi_*`,
   `docs/pwi.md`) over PWI's HTTP API, PWI4 or the legacy PWI2, with
   simulators of both and ConformU in CI: altitude limits and a limit watch
   enforced in the server, motors enabled only on explicit command,
@@ -128,7 +128,7 @@ their good ideas instead (section 9).
   camera's Alpaca server, a legacy Redis) talks to real hardware only with
   `"allow_hardware": true` in its config **and** `--hardware` on its
   command line; shipped configs say false. Without both it talks only to a
-  simulator it has **verified** itself (`robofast_core/hwgate.py`).
+  simulator it has **verified** itself (`robofast/hwgate.py`).
   Loopback is not evidence: `ssh -L 7100:pac:22004` puts the real PAC on
   127.0.0.1, as would socat, a VPN helper or a container port mapping. A
   simulator proves itself by holding a Linux abstract Unix socket
@@ -156,7 +156,7 @@ their good ideas instead (section 9).
 
 ### 3.2 Device owners and grants
 
-A `DeviceOwner` is the only path to one device (`robofast_core/owner.py`).
+A `DeviceOwner` is the only path to one device (`robofast/owner.py`).
 
 - Components never hold a device, only a revocable `Grant`.
 - The owner checks the grant immediately before each command goes on the
@@ -173,7 +173,7 @@ A `DeviceOwner` is the only path to one device (`robofast_core/owner.py`).
 ### 3.3 Safety supervisor
 
 The only component allowed to open or close an enclosure
-(`robofast_core/safety.py`). Policy:
+(`robofast/safety.py`). Policy:
 
 - The enclosure is open only while (a) the weather has been **continuously
   safe for the reopen hold**, and (b) a live sequencer holds an unexpired
@@ -235,7 +235,7 @@ The only component allowed to open or close an enclosure
 
 ### 3.4 Sequencer, one per enclosure
 
-`robofast_core/sequencer.py`. Each "generation" of observing:
+`robofast/sequencer.py`. Each "generation" of observing:
 
 1. request an open lease and wait for the supervisor to open;
 2. take grants for this generation only, per telescope;
@@ -266,7 +266,7 @@ up for the night once the ladder is used up.
 
 **Plans.** The sequencer asks a *plan provider* for each telescope's next
 observation whenever that telescope is free, and reports how each ended
-(`robofast_core/plan.py`):
+(`robofast/plan.py`):
 
 ```python
 class PlanProvider(Protocol):
@@ -340,7 +340,7 @@ failure. Every cleanup switches the tracking off (prisms neutral).
 configuration of type `AUTO_FOCUS`) focuses its telescope on its field,
 through its filter and port: the lease, the slew, the grants (the focuser's
 is fenced with the others) and the cleanup are the usual ones
-(`robofast_core/autofocus.py`, `docs/autofocus.md`). The default method takes
+(`robofast/autofocus.py`, `docs/autofocus.md`). The default method takes
 two exposures far out on one known side of focus, where the star's size is
 set by the optics and not the seeing, and computes the focus from a
 calibrated V-curve slope; a donut method needs one, a sweep nine. A focus
@@ -354,7 +354,7 @@ start; each measured focus re-anchors it.
 **Evening start, morning end.** The sequencer process runs one night.
 `deploy/robofast-sequencer@.timer` starts its unit every afternoon; the
 unit takes evening calibrations (closed) while the Sun is up, waits with
-`python -m robofast_core.when --sun-below -6 --config <enclosure.json>`
+`python -m robofast.when --sun-below -6 --config <enclosure.json>`
 (astropy, the site from the config; at once if it is already dark, e.g.
 after a restart), then runs the night. The dispatch scheduler ends the
 night once the Sun is above its `max_sun_alt` and rising; on that clean
@@ -378,7 +378,7 @@ on the fiber; the guide mode and star go into the FITS headers
 (`GUIDMODE`, `GS*`) and the decision record. With `guide: "auto"` the
 dispatch scheduler chooses annulus or offset guiding from the instrument's
 guiding model (`instruments.<name>.guiding`:
-`robofast_core/guider/recommend.py`, a photon-noise prediction of each
+`robofast/guider/recommend.py`, a photon-noise prediction of each
 method's error checked against the guide loop in the simulator), and
 records the recommendation and its reason. How the guide camera sees a
 target on the fiber is per instrument (`on_target`): the spill round a
@@ -387,7 +387,7 @@ beamsplitter (`beamsplitter`, MINERVA's FAU, JDE 2026-11-02: "the FAU has
 no fiber hole"); offset guiding is chosen only when the target is too
 faint to see at that light, or to correct at least `min_rate` times a
 second. **Seeing** comes from a
-configured, pluggable source (`robofast_core/seeing.py`,
+configured, pluggable source (`robofast/seeing.py`,
 `docs/seeing.md`; the dispatch plan's `seeing` entry): by default the
 guiders' live FWHM (the median over the last 30 min, stale after 15),
 falling back to the guiding model's value; the same estimate decides a
@@ -396,7 +396,7 @@ it (JDE 2026-11-02: "schedulers may use seeing as a selection criterion,
 too").
 
 **Saving frames.** With an `images` entry in the enclosure config, every
-frame is saved (`robofast_core/imaging.py`, `docs/data.md`). The image is
+frame is saved (`robofast/imaging.py`, `docs/data.md`). The image is
 downloaded right after `ImageReady`, by the Alpaca ImageBytes transfer with
 JSON as the fallback, with a timeout sized by the image. This happens in
 the telescope's task and under its generation grant, because the camera
@@ -409,10 +409,10 @@ frames are on disk, with their paths, so the request API's data endpoint
 returns real files. If a write fails, the pipeline raises an alarm and that
 telescope gives up for the night. Frames are never dropped silently.
 
-**Entry point.** `python -m robofast_core.sequencer_service --config
+**Entry point.** `python -m robofast.sequencer_service --config
 <enclosure.json>` builds the owners, the lease client and the plan from the
 enclosure's config file, which the supervisor service reads too
-(`robofast_core/config.py`; `sites/minerva/aqawan1.json` is MINERVA's
+(`robofast/config.py`; `sites/minerva/aqawan1.json` is MINERVA's
 Aqawan 1 with T1 and T2, on placeholder addresses). A telescope entry may
 add `filterwheel` (an Alpaca address) and `port_action`. SIGTERM cleans up and
 releases the lease; exit status 3 means "needs an operator" (quarantined, or
@@ -457,7 +457,7 @@ slews are not vetted against each other; MEarth North's telescopes can collide.
   unparked telescope. An *emergency* close (weather unsafe or unknown, an
   enclosure fault, a shutter error, the console's EMERGENCY CLOSE, the
   supervisor stopping) still closes after `park_wait`, parked or not
-  (`robofast_core/safety.py`, "Closing on unparked telescopes").
+  (`robofast/safety.py`, "Closing on unparked telescopes").
 - **Collision checking hook.** Before every slew the telescope task asks a
   `SlewGuard` (default: allow). MEarth North's **collision checker** will be
   one: it vets each target and path against the other telescopes'
@@ -468,7 +468,7 @@ slews are not vetted against each other; MEarth North's telescopes can collide.
 ### 3.6 Telescopes and pointing models
 
 The telescope layer hides the mount type. robofast keeps its own pointing
-model per telescope and M3 port (`robofast_core/pointmodel.py`,
+model per telescope and M3 port (`robofast/pointmodel.py`,
 `docs/pointing_model.md`): built from plate solves by a pointing run (a
 `POINTING_MODEL` request) and from every solved frame, terms chosen by
 significance and cross-validated, applied to every slew (optionally with
@@ -477,7 +477,7 @@ rolling local correction and a nightly drift alarm. Where the mount
 software's own model is kept (PWI4 on the CDK700s, for now), robofast's
 can run disabled, measuring only. Each port's image PA and parity against
 the rotator's mechanical angle is measured from plate solves and saved
-(`robofast_core/rotcal.py`, `docs/rotcal.md`); the frame pipeline's WCS,
+(`robofast/rotcal.py`, `docs/rotcal.md`); the frame pipeline's WCS,
 the plate solver's hint and the guider's mount matrix read it.
 
 Where a telescope really points is measured, not assumed (`docs/sky.md`):
@@ -487,7 +487,7 @@ non-commercial licence does not fit, UCAC4 or 2MASS tiles from IRSA with an
 estimated G, chosen by `catalog.source`, and `catalog.allow_noncommercial:
 false` to refuse every non-commercial file), a near-blind plate solver that every
 light frame, acquisition and pointing-model run can use, and TPOINT-style
-pointing-error terms (`robofast_core/pointing.py`) that the sky simulator
+pointing-error terms (`robofast/pointing.py`) that the sky simulator
 uses as the mount's "true" errors and that a pointing-model fit recovers.
 Solved frames carry their WCS and a photometric zero point, for throughput
 monitoring.
@@ -502,7 +502,7 @@ may be wrong about the 60-inch's focus.
 ### 3.7 Planning and the request API
 
 - **Requests** are written in the LCO OCS request language, with its field
-  names, nesting and units (`robofast_core/request_model.py`;
+  names, nesting and units (`robofast/request_model.py`;
   `docs/request_language.md` field by field), so OCS clients such as TOM
   Toolkit's `OCSFacility` work unchanged: RequestGroup (`proposal`,
   `ipp_value`, `observation_type`) → Request (`windows`, `location`) →
@@ -526,17 +526,17 @@ may be wrong about the 60-inch's focus.
   taken only rather than idle: MINERVA's B stars, as legacy did). Requests load from JSON files, validated with errors that
   name the entry; a site plug-in's request importers convert legacy lists
   (a dispatch plan's `imports`: MINERVA's target spreadsheet export is
-  `minerva.legacy_csv`), `robofast_core.sites.minerva.target_sheet` reads
+  `minerva.legacy_csv`), `robofast.sites.minerva.target_sheet` reads
   MINERVA's target and B-star lists from their Google Sheet (read only,
   with timestamped snapshots and a fallback to the newest;
-  `docs/minerva_sheet.md`), and `robofast_core.sites.flwo60.catalogs` the FLWO 60-inch's
+  `docs/minerva_sheet.md`), and `robofast.sites.flwo60.catalogs` the FLWO 60-inch's
   telshell catalogs (`.mct` target lists, `.off` offset patterns; `.sec`
   confidential lists described but never decrypted) into an intermediate
   form shaped like the proposed target model, request groups for the
   60-inch, and back into `.mct` for the legacy software
   (`docs/catalogs.md`; rules ported from FLWO's telshell, T. Groner). An InstrumentConfig may name a `filter` and an M3
   `port`; a Configuration may set `allow_partial`.
-- The scheduler is a **dispatch scheduler** (`robofast_core/dispatch.py`),
+- The scheduler is a **dispatch scheduler** (`robofast/dispatch.py`),
   RTS2/POCS-style: whenever a telescope is free it evaluates every request
   for that telescope *now*. Hard constraints first: the telescope's
   instruments and the request's allowed telescopes; time windows (the
@@ -583,7 +583,7 @@ may be wrong about the 60-inch's focus.
   observe through the wrong port); one naming a `filter`, only for
   telescopes whose `filters`, if listed, include it. The sequencer selects
   them (section 3.4).
-- **The nightly plan record** (`robofast_core/plan_record.py`, plan entry
+- **The nightly plan record** (`robofast/plan_record.py`, plan entry
   `"record": {"dir": ..., "night_rollover_hour": 12, "timezone": ...}`):
   every answer and report as one JSON line, one file per night (the local
   date of the evening; times before `night_rollover_hour` belong to the
@@ -594,10 +594,10 @@ may be wrong about the 60-inch's focus.
   abandoned, ToOs received or cancelled, expiries, preemptions and
   outcomes. The first line a process writes to a night's file is a snapshot
   of the scheduler (requests, state, limits, settings), so `python -m
-  robofast_core.plan_record FILE --replay` rebuilds the scheduler, replays
+  robofast.plan_record FILE --replay` rebuilds the scheduler, replays
   the night's calls at their recorded times and checks that it makes the
   same choices (a test does exactly that).
-- The **request API** (`robofast_core/request_api.py`) is the only
+- The **request API** (`robofast/request_api.py`) is the only
   internet-facing surface; the supervisor's API and Alpaca stay on the
   control network. A small REST API over JSON, in its own process, on
   loopback behind a TLS reverse proxy (`deploy/` has nginx and Caddy
@@ -615,13 +615,13 @@ may be wrong about the 60-inch's focus.
   client reads: `/api/instruments/`, `/api/profile/` (the configured
   proposals), `/api/requests/{id}` and its observation blocks,
   `/api/telescope_states/`, and the cadence expansion.
-  **Authentication** (`robofast_core/api_auth.py`): a token per client,
+  **Authentication** (`robofast/api_auth.py`): a token per client,
   stored only as a salted HMAC-SHA256 in a tokens file outside any
   repository, compared in constant time; scopes `read`, `submit`, `too`,
   `operator` (the observer console's actions, section 3.8), `admin`; a client sees and cancels only its own groups; per-token and
   per-address (failed attempts) rate limits; every POST is written to an
   append-only audit log. No default tokens: `python -m
-  robofast_core.request_api tokens add --name ... --scope ...` prints a
+  robofast.request_api tokens add --name ... --scope ...` prints a
   new one once. The HTTP layer is plain asyncio (no new dependency):
   bounded request line, headers and body, timeouts, a connection limit, no
   chunked bodies, JSON errors without stack traces.
@@ -728,7 +728,7 @@ broker outage costs only ToOs, never the night.
 - Published state carries the time it was measured and a maximum age;
   consumers treat expired state as unknown (pyobs).
 - A value registry collects device state for status pages and FITS headers
-  (RTS2; `robofast_core/registry.py`). Values are named `<scope>.<name>`,
+  (RTS2; `robofast/registry.py`). Values are named `<scope>.<name>`,
   where the scope is a telescope (`t1.ccd_temp`) or shared (`site`,
   `software`, `weather`, `enclosure`, `sky`). Each value carries its
   measurement time, maximum age, unit and FITS keyword. Publishers: the
@@ -754,12 +754,12 @@ broker outage costs only ToOs, never the night.
 - Alarms (email or chat) for: quarantine, give-up, shutter not reaching the
   commanded state, safety supervisor or heartbeat failures. The observer
   console shows and acknowledges them; the notifier
-  (`robofast_core/notifier/`, `docs/notifier.md`), its own process, polls
+  (`robofast/notifier/`, `docs/notifier.md`), its own process, polls
   the same sources through the console's aggregator and sends them by
   email, chat webhook or a command (to page an observer): per-sink minimum
   level, deduplication, rate limits, escalation until acknowledged on the
   console, a daily digest. The safety processes do not know it exists.
-- **The observer console** (`robofast_core/console/`, `docs/console.md`):
+- **The observer console** (`robofast/console/`, `docs/console.md`):
   one web page, its own small process, for the observer on site (the FLWO
   60-inch runs as attended automation) and the people watching MINERVA.
   Live by server-sent events: weather (verdict, reasons, key values,
@@ -796,7 +796,7 @@ broker outage costs only ToOs, never the night.
   (quarantine, give-up). A crash-looping sequencer stops being restarted and
   the supervisor's orphan alarm takes over.
 - Cancellation is never lost and a stop never hangs
-  (`robofast_core/cancel.py`). A `task.cancel()` landing inside an httpx
+  (`robofast/cancel.py`). A `task.cancel()` landing inside an httpx
   request can be lost (httpx 0.28 / anyio 4: the request returns normally),
   so every httpx request runs through `isolated()`, in a task of its own,
   and the caller's cancel always arrives. Each loop stopped by a cancel also
@@ -831,18 +831,18 @@ timeouts, limits and policies (`sites/minerva/aqawan1.json`,
 minerva-control `config/*.ini` source and lists the conflicts between them.
 The rules:
 
-- Core (`robofast_core/`, outside `robofast_core/sites/`) has no site
+- Core (`robofast/`, outside `robofast/sites/`) has no site
   names and no site numbers: no coordinates, elevations, apertures, port
   geometry, altitude limits, telescope or instrument names, help text.
 - A site, telescope or instrument value that is missing is an error that
   names the key and the file, never another site's default (the error
-  comes from `robofast_core.config.require_keys` or the config's own
+  comes from `robofast.config.require_keys` or the config's own
   `from_dict`). Generic device tuning (timeouts, poll rates, retry counts)
   may keep defaults. Values derived from site values are derived, not
   assumed: the Sun's refraction uses the standard atmosphere at the
   configured elevation unless a pressure and temperature are configured
   (`docs/weather_bridge.md`).
-- A driver for specific hardware (`robofast_core/devices/`: the Aqawan
+- A driver for specific hardware (`robofast/devices/`: the Aqawan
   PAC, the KiwiSpec PC, the TCSGalil, the TRES front end, ...) may name its
   own hardware; the core modules that use it (sequencer, plan, dispatch,
   request intake, console, safety, imaging, photometry, vetting, Sun,
@@ -869,7 +869,7 @@ that may open. The supervisor holds the mode (saved across restarts; a
 missing or unreadable file means the config's default: `robotic` at
 MINERVA, `attended` at the 60-inch and MEarth South) and the sequencer, the observer console
 and the request API read it from its status; every switch (console or
-`python -m robofast_core.modes`) is logged with who, when and why and
+`python -m robofast.modes`) is logged with who, when and why and
 raised as a notice, never opens by itself (a less safe mode takes effect
 through the normal lease path), and closes at once when the live lease may
 not go on under the new mode. The active mode is in the FITS headers
@@ -900,7 +900,7 @@ and 4, done).** Two mechanisms, for two kinds of difference:
   enclosure config (`sequences`), run as an observation of kind
   `sequence` from a static or calibration plan: e.g. the TRES ThAr and
   flat sets (`sites/flwo60/flwo60.json`). Each step type is an entry of a
-  registry (`robofast_core.sequences.SEQUENCE_STEPS`), so a plug-in adds
+  registry (`robofast.sequences.SEQUENCE_STEPS`), so a plug-in adds
   steps. A sequence runs inside the sequencer's generation and grants like
   any observation; its `cleanup` (lamps off, the stage out, ...) always
   runs after its steps, with grants of its own, also when it is cancelled
@@ -928,7 +928,7 @@ and 4, done).** Two mechanisms, for two kinds of difference:
   KiwiSpec, TRES and the imager, weather sources, guider hardware, recovery
   rungs) registers in a registry keyed by name, and an installed package
   can add entries through the `robofast.plugins` entry-point group. An
-  observation kind is one handler object (`robofast_core/kinds.py`) that
+  observation kind is one handler object (`robofast/kinds.py`) that
   owns its validation, its request mapping and its execution, instead of
   the former if-chain across the plan's kind list, the sequencer, the
   request model and dispatch. The registries that existed already
@@ -947,26 +947,26 @@ The plan, approved by JDE 2026-11-01:
    observation kinds, instrument handlers, guider hardware, weather
    sources, request importers), KiwiSpec decoupled from the sequencer,
    Action names in config, the legacy importers moved under
-   `robofast_core/sites/<site>/`. (The recovery ladder's rungs stay a
+   `robofast/sites/<site>/`. (The recovery ladder's rungs stay a
    fixed list until a site needs another.) **2a**
-   (docs/plugins.md): the plug-in loader (`robofast_core.plugins`: entry
+   (docs/plugins.md): the plug-in loader (`robofast.plugins`: entry
    points and a config's `plugins`), plan types, observation kinds (one
-   handler per kind: `robofast_core/kinds.py`), instrument types
-   (`robofast_core/instruments.py`: imager, camera_spectrograph, KiwiSpec;
+   handler per kind: `robofast/kinds.py`), instrument types
+   (`robofast/instruments.py`: imager, camera_spectrograph, KiwiSpec;
    each dispatch config declares its instruments' types, `/instruments`
    and request intake follow them), KiwiSpec decoupled from the sequencer
    (neutral `SpectrographBusy`/`SpectrographError`, `spectrograph.type`),
    weather sources (MINERVA's adapters loaded from its weather config) and
    notifier sinks.
-   **2b**: guider hardware registries (`robofast_core/guider/hardware.py`;
-   KiwiSpec's backlight registered by `robofast_core.devices`), ADC
-   switches found by name (`robofast_core/adc.py`), Action names in config
+   **2b**: guider hardware registries (`robofast/guider/hardware.py`;
+   KiwiSpec's backlight registered by `robofast.devices`), ADC
+   switches found by name (`robofast/adc.py`), Action names in config
    with robofast's servers' names as defaults, the console's spectrograph
    panel described by the instrument type (`status_fields`); the legacy
-   importers as site code: `robofast_core/sites/minerva/` (the MINERVA
+   importers as site code: `robofast/sites/minerva/` (the MINERVA
    plug-in: weather pages, the legacy target CSV as request importer
    `minerva.legacy_csv`; the target Sheet, the legacy focus model, the
-   legacy AO calibration) and `robofast_core/sites/flwo60/` (the telshell
+   legacy AO calibration) and `robofast/sites/flwo60/` (the telshell
    catalogs and their command line, tres-guider's calibration); a legacy
    frame's port from its file name is the throughput config's
    `file_ports`. The guard now also refuses a module named after a site
@@ -978,8 +978,8 @@ A new site is a new config directory, plus any device servers it needs,
 plus (after step 2) any plug-ins it needs in its own package.
 
 Site code that is not configuration (a new weather source type for the
-bridge, `robofast_core.weather_sources.SOURCE_TYPES`; a new plan type,
-`robofast_core.plan.PLAN_TYPES`; an observation kind or an instrument type)
+bridge, `robofast.weather_sources.SOURCE_TYPES`; a new plan type,
+`robofast.plan.PLAN_TYPES`; an observation kind or an instrument type)
 plugs in through the Python entry-point group `robofast.plugins`: a site
 package declares an entry there in its own `pyproject.toml`, pointing at a
 function that registers its entries, and robofast runs it the first time a
@@ -988,9 +988,9 @@ installed is listed in the config that needs it (`plugins`). A name
 registered twice is refused, naming both origins (docs/plugins.md).
 
 robofast is packaged from `pyproject.toml` (`pip install .`): only
-`robofast_core` is installed, with a `robofast-*` console command for each
-long-running service and device server. The legacy `robofast/` directory
-stays in the repository, unpackaged.
+`robofast` is installed, with a `robofast-*` console command for each
+long-running service and device server. The earlier, Windows-era
+`robofast/` code was removed on 2026-11-04 (git tag `legacy-robofast`).
 
 ## 4. Windows control PCs
 
@@ -1014,9 +1014,9 @@ support is often worse. So:
 - **Fast tier:** pure-Python fakes and an in-process weather server; unit
   tests plus the scenario suite. Python 3.12-3.14. Image-based features
   (autofocus, the guider) run on a synthetic star field
-  (`robofast_core/testing/starfield.py`: the pupil image, with its central
+  (`robofast/testing/starfield.py`: the pupil image, with its central
   obstruction, convolved with the seeing; jitter, noise, subframes) with
-  known truth, or on the real sky (`robofast_core/testing/skysim.py`:
+  known truth, or on the real sky (`robofast/testing/skysim.py`:
   catalog stars through a mount with TPOINT-style pointing errors, sky
   brightness from the Sun and Moon, the port's zero point; fixture Gaia
   tiles, so no catalog is downloaded in CI).
@@ -1059,7 +1059,7 @@ support is often worse. So:
 | `plan_timeout` | 30 s | bound on asking the plan for a telescope's next observation |
 | `idle_release_after` | 15 min | every telescope idle this long: park, release the lease, close (section 3.4) |
 | `filter_timeout`, `port_timeout` | 60 s, 60 s | bounds on a filter wheel move and an M3 port selection |
-| evening start | Sun below -6° | `robofast_core.when` in the sequencer unit (`deploy/`) |
+| evening start | Sun below -6° | `robofast.when` in the sequencer unit (`deploy/`) |
 | `night_rollover_hour` | 12 | plan record: earlier local times belong to the previous night |
 | `record_top_n` | 5 | runners-up and rejected candidates recorded per decision |
 | `park_before_close` | off | roll-off roofs: park every telescope (bounded, in parallel) before closing |
@@ -1107,9 +1107,10 @@ support is often worse. So:
    still a per-site mechanical-clearance question; no shipped site config
    sets it yet.
 2. The defaults in section 6.
-3. Where the legacy `robofast/` package's useful parts (YAML configs, HAL
-   knowledge for Aqawan, APC PDU, IRF90, Paramount, DFM) move, and when
-   `robofast_core` becomes `robofast`.
+3. Which of the legacy `robofast/` package's useful parts (YAML configs, HAL
+   knowledge for Aqawan, APC PDU, IRF90, Paramount, DFM) still need porting.
+   The package itself was removed on 2026-11-04 and the core renamed from
+   `robofast_core` to `robofast`; the old tree is git tag `legacy-robofast`.
 4. Temperatures the CDK700 focus model needs when PWI4 doesn't report them
    (the autofocus model uses the focuser's temperature until the primary's
    and the ambient are in the registry; `docs/autofocus.md` section 11).
@@ -1128,7 +1129,7 @@ Each step is a CI-tested deliverable.
    ObservingConditions for
    MINERVA's real feeds.
 5. Aqawan enclosure Alpaca server with a simulator mode, passing ConformU
-   (`robofast_core/devices/`: PAC client, PAC simulator, Dome server;
+   (`robofast/devices/`: PAC client, PAC simulator, Dome server;
    ConformU runs in CI). Hardware facts not yet confirmed on a real PAC are
    listed in `aqawan_pac`'s and `aqawan_sim`'s module docs; the confirmed
    ones and the fault policy are in `docs/aqawan.md`.
@@ -1152,7 +1153,7 @@ Each step is a CI-tested deliverable.
    next a TOM Toolkit facility module (`docs/tom_facility.md`) and an
    alert-broker client; then MEarth (collision checker). MINERVA's
    target and B-star lists come from their Google Sheet as request groups
-   (built: `robofast_core/sites/minerva/target_sheet.py`,
+   (built: `robofast/sites/minerva/target_sheet.py`,
    `docs/minerva_sheet.md`; next, the service-account key on the control
    host and a timer running `export`).
 10. **Done:** several telescopes per enclosure (section 3.5) and the
@@ -1164,28 +1165,28 @@ Each step is a CI-tested deliverable.
     auxiliary devices (iodine heater, iodine stage, backlight, vacuum
     gauges, chiller) are also driven directly, over serial URLs, as an
     Alpaca Switch/FilterWheel server passing ConformU in
-    CI (built: `robofast_core/devices/kiwispec_aux_server.py`,
+    CI (built: `robofast/devices/kiwispec_aux_server.py`,
     `docs/kiwispec_aux.md`; next, a serial bridge on the PC and the
     hardware checks listed there).
 12. FLWO 60" / TRES: an Alpaca Telescope + Focuser (+ Dome, if the TCS
     drives it) server for the 60-inch's DFM TCSGalil ("TCSGO"), with a
     protocol-faithful simulator, passing ConformU in CI, and the
     weather-unsafe scenario on the `sites/flwo60/` config (built:
-    `robofast_core/devices/tcsgo_*`; protocol, hardware-moving commands
+    `robofast/devices/tcsgo_*`; protocol, hardware-moving commands
     and open questions in `docs/tcsgo.md`). The TRES front end's
     calibration stage (a PI C-663 stage controller) is served as an Alpaca
     FilterWheel (named positions: `out`, `sky`, `science`, ...) and Focuser
     (absolute microns), with a simulator, ConformU in CI, an optional
     Redis shim for the legacy TCS window, and the sequencer selecting an
-    observation's `calstage` (built: `robofast_core/devices/tres_frontend_*`,
+    observation's `calstage` (built: `robofast/devices/tres_frontend_*`,
     `docs/tres_frontend.md`, hardware locked until confirmed). The
     calibration lamps (a Pulizzi power controller) are served as an Alpaca
     Switch with a simulator, a max-on limit and lamps off on a clean stop,
     ConformU in CI, and `ARC`/`LAMP_FLAT` requests and sequencer lamp frames
     for the 60-inch only, and each lamp's burning hours and starts kept
     from what the unit reports, with a replacement record and rated-life
-    warnings (built: `robofast_core/devices/pulizzi*`, `lamp_hours.py`,
-    `robofast_core/lamps.py`, `docs/pulizzi.md`, hardware locked until
+    warnings (built: `robofast/devices/pulizzi*`, `lamp_hours.py`,
+    `robofast/lamps.py`, `docs/pulizzi.md`, hardware locked until
     confirmed). The 60-inch's atmospheric dispersion corrector (two prism
     motors on one serial line; it serves TRES and FAST alike) is served as
     two Alpaca Rotators (the prisms) and a Switch (tracking on/off and its
@@ -1194,9 +1195,9 @@ Each step is a CI-tested deliverable.
     input, during slews and beyond its zenith-distance limit, neutral at
     park and when off, with a simulator, ConformU in CI, the sequencer
     turning it on before light frames and its state in the headers (built:
-    `robofast_core/devices/adc_*`, `docs/adc.md`, hardware locked until
+    `robofast/devices/adc_*`, `docs/adc.md`, hardware locked until
     confirmed). The TRES catalogs import as request groups and export
-    back for telshell (built: `robofast_core/sites/flwo60/catalogs/`,
+    back for telshell (built: `robofast/sites/flwo60/catalogs/`,
     `docs/catalogs.md`; the target database waits for the live catalog
     directory). Next: answers to those questions, a TRES
     camera/spectrograph service, then a supervised test on the real TCS.
@@ -1250,7 +1251,7 @@ Each step is a CI-tested deliverable.
     loader; plan, observation-kind, instrument, weather-source, guider
     hardware and request-importer registries; KiwiSpec out of the
     sequencer; Action names in config; the legacy importers under
-    `robofast_core/sites/`) done; step 3 (operating modes, docs/modes.md)
+    `robofast/sites/`) done; step 3 (operating modes, docs/modes.md)
     and step 4 (config-defined sequences, docs/sequences.md) done.
 
 ## 9. Borrowed ideas

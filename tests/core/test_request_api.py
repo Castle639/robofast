@@ -20,11 +20,11 @@ from pathlib import Path
 import httpx
 import pytest
 
-from robofast_core import api_auth
-from robofast_core.api_auth import RateLimiter, TokenStore
-from robofast_core.dispatch import DispatchScheduler, dispatch_from_config
-from robofast_core.plan import Idle
-from robofast_core.request_api import (
+from robofast import api_auth
+from robofast.api_auth import RateLimiter, TokenStore
+from robofast.dispatch import DispatchScheduler, dispatch_from_config
+from robofast.plan import Idle
+from robofast.request_api import (
     ApiConfig,
     HttpServer,
     RequestApi,
@@ -34,10 +34,10 @@ from robofast_core.request_api import (
     main,
     tls_context,
 )
-from robofast_core.request_model import Status
-from robofast_core.sequencer_service import snapshot, write_snapshot
-from robofast_core.supervisor_service import SupervisorServer
-from robofast_core.testing.checks import wait_until
+from robofast.request_model import Status
+from robofast.sequencer_service import snapshot, write_snapshot
+from robofast.supervisor_service import SupervisorServer
+from robofast.testing.checks import wait_until
 from tests.core.test_dispatch import NIGHT, Clock, Preempts, group, too
 
 SITE = {"latitude": 31.680407, "longitude": -110.878977, "elevation": 2316.0}
@@ -980,7 +980,7 @@ async def test_tls(tmp_path, monkeypatch):
 
 
 async def test_the_service_process(tmp_path):
-    """``python -m robofast_core.request_api serve``: prints its URL,
+    """``python -m robofast.request_api serve``: prints its URL,
     answers, refuses without a token, exits 0 on SIGTERM."""
     import signal
     import sys
@@ -991,7 +991,7 @@ async def test_the_service_process(tmp_path):
     proc = await asyncio.create_subprocess_exec(
         sys.executable,
         "-m",
-        "robofast_core.request_api",
+        "robofast.request_api",
         "serve",
         "--config",
         str(path),
@@ -1084,7 +1084,7 @@ def test_the_example_config_loads(tmp_path):
 async def test_validate_vets_targets_against_the_catalog(api):
     """With ``vetting`` in the plan, validate reports what the catalog says
     (docs/sky.md): warnings, and errors for the flags the site rejects."""
-    from robofast_core.catalog import catalog_at
+    from robofast.catalog import catalog_at
     from tests.core.skydata import sky_dir
 
     data = sky_dir()

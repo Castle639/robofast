@@ -15,7 +15,7 @@ import numpy as np
 import pytest
 from astropy.io import fits
 
-from robofast_core.frameview import (
+from robofast.frameview import (
     bin_to,
     decode_array,
     encode_array,
@@ -25,7 +25,7 @@ from robofast_core.frameview import (
     to_8bit,
     zscale,
 )
-from robofast_core.guider.service import GuiderRemote, GuiderService
+from robofast.guider.service import GuiderRemote, GuiderService
 
 from . import test_console as _console
 from .test_guider_loop import _service_config
@@ -244,7 +244,7 @@ async def test_saved_frames_pixels_and_fits(make_console, tmp_path):
         r = await rig.client.get(path)
         assert r.status_code == code, (path, r.status_code, r.text)
     # Images have their own rate limit, apart from the page's.
-    from robofast_core.api_auth import RateLimiter
+    from robofast.api_auth import RateLimiter
 
     rig.app.image_limiter = RateLimiter(0.0, 0.0)
     assert (await rig.client.get("/console/api/image/aqawan1/imager-t1")).status_code == 429
@@ -252,7 +252,7 @@ async def test_saved_frames_pixels_and_fits(make_console, tmp_path):
 
 
 def test_the_page_has_the_viewer():
-    from robofast_core.console.page import render_page
+    from robofast.console.page import render_page
 
     page = render_page("n")
     for needle in ('id="img-canvas"', 'id="guider-strip"', "/console/api/image/", "If-None-Match"):

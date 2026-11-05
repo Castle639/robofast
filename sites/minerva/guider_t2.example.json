@@ -1,7 +1,7 @@
 {
   "_note": [
     "The guider service for T2's FAU (docs/guider.md), on the computer the FAU camera is plugged into:",
-    "  python -m robofast_core.guider.service --config sites/minerva/guider_t2.example.json",
+    "  python -m robofast.guider.service --config sites/minerva/guider_t2.example.json",
     "Hardware-shaped but locked: allow_hardware is false, so nothing is opened until it is true AND --hardware is given,",
     "which needs JDE's approval (docs/guider.md, Commissioning). Addresses are 127.0.0.1 placeholders.",
     "From minerva-control (sites/minerva/README.md has the table): fau_t2.ini -- ZWO ASI174,",
@@ -13,7 +13,7 @@
     "9600 baud, XMIN..YMAX +/-500 steps): rename it to 'tiptilt' (and add an 'offload') only during commissioning.",
     "_legacy_seed_calibrations (NOT loaded): the mount's matrix from the plate scale at PA 0, and the AO's from",
     "ao_t2.ini as the pre-2019 legacy code used it (PLATESCALE = 40 steps per arcsec, so 0.025 arcsec/step;",
-    "ROTOFFSET 45) via robofast_core.sites.minerva.guider_calibration.from_sx_legacy(0.025, 45, 0.265). Both are unverified starting points to",
+    "ROTOFFSET 45) via robofast.sites.minerva.guider_calibration.from_sx_legacy(0.025, 45, 0.265). Both are unverified starting points to",
     "compare with POST /calibrate; README.md lists the conflicting alternatives.",
     "The FAU has no fiber hole: a beamsplitter sends a few per cent of the light to it, so the target is a whole",
     "star and the centroider is a plain one ('com'), not 'annulus' (docs/offset_guiding.md, on_target).",

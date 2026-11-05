@@ -5,8 +5,8 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from robofast_core import pointing as pm
-from robofast_core.catalog import separation
+from robofast import pointing as pm
+from robofast.catalog import separation
 
 LAT = 31.68
 

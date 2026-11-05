@@ -4,7 +4,7 @@ the switch that refuses non-commercial data.
 The UCAC4 and 2MASS answers here are made from the test sky
 (tests/core/skydata.py): each star's G and BP-RP turned into the catalog's
 own photometry (B, V, J, Ks) by inverting the relations
-:mod:`robofast_core.catalog_sources` uses, with 0.05 mag of scatter, and
+:mod:`robofast.catalog_sources` uses, with 0.05 mag of scatter, and
 served by a fake IRSA TAP service, so the real fetch path (query, CSV,
 conversion, tile cut) runs with no network. Frames are rendered from the
 test sky itself (the truth) and solved against the other source.
@@ -18,11 +18,11 @@ from datetime import UTC, datetime
 import numpy as np
 import pytest
 
-from robofast_core import astrometry as ast
-from robofast_core import catalog as cat
-from robofast_core import catalog_sources as cs
-from robofast_core import zenodo, zenodo_assets
-from robofast_core.guider import offset as og
+from robofast import astrometry as ast
+from robofast import catalog as cat
+from robofast import catalog_sources as cs
+from robofast import zenodo, zenodo_assets
+from robofast.guider import offset as og
 from tests.core.skydata import sky_dir
 from tests.core.test_astrometry import (
     DENSE,
