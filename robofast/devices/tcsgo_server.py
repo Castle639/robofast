@@ -399,9 +399,11 @@ class TCSGO:
         if on:
             if await self.at_park():
                 raise AlpacaException(PARKED, "Tracking: the telescope is parked")
+            # Before the already-tracking shortcut: that reads a cached status,
+            # which can predate a tripped limit that has since stopped the mount.
+            await self._check_motion_allowed()
             if await self.tracking():
                 return
-            await self._check_motion_allowed()
             self._park_state = "unparked"
             await self._send(50)
         else:
