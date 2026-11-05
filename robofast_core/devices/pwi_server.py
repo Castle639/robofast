@@ -616,15 +616,21 @@ class PWIMount:
         assert ref is not None
         if now - ref[0] < cfg.stall_time:
             return
-        self._fail_slew(
+        why = (
             f"slew failed: PWI reports slewing but the mount has made no progress for"
             f" {now - ref[0]:.1f} s (alt {st.alt_deg:.3f}, az {st.az_deg:.3f}"
             + (f", mechanical az {st.az_mech_deg:.3f}" if st.az_mech_deg is not None else "")
             + "); the target is probably beyond PWI's own axis limits or the axis is blocked"
             " (PWI4 accepts such a goto, stops short and reports slewing forever). Mount stopped."
         )
+        # Stop first, then publish the error: a client polling Slewing (the
+        # watcher task also runs this check) must not see the failure while the
+        # mount is still being driven. Disarming first keeps a concurrent check
+        # from stopping twice.
+        self._disarm_slew()
         with contextlib.suppress(PWIError):
             await self._send(self.pwi.stop, "stop (slew stalled)")
+        self._fail_slew(why)
 
     async def slewing(self) -> bool:
         if self.slew_error is not None:
