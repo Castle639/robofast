@@ -8,7 +8,7 @@ import time
 
 import pytest
 
-from robofast_core.devices.aqawan_pac import (
+from robofast.devices.aqawan_pac import (
     COMMANDS,
     HardwareNotAllowed,
     PACClient,
@@ -23,7 +23,7 @@ from robofast_core.devices.aqawan_pac import (
     parse_status,
     split_reply,
 )
-from robofast_core.devices.aqawan_sim import AqawanSim
+from robofast.devices.aqawan_sim import AqawanSim
 
 #: A documentation address (RFC 5737): never routed, never connected to here.
 NOT_LOOPBACK = "192.0.2.1"

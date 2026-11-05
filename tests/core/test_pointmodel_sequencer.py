@@ -12,21 +12,21 @@ from pathlib import Path
 
 import pytest
 
-from robofast_core import pointing as pm
-from robofast_core.astrometry import SolverConfig
-from robofast_core.catalog import separation
-from robofast_core.config import load_config
-from robofast_core.framesolve import FrameSolver
-from robofast_core.imaging import Imaging, ImagingConfig
-from robofast_core.owner import DeviceOwner
-from robofast_core.plan import Observation, StaticPlan
-from robofast_core.pointmodel import BuiltModel, ModelStore, PointingCorrector, SampleLog
-from robofast_core.request_model import load_request_groups
-from robofast_core.sequencer_service import build, snapshot
-from robofast_core.testing.focus_sim import SimFocuser, StarfieldCamera
-from robofast_core.testing.pointing_sim import SkyMount
-from robofast_core.testing.skysim import SkyFocusScene, lst_deg
-from robofast_core.timeline import Timeline
+from robofast import pointing as pm
+from robofast.astrometry import SolverConfig
+from robofast.catalog import separation
+from robofast.config import load_config
+from robofast.framesolve import FrameSolver
+from robofast.imaging import Imaging, ImagingConfig
+from robofast.owner import DeviceOwner
+from robofast.plan import Observation, StaticPlan
+from robofast.pointmodel import BuiltModel, ModelStore, PointingCorrector, SampleLog
+from robofast.request_model import load_request_groups
+from robofast.sequencer_service import build, snapshot
+from robofast.testing.focus_sim import SimFocuser, StarfieldCamera
+from robofast.testing.pointing_sim import SkyMount
+from robofast.testing.skysim import SkyFocusScene, lst_deg
+from robofast.timeline import Timeline
 
 from .test_imaging import SITE, headers
 from .test_pointmodel import EQ, LAT, LON, sky_scene

@@ -6,10 +6,10 @@ from __future__ import annotations
 
 import asyncio
 
-from robofast_core.guider.base import GuiderError
-from robofast_core.plan import StaticPlan
-from robofast_core.request_model import Configuration
-from robofast_core.testing.checks import wait_until
+from robofast.guider.base import GuiderError
+from robofast.plan import StaticPlan
+from robofast.request_model import Configuration
+from robofast.testing.checks import wait_until
 
 
 class FakeGuider:
@@ -144,9 +144,9 @@ def test_configuration_guide_flag_round_trips():
 
 
 def test_sequencer_service_builds_a_guider_client():
-    from robofast_core.guider.service import GuiderRemote
-    from robofast_core.sequencer_service import build_units
-    from robofast_core.timeline import Timeline
+    from robofast.guider.service import GuiderRemote
+    from robofast.sequencer_service import build_units
+    from robofast.timeline import Timeline
 
     entry = {"telescope": "127.0.0.1:1", "camera": "127.0.0.1:1"}
     units = build_units(
@@ -178,7 +178,7 @@ async def test_an_offset_guided_observation_hands_the_guider_its_offset(make_rig
     assert start["offset_guide"] == offset
     import pytest
 
-    from robofast_core.plan import Observation
+    from robofast.plan import Observation
 
     with pytest.raises(ValueError, match="guide_offset without guide"):
         Observation(name="y", guide_offset=offset)

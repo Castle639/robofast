@@ -11,7 +11,7 @@
 #    sequencer never requests a lease (docs/design.md 3.4). Only while the
 #    Sun is still up, so a restart in the night does not take them again;
 #    their failure does not stop the night (the leading "-");
-# 2. wait for the Sun (ExecStartPre): python -m robofast_core.when returns
+# 2. wait for the Sun (ExecStartPre): python -m robofast.when returns
 #    once the Sun is below -6 deg at the site in the config (at once if it
 #    already is, e.g. after a restart in the night);
 # 3. the night (ExecStart): the sequencer with the config's plan (the
@@ -30,7 +30,7 @@
 # unit per enclosure keeps a single sequencer per lease holder
 # (sequencer_name in the config): a restarted process uses the same name, so
 # it can recover the lease its crashed predecessor left behind (see
-# robofast_core/sequencer.py). The calibration runs use the same name; they
+# robofast/sequencer.py). The calibration runs use the same name; they
 # run before and after the night's process, never alongside it.
 #
 # On a crash it is restarted after RestartSec. The new process waits for the
@@ -55,9 +55,9 @@ Type=simple
 User=robofast-sequencer
 WorkingDirectory=/opt/robofast/current
 Environment=PY=/opt/robofast/current/venv/bin/python CONFIG=/etc/robofast/%i.json CALIB=/etc/robofast/%i-calibration.json
-ExecStartPre=-/bin/sh -c '"$$PY" -m robofast_core.when --config "$$CONFIG" --sun-above 0 --check && exec "$$PY" -m robofast_core.sequencer_service --config "$$CONFIG" --plan "$$CALIB"'
-ExecStartPre=/opt/robofast/current/venv/bin/python -m robofast_core.when --config ${CONFIG} --sun-below -6
-ExecStart=/opt/robofast/current/venv/bin/python -m robofast_core.sequencer_service --config ${CONFIG}
+ExecStartPre=-/bin/sh -c '"$$PY" -m robofast.when --config "$$CONFIG" --sun-above 0 --check && exec "$$PY" -m robofast.sequencer_service --config "$$CONFIG" --plan "$$CALIB"'
+ExecStartPre=/opt/robofast/current/venv/bin/python -m robofast.when --config ${CONFIG} --sun-below -6
+ExecStart=/opt/robofast/current/venv/bin/python -m robofast.sequencer_service --config ${CONFIG}
 # The calibrations and the wait for the Sun take hours.
 TimeoutStartSec=infinity
 Restart=on-failure

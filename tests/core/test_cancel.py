@@ -1,4 +1,4 @@
-"""Lost cancellations (robofast_core.cancel): a ``task.cancel()`` landing
+"""Lost cancellations (robofast.cancel): a ``task.cancel()`` landing
 inside an httpx request can be lost, the request returning normally. The
 fakes here lose the first cancel they see, the way httpx does."""
 
@@ -8,8 +8,8 @@ import asyncio
 
 import pytest
 
-from robofast_core.cancel import isolated, stop_task
-from robofast_core.lease_client import RemoteLease, RemoteSupervisor
+from robofast.cancel import isolated, stop_task
+from robofast.lease_client import RemoteLease, RemoteSupervisor
 
 
 def cancel_loser(delay: float = 0.1):

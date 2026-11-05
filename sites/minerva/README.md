@@ -7,7 +7,7 @@ only in `instruments.json`, with `"enabled": false`.
 
 | File | Read by |
 |---|---|
-| `aqawan1.json` | `supervisor_service`, `sequencer_service` (`robofast_core/config.py`) |
+| `aqawan1.json` | `supervisor_service`, `sequencer_service` (`robofast/config.py`) |
 | `autofocus.example.json` | merged into `aqawan1.json` (`AutofocusSetup`, `TriggerConfig`) |
 | `dispatch.example.json`, `requests.example.json`, `too.example.json` | the dispatch scheduler (`plan_from_config`) |
 | `calibration.example.json`, `targets.example.json` | `plan_from_config`, `load_plan` |
@@ -107,10 +107,10 @@ before trusting them.
 ### T2 AO (Starlight Xpress) and the guider's calibration matrices
 
 The guider's calibration is a 2x2 matrix `M` with d(pixels) = M @
-d(device units) (`robofast_core/guider/calibration.py`). The legacy model
+d(device units) (`robofast/guider/calibration.py`). The legacy model
 (`minerva_library/ao.py`) is tip = -(E cos r - N sin r)/a and tilt = (E sin
 r + N cos r)/a, with a = ARCSEC_PER_STEP and r = ROTOFFSET.
-`robofast_core.sites.minerva.guider_calibration.from_sx_legacy(a, r, plate_scale)`
+`robofast.sites.minerva.guider_calibration.from_sx_legacy(a, r, plate_scale)`
 converts it.
 
 | Value | Here | Legacy source |

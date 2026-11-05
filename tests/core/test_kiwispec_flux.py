@@ -19,11 +19,11 @@ import numpy as np
 import pytest
 from astropy.io import fits
 
-from robofast_core.devices import kiwispec_fits as kf
-from robofast_core.devices.kiwispec_aux import SimChiller, build_chiller
-from robofast_core.devices.kiwispec_flux import FluxLog, fau_flux, parse_frames
-from robofast_core.devices.kiwispec_service import KiwiSpecConfig, KiwiSpecServer
-from robofast_core.devices.kiwispec_sim import KiwiSpecSim, SimConfig
+from robofast.devices import kiwispec_fits as kf
+from robofast.devices.kiwispec_aux import SimChiller, build_chiller
+from robofast.devices.kiwispec_flux import FluxLog, fau_flux, parse_frames
+from robofast.devices.kiwispec_service import KiwiSpecConfig, KiwiSpecServer
+from robofast.devices.kiwispec_sim import KiwiSpecSim, SimConfig
 from tests.core.test_kiwispec import FAST, run_job, service_config
 
 ROOT = Path(__file__).parents[2]
@@ -286,7 +286,7 @@ async def test_flux_report_validation(fau):
 
 
 def test_sidecar_midpoint_source_follows_the_flux_source(tmp_path):
-    from robofast_core.spectra import SpectrumRecorder
+    from robofast.spectra import SpectrumRecorder
     from tests.core.test_rv_spectra import MTHOPKINS, TARGET
 
     store = SpectrumRecorder(tmp_path, "minerva", MTHOPKINS, "kiwispec")
@@ -408,7 +408,7 @@ async def test_rewrite_failure_alarms_and_keeps_the_raw_file(sim, tmp_path, monk
     def broken(path, **kw):
         raise kf.FitsRewriteError("simulated verification failure")
 
-    monkeypatch.setattr("robofast_core.devices.kiwispec_service.standardize", broken)
+    monkeypatch.setattr("robofast.devices.kiwispec_service.standardize", broken)
     server = await start_service(sim, raw_fits={"dir": str(tmp_path / "pc"), "wait": 2})
     try:
         async with httpx.AsyncClient(base_url=server.url, timeout=10) as http:

@@ -1,4 +1,4 @@
-"""The seeing source (robofast_core/seeing.py, docs/seeing.md): the
+"""The seeing source (robofast/seeing.py, docs/seeing.md): the
 guiders' live FWHM by default, its averaging and staleness, the fallback,
 the registry of sources, ``guide: "auto"`` and the ``max_seeing``
 constraint in the dispatch scheduler."""
@@ -10,11 +10,11 @@ from pathlib import Path
 
 import pytest
 
-from robofast_core.guider.base import VirtualClock
-from robofast_core.guider.loop import publish_values
-from robofast_core.plan_record import PlanRecord, read_record
-from robofast_core.registry import ValueRegistry
-from robofast_core.seeing import (
+from robofast.guider.base import VirtualClock
+from robofast.guider.loop import publish_values
+from robofast.plan_record import PlanRecord, read_record
+from robofast.registry import ValueRegistry
+from robofast.seeing import (
     SEEING_SOURCES,
     GuiderSeeing,
     Seeing,
@@ -189,7 +189,7 @@ async def test_max_seeing_follows_the_source_and_is_recorded(tmp_path):
 
 
 def test_dispatch_config_takes_a_seeing_entry():
-    from robofast_core.dispatch import dispatch_from_config
+    from robofast.dispatch import dispatch_from_config
 
     base = {
         "site": {"latitude": 31.68, "longitude": -110.88, "elevation": 2316},
@@ -221,7 +221,7 @@ async def test_guide_auto_uses_live_seeing_else_the_model():
 
     clock = Clock()
     model = {**GUIDING, "seeing": 1.0}
-    from robofast_core.guider import recommend as rc
+    from robofast.guider import recommend as rc
 
     # A magnitude where the choice flips between 1" and 4" seeing.
     gm = rc.GuideModel.from_dict(model)
@@ -254,9 +254,9 @@ async def test_the_sequencer_binds_the_guiders_to_the_seeing_source(tmp_path):
     """The service gives the plan its value registry; a guider then
     publishes there even without a frame pipeline, so the seeing source
     hears every guider."""
-    from robofast_core.config import load_config
-    from robofast_core.sequencer_service import build
-    from robofast_core.timeline import Timeline
+    from robofast.config import load_config
+    from robofast.sequencer_service import build
+    from robofast.timeline import Timeline
 
     config = load_config(MINERVA_SITE / "aqawan1.json")
     config.pop("images", None)

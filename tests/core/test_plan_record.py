@@ -1,4 +1,4 @@
-"""The nightly plan record (robofast_core/plan_record.py): one JSON-lines file
+"""The nightly plan record (robofast/plan_record.py): one JSON-lines file
 per night, readable, and replayable to the same decisions."""
 
 from __future__ import annotations
@@ -9,9 +9,9 @@ from datetime import UTC, date, datetime, timedelta
 
 import pytest
 
-from robofast_core.dispatch import dispatch_from_config
-from robofast_core.plan import Idle, Observation
-from robofast_core.plan_record import PlanRecord, main, night_of, read_record, replay
+from robofast.dispatch import dispatch_from_config
+from robofast.plan import Idle, Observation
+from robofast.plan_record import PlanRecord, main, night_of, read_record, replay
 from tests.core.test_dispatch import MINERVA, NIGHT, Clock, group, make, too
 
 LON = MINERVA.longitude

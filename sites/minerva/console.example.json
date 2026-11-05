@@ -1,10 +1,10 @@
 {
   "_note": [
-    "The observer console (robofast_core/console/; docs/console.md).",
-    "  python -m robofast_core.console serve --config sites/minerva/console.example.json",
+    "The observer console (robofast/console/; docs/console.md).",
+    "  python -m robofast.console serve --config sites/minerva/console.example.json",
     "It listens on loopback; put the same TLS reverse proxy as the request API in front of it for anyone else.",
     "tokens: the request API's tokens file. Observers get named tokens with the operator scope, e.g.",
-    "  python -m robofast_core.request_api tokens add --config request_api.json --name alice --scope read,operator,submit,too",
+    "  python -m robofast.request_api tokens add --config request_api.json --name alice --scope read,operator,submit,too",
     "Watchers get read-only tokens (--scope read).",
     "enclosures: each enclosure's config (shared with its supervisor and sequencer) and, when the sequencer",
     "runs with --plan, that plan file. Give the enclosure config a status_file (the telescopes' state) and an",

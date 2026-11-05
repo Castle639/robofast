@@ -2,9 +2,9 @@
 
     python scripts/conformu_aqawan.py --conformu PATH [--out DIR]
 
-Starts ``robofast_core.devices.aqawan_sim`` (heartbeat watchdog off, since
+Starts ``robofast.devices.aqawan_sim`` (heartbeat watchdog off, since
 ConformU sends no heartbeats; the legacy settle quirk on) and
-``robofast_core.devices.aqawan_server`` on free loopback ports, then runs
+``robofast.devices.aqawan_server`` on free loopback ports, then runs
 ConformU's ``conformance`` check (with the shutter-opening tests enabled by
 ``scripts/conformu-dome.settings.json``) and its ``alpacaprotocol`` check.
 Exits non-zero if either reports any error or issue. Logs and results go to
@@ -81,7 +81,7 @@ def main() -> None:
 
     sim, line = start(
         [
-            "robofast_core.devices.aqawan_sim",
+            "robofast.devices.aqawan_sim",
             *("--port", "0", "--heartbeat-timeout", "0"),
             *("--open-time", "2", "--close-time", "2", "--settle", "0.3"),
         ],
@@ -103,7 +103,7 @@ def main() -> None:
     procs = [sim]
     try:
         server, hello = start(
-            ["robofast_core.devices.aqawan_server", "--config", str(config)], out / "server.log"
+            ["robofast.devices.aqawan_server", "--config", str(config)], out / "server.log"
         )
         procs.append(server)
         url = json.loads(hello)["url"] + "/api/v1/dome/0"

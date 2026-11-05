@@ -1,4 +1,4 @@
-"""Lamp hours (robofast_core/devices/lamp_hours.py, docs/pulizzi.md): the
+"""Lamp hours (robofast/devices/lamp_hours.py, docs/pulizzi.md): the
 tracker on a fake clock (accumulation, flushes, restarts, crashes,
 replacements, a corrupt file, the rated-life warnings), then in the lamp
 server against the simulated unit (lamps switched outside robofast, the
@@ -17,8 +17,8 @@ import time
 
 import pytest
 
-from robofast_core.devices.lamp_hours import LampHours
-from robofast_core.devices.pulizzi_server import PulizziConfig, PulizziServer, hours_path
+from robofast.devices.lamp_hours import LampHours
+from robofast.devices.pulizzi_server import PulizziConfig, PulizziServer, hours_path
 from tests.core.test_pulizzi import LAMPS, Client, lamp_config, serve, wait_until_sync  # noqa: F401
 
 

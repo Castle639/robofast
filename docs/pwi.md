@@ -1,7 +1,7 @@
 # PlaneWave PWI server (CDK700 mounts)
 
 robofast's Alpaca server for a PlaneWave CDK700 driven by PlaneWave's PWI:
-`robofast_core/devices/pwi_server.py` (Telescope + Focuser + Rotator),
+`robofast/devices/pwi_server.py` (Telescope + Focuser + Rotator),
 over `pwi_client.py` (two backends), with simulators of both PWI HTTP APIs
 (`pwi_sim.py`) and a small-move tool for the first hardware session
 (`pwi_jog.py`, `robofast-pwi-jog`). ConformU runs against the server on both
@@ -155,7 +155,7 @@ What robofast does:
 ### The home record (PWI4)
 
 PWI4 4.1.6's `/status` has no homed flag, so robofast keeps its own
-evidence (`robofast_core/devices/pwi_homed.py`): a JSON file per telescope,
+evidence (`robofast/devices/pwi_homed.py`): a JSON file per telescope,
 `$ROBOFAST_DATA_DIR/pwi-homed/<name>.json` (or `home_record` in the
 config), shared by the server and the jog tool.
 
@@ -191,7 +191,7 @@ pipeline writes `DriverInfo` into each light frame's header as `MNTSWVER`
 
 ## Safety
 
-* **Hardware gate** (`robofast_core/hwgate.py`, design.md 3.1): without
+* **Hardware gate** (`robofast/hwgate.py`, design.md 3.1): without
   `"allow_hardware": true` in the config **and** `--hardware`, the server
   and the jog tool talk only to a verified simulator on loopback. A tunnel
   (`ssh -L 7101:...`) on 127.0.0.1 is refused before a byte is sent.
@@ -283,7 +283,7 @@ way. Without `az_wrap_min`/`az_wrap_max` PWI chooses, as before.
 
 ## Simulators
 
-    python -m robofast_core.devices.pwi_sim --api pwi4|pwi2 --port 0 [--ready]
+    python -m robofast.devices.pwi_sim --api pwi4|pwi2 --port 0 [--ready]
 
 One CDK700 model behind either API. Motion needs connect + enable (start
 with `--ready` for connected, enabled and homed); slews at `--slew-rate`;

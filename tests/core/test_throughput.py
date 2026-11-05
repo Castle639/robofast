@@ -1,6 +1,6 @@
-"""The throughput monitor (robofast_core/throughput.py, docs/throughput.md).
+"""The throughput monitor (robofast/throughput.py, docs/throughput.md).
 
-A year of zero points with a known history (robofast_core/testing/throughput_sim.py:
+A year of zero points with a known history (robofast/testing/throughput_sim.py:
 the port's zero point times an injected throughput -- a slow decline, a
 cleaning, a sudden loss -- times random clouds, less extinction): the
 monitor recovers the trend, alarms when the clear-night envelope is 10 %
@@ -21,10 +21,10 @@ import numpy as np
 import pytest
 from astropy.io import fits
 
-from robofast_core import throughput as tp
-from robofast_core.photometry import PortPhotometry, SkyConditions
-from robofast_core.testing import TEST_OPTICS
-from robofast_core.testing.throughput_sim import History, Weather, simulate
+from robofast import throughput as tp
+from robofast.photometry import PortPhotometry, SkyConditions
+from robofast.testing import TEST_OPTICS
+from robofast.testing.throughput_sim import History, Weather, simulate
 
 #: T2's FAU as sky.example.json has it (the efficiency chain; G band).
 FAU = PortPhotometry(
@@ -218,8 +218,8 @@ def test_update_console_and_morning_report(tmp_path):
     ingests it, raises the alarm on the night it starts, writes the status
     file; the console shows the series and the alarm; the morning report
     has the section and the QA line."""
-    from robofast_core.console.aggregate import Aggregator, ConsoleEnclosure
-    from robofast_core.morning import main as morning_main
+    from robofast.console.aggregate import Aggregator, ConsoleEnclosure
+    from robofast.morning import main as morning_main
 
     hist = History(decline_per_30d=0.04)
     recs, _ = simulate(FAU, hist, Weather(runs=[]), nights=200, seed=3)
@@ -302,15 +302,15 @@ HD185144 = (293.2035, 69.6611)
 
 @pytest.fixture(scope="module")
 def sky():
-    from robofast_core.catalog import catalog_at
+    from robofast.catalog import catalog_at
     from tests.core.skydata import sky_dir
 
     return catalog_at(sky_dir())
 
 
 def _scene(catalog, thr: float):
-    from robofast_core.testing.skysim import SkyCamera, SkyScene
-    from robofast_core.testing.starfield import Detector
+    from robofast.testing.skysim import SkyCamera, SkyScene
+    from robofast.testing.starfield import Detector
 
     phot = PortPhotometry(**TEST_OPTICS, band="V",
                           efficiency={"mirrors": 0.73, "qe": 0.8, "dust": thr},
@@ -321,8 +321,8 @@ def _scene(catalog, thr: float):
 
 
 def _frame_info(scene, when):
-    from robofast_core.fits_writer import FrameInfo, Optics
-    from robofast_core.registry import ValueRegistry
+    from robofast.fits_writer import FrameInfo, Optics
+    from robofast.registry import ValueRegistry
 
     ra, dec = HD185144
     reg = ValueRegistry()
@@ -350,10 +350,10 @@ def test_rendered_frames_to_efficiency(sky, tmp_path):
     and measured as they are written, ingested from the frame index: the
     efficiency against the optics' chain is the injected throughput (times
     the aperture loss), and the per-night ratios match to ~2 %."""
-    from robofast_core.astrometry import SolverConfig
-    from robofast_core.fits_writer import FrameStore
-    from robofast_core.framesolve import FrameSolver
-    from robofast_core.imagebytes import ImageArray
+    from robofast.astrometry import SolverConfig
+    from robofast.fits_writer import FrameStore
+    from robofast.framesolve import FrameSolver
+    from robofast.imagebytes import ImageArray
 
     solver = FrameSolver(sky, {"t1": SolverConfig(0.61, search_radius=0.1)})
     store = FrameStore(tmp_path / "data", "test", solver=solver)

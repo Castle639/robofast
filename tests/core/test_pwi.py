@@ -17,8 +17,8 @@ from pathlib import Path
 
 import pytest
 
-from robofast_core import hwgate
-from robofast_core.alpaca_client import (
+from robofast import hwgate
+from robofast.alpaca_client import (
     ActionNotImplementedException,
     AlpacaDevice,
     InvalidOperationException,
@@ -27,7 +27,7 @@ from robofast_core.alpaca_client import (
     NotImplementedException,
     ParkedException,
 )
-from robofast_core.devices.pwi_client import (
+from robofast.devices.pwi_client import (
     PWI2Client,
     PWI4Client,
     PWICommandError,
@@ -38,13 +38,13 @@ from robofast_core.devices.pwi_client import (
     parse_pwi2_status,
     parse_pwi4_status,
 )
-from robofast_core.devices.pwi_homed import HomeRecord, encoders_reset
-from robofast_core.devices.pwi_jog import Jog, JogRefused, plan_altaz, plan_radec
-from robofast_core.devices.pwi_jog import main as jog_main
-from robofast_core.devices.pwi_server import PWIConfig, PWIServer, target_altaz
-from robofast_core.devices.pwi_sim import SIM_LATITUDE, SIM_LONGITUDE, PWISim, pwi2_status
-from robofast_core.testing.checks import wait_until
-from robofast_core.testing.tunnel import FakeTunnel
+from robofast.devices.pwi_homed import HomeRecord, encoders_reset
+from robofast.devices.pwi_jog import Jog, JogRefused, plan_altaz, plan_radec
+from robofast.devices.pwi_jog import main as jog_main
+from robofast.devices.pwi_server import PWIConfig, PWIServer, target_altaz
+from robofast.devices.pwi_sim import SIM_LATITUDE, SIM_LONGITUDE, PWISim, pwi2_status
+from robofast.testing.checks import wait_until
+from robofast.testing.tunnel import FakeTunnel
 
 ROOT = Path(__file__).resolve().parents[2]
 BACKENDS = ("pwi4", "pwi2")
@@ -246,7 +246,7 @@ async def test_client_status_and_allowlist(backend):
 
 
 def test_pwi2_moving_quirk_and_parsing():
-    from robofast_core.devices.pwi_sim import CDK700Model
+    from robofast.devices.pwi_sim import CDK700Model
 
     m = CDK700Model(ready=True)
     st = parse_pwi2_status(pwi2_status(m))
@@ -512,8 +512,8 @@ async def test_jog_not_confirmed_sends_nothing(backend):
 
 
 def test_jog_plans_refuse():
-    from robofast_core.devices.pwi_client import parse_pwi4_status
-    from robofast_core.devices.pwi_sim import CDK700Model, pwi4_status
+    from robofast.devices.pwi_client import parse_pwi4_status
+    from robofast.devices.pwi_sim import CDK700Model, pwi4_status
 
     m = CDK700Model(ready=True, alt=20.5, az=359.8)
     cfg = config(1, "pwi4")

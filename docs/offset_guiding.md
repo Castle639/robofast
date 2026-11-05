@@ -45,7 +45,7 @@ Acquisition looks for the **guide star**, not the target. The catalog
 identifier or the acquisition cascade (`docs/acquisition.md`) is given the
 guide star's coordinates, and its predicted pixel is the setpoint.
 
-`robofast_core/guider/offset.py` handles the geometry. It also covers the
+`robofast/guider/offset.py` handles the geometry. It also covers the
 effects that change the offset:
 
 | Effect | Size (60" offset) | Handling |
@@ -101,11 +101,11 @@ imported: a star of sensible brightness must be at the target plus the
 offset, proper motion applied to both, or the row is refused (or flagged)
 with where the nearest star is (`docs/minerva_sheet.md`, "Acquisition
 offsets"). The check is `check_offset_star` in
-`robofast_core/guider/offset.py`, for any explicit `{"east", "north"}`.
+`robofast/guider/offset.py`, for any explicit `{"east", "north"}`.
 
 ## When to offset guide
 
-`robofast_core/guider/recommend.py` predicts the error of each method from
+`robofast/guider/recommend.py` predicts the error of each method from
 photon statistics and recommends one, with the reason. Its inputs are:
 
 - the target's magnitude;
@@ -225,8 +225,8 @@ recommendation (both predictions and the reason) and the `seeing` used
 From the command line:
 
 ```
-python -m robofast_core.guider.recommend --config sites/flwo60/dispatch.example.json --instrument tres --grid 10:18:1
-python -m robofast_core.guider.recommend --config sites/minerva/dispatch.example.json --mag 13 --sky 19 --seeing 2.5 --json
+python -m robofast.guider.recommend --config sites/flwo60/dispatch.example.json --instrument tres --grid 10:18:1
+python -m robofast.guider.recommend --config sites/minerva/dispatch.example.json --mag 13 --sky 19 --seeing 2.5 --json
 ```
 
 ## Choosing the guide star (`"auto"`)

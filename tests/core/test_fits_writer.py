@@ -10,10 +10,10 @@ import numpy as np
 import pytest
 from astropy.io import fits
 
-from robofast_core import fits_writer as fw
-from robofast_core.fits_writer import FrameInfo, FrameStore, Optics
-from robofast_core.imagebytes import ImageArray
-from robofast_core.registry import Snapshot, ValueRegistry, publish_static, sun_and_moon
+from robofast import fits_writer as fw
+from robofast.fits_writer import FrameInfo, FrameStore, Optics
+from robofast.imagebytes import ImageArray
+from robofast.registry import Snapshot, ValueRegistry, publish_static, sun_and_moon
 
 T0 = datetime(2026, 11, 14, 5, 6, 7, 891234, tzinfo=UTC)
 SITE = {"latitude": 31.68, "longitude": -110.88, "elevation": 2316.0}

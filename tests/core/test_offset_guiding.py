@@ -10,14 +10,14 @@ from datetime import UTC, datetime, timedelta
 import numpy as np
 import pytest
 
-from robofast_core.catalog import Stars
-from robofast_core.guider import offset as og
-from robofast_core.guider.base import VirtualClock
-from robofast_core.guider.calibration import Calibration, fits_sky_matrix
-from robofast_core.guider.loop import GuideConfig, Guider
-from robofast_core.guider.service import GuiderRemote, GuiderService, GuiderServiceConfig
-from robofast_core.guider.sim import Fiber, Jitter, SimCamera, SimTipTilt, SimWorld
-from robofast_core.registry import ValueRegistry
+from robofast.catalog import Stars
+from robofast.guider import offset as og
+from robofast.guider.base import VirtualClock
+from robofast.guider.calibration import Calibration, fits_sky_matrix
+from robofast.guider.loop import GuideConfig, Guider
+from robofast.guider.service import GuiderRemote, GuiderService, GuiderServiceConfig
+from robofast.guider.sim import Fiber, Jitter, SimCamera, SimTipTilt, SimWorld
+from robofast.registry import ValueRegistry
 
 WHEN = datetime(2026, 11, 15, 7, 0, tzinfo=UTC)
 #: A generic site for the tests (core takes no site values; design.md 3.10).
@@ -116,7 +116,7 @@ def _stars(rows) -> Stars:
     """rows: (east", north", G) from the target at (30, 25), Gaia epoch."""
     target = (30.0, 25.0)
     ra, dec = [], []
-    from robofast_core.catalog import _untan
+    from robofast.catalog import _untan
 
     for e, n, _ in rows:
         r, d = _untan(*target, math.radians(e / 3600), math.radians(n / 3600))

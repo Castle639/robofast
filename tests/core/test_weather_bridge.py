@@ -24,8 +24,8 @@ from pathlib import Path
 import httpx
 import pytest
 
-from robofast_core.sites.minerva import MearthSource, SkyTempsSource
-from robofast_core.testing.weather_feed import (
+from robofast.sites.minerva import MearthSource, SkyTempsSource
+from robofast.testing.weather_feed import (
     CLOUD_FIXTURE,
     GOOD_CLOUD,
     GOOD_RIDGE,
@@ -33,14 +33,14 @@ from robofast_core.testing.weather_feed import (
     cloud_page,
     ridge_page,
 )
-from robofast_core.weather_bridge import (
+from robofast.weather_bridge import (
     WeatherBridge,
     build_sources,
     load_config,
     main,
     parse_config,
 )
-from robofast_core.weather_eval import (
+from robofast.weather_eval import (
     SAFE,
     UNKNOWN,
     UNSAFE,
@@ -48,7 +48,7 @@ from robofast_core.weather_eval import (
     FieldLimits,
     SourceSpec,
 )
-from robofast_core.weather_sources import SourceConfig, SourceError, read_credentials, to_ascom
+from robofast.weather_sources import SourceConfig, SourceError, read_credentials, to_ascom
 
 CONFIG = Path(__file__).resolve().parents[2] / "sites" / "minerva" / "weather.yaml"
 RIDGE_URL = "http://linmax.sao.arizona.edu/weather/weather.cur_cond"
@@ -666,7 +666,7 @@ def test_unit_conversions():
 
 
 def test_shadow_once_prints_one_line(raw, tmp_path, capsys, monkeypatch):
-    from robofast_core.testing.weather_feed import FeedServer, FeedState
+    from robofast.testing.weather_feed import FeedServer, FeedState
 
     feed = FeedServer(FeedState(user="u", password="p")).start()
     try:

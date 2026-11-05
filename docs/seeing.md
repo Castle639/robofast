@@ -12,7 +12,7 @@ The seeing (FWHM, arcsec) is used in two places:
   selection criterion, too".
 
 Both read the same **seeing source**. Which source is configuration: the
-dispatch plan's `seeing` entry. The code is `robofast_core/seeing.py`.
+dispatch plan's `seeing` entry. The code is `robofast/seeing.py`.
 
 ## The default: the guiders' live FWHM
 
@@ -84,7 +84,7 @@ against the science camera before setting it).
 
 ## Other sources
 
-`source` is a key of the registry `robofast_core.seeing.SEEING_SOURCES`
+`source` is a key of the registry `robofast.seeing.SEEING_SOURCES`
 (docs/plugins.md). Core's entries:
 
 | Source | Options | What |
@@ -96,7 +96,7 @@ A plug-in adds another source, for example a DIMM or a weather feed's
 seeing:
 
 ```python
-from robofast_core.seeing import SEEING_SOURCES, Seeing
+from robofast.seeing import SEEING_SOURCES, Seeing
 
 class Dimm:
     name = "mysite.dimm"

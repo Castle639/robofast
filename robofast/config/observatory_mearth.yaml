@@ -1,7 +1,0 @@
-[Setup]
-dome = 'dome.ini'
-weather = 'weather.yaml'
-log_dir = 'logs/'
-data_dir = 'data/'
-
-  

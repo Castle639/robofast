@@ -1,7 +1,7 @@
 """The weather bridge end to end over real sockets.
 
-A fake site Redis server (:mod:`robofast_core.testing.redis_feed`) and a
-fake SAO page server (:mod:`robofast_core.testing.weather_feed`) serve
+A fake site Redis server (:mod:`robofast.testing.redis_feed`) and a
+fake SAO page server (:mod:`robofast.testing.weather_feed`) serve
 MINERVA's sources; the bridge (the shipped config: Redis primary, pages
 advisory) polls them and publishes to the Alpaca weather server; the safety
 supervisor reads that server through its Alpaca owners and closes a (fake)
@@ -18,17 +18,17 @@ from pathlib import Path
 import httpx
 import pytest
 
-from robofast_core import DeviceOwner, SafetyConfig, SafetySupervisor, Timeline
-from robofast_core.alpaca import alpaca_owner
-from robofast_core.alpaca_client import AlpacaDevice, DriverException, NotImplementedException
-from robofast_core.safety import ENCLOSURE_MEMBERS
-from robofast_core.sun import now_utc
-from robofast_core.testing.checks import wait_until
-from robofast_core.testing.fakes import FakeDome
-from robofast_core.testing.redis_feed import RedisFeed, RedisFeedState
-from robofast_core.testing.weather_feed import FeedServer, FeedState
-from robofast_core.weather_bridge import WeatherBridge, load_config, parse_config
-from robofast_core.weather_server import WeatherServer, WeatherState
+from robofast import DeviceOwner, SafetyConfig, SafetySupervisor, Timeline
+from robofast.alpaca import alpaca_owner
+from robofast.alpaca_client import AlpacaDevice, DriverException, NotImplementedException
+from robofast.safety import ENCLOSURE_MEMBERS
+from robofast.sun import now_utc
+from robofast.testing.checks import wait_until
+from robofast.testing.fakes import FakeDome
+from robofast.testing.redis_feed import RedisFeed, RedisFeedState
+from robofast.testing.weather_feed import FeedServer, FeedState
+from robofast.weather_bridge import WeatherBridge, load_config, parse_config
+from robofast.weather_server import WeatherServer, WeatherState
 
 CONFIG = Path(__file__).resolve().parents[2] / "sites" / "minerva" / "weather.yaml"
 

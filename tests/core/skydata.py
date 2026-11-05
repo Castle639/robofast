@@ -1,11 +1,11 @@
 """Which test sky the catalog tests run on: real Gaia DR3 or synthetic.
 
 ``sky_dir()`` is a catalog cache directory (``catalog_at(sky_dir())``)
-holding the five test fields (``robofast_core.testing.sky_fixture``):
+holding the five test fields (``robofast.testing.sky_fixture``):
 
 * **real**: the Gaia DR3 fixture tiles and bright stars from the Zenodo
   record ``gaia_extracts``, once it is pinned in
-  ``robofast_core/zenodo_assets.py`` -- downloaded once into the data
+  ``robofast/zenodo_assets.py`` -- downloaded once into the data
   directory (``$ROBOFAST_DATA_DIR``; CI caches it) and unpacked there;
 * **synthetic** otherwise: ``tests/core/data/catalog``, a seeded random sky
   with hand-placed stars where the tests need them (no Gaia data; the
@@ -27,9 +27,9 @@ from pathlib import Path
 
 import pytest
 
-from robofast_core import zenodo, zenodo_assets
-from robofast_core.catalog import BRIGHT_FILE
-from robofast_core.testing.sky_fixture import FIXTURE_FILE, unpack_tiles
+from robofast import zenodo, zenodo_assets
+from robofast.catalog import BRIGHT_FILE
+from robofast.testing.sky_fixture import FIXTURE_FILE, unpack_tiles
 
 SYNTHETIC = Path(__file__).parent / "data" / "catalog"
 log = logging.getLogger(__name__)

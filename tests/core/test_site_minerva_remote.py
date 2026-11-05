@@ -14,13 +14,13 @@ from pathlib import Path
 
 import pytest
 
-from robofast_core import config as enclosure_config
-from robofast_core import hwgate
-from robofast_core.devices.aqawan_server import AqawanConfig, AqawanServer
-from robofast_core.devices.aqawan_sim import AqawanSim
-from robofast_core.supervisor_service import build as build_supervisor
-from robofast_core.testing.tunnel import FakeTunnel
-from robofast_core.timeline import Timeline
+from robofast import config as enclosure_config
+from robofast import hwgate
+from robofast.devices.aqawan_server import AqawanConfig, AqawanServer
+from robofast.devices.aqawan_sim import AqawanSim
+from robofast.supervisor_service import build as build_supervisor
+from robofast.testing.tunnel import FakeTunnel
+from robofast.timeline import Timeline
 
 REMOTE = Path(__file__).resolve().parents[2] / "sites" / "minerva" / "remote"
 
@@ -116,7 +116,7 @@ def test_enclosure_config_is_engineering_and_builds():
     ],
 )
 def test_pwi_configs_are_refused_without_hardware(name, port):
-    from robofast_core.devices.pwi_server import PWIConfig, PWIServer
+    from robofast.devices.pwi_server import PWIConfig, PWIServer
 
     d = _json(name)
     assert d["pwi"]["host"] == "127.0.0.1" and d["pwi"]["port"] == port
@@ -130,8 +130,8 @@ def test_pwi_configs_are_refused_without_hardware(name, port):
 
 
 def test_t2_pdu_config_is_refused_without_hardware():
-    from robofast_core.devices.apc_pdu import Credentials
-    from robofast_core.devices.pdu_server import PDUConfig, PDUServer
+    from robofast.devices.apc_pdu import Credentials
+    from robofast.devices.pdu_server import PDUConfig, PDUServer
 
     d = _json("t2_pdu.json")
     assert d["pdu"]["host"] == "127.0.0.1" and d["pdu"]["port"] == 7162 and d["pdu"]["relay"]

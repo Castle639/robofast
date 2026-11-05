@@ -5,7 +5,7 @@ acquisition frame shows the target and perhaps a bright companion -- rarely
 enough stars to plate solve. "Take the brightest star" puts the wrong
 component of a near-equal pair on the fiber. The guider therefore decides
 per frame, from what it actually detects, with an explicit pass/fail test
-at every step and a recorded reason (`robofast_core/guider/acquire.py`).
+at every step and a recorded reason (`robofast/guider/acquire.py`).
 
 ## The AUTO cascade
 

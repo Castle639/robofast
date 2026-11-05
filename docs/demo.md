@@ -6,7 +6,7 @@ hardware or the observatory network.
 
 ```sh
 python -m pip install --group test              # once (pip >= 25.1)
-python -m robofast_core.testing.rv_night --out /tmp/rv-night
+python -m robofast.testing.rv_night --out /tmp/rv-night
 ```
 
 It takes about four minutes. It prints the night's events as they happen,
@@ -22,15 +22,15 @@ directory as the `rv-night` artifact.
 
 | Piece | What it is |
 |---|---|
-| weather | the real weather bridge (`robofast_core.weather_bridge`, a child process) with the shipped `sites/minerva/weather.yaml`, reading a fake site Redis server and fake SAO weather pages |
+| weather | the real weather bridge (`robofast.weather_bridge`, a child process) with the shipped `sites/minerva/weather.yaml`, reading a fake site Redis server and fake SAO weather pages |
 | enclosure | the Aqawan PAC simulator and the real Alpaca Dome server (`aqawan_server`) |
 | safety | the real supervisor (`supervisor_service`, a child process), with `sites/minerva/aqawan1.json`'s safety settings (park before close, the dome heartbeat) and shorter timings, in the `robotic` operating mode (the site's default is `attended`; docs/modes.md) |
 | T1, T2 | fake mounts served over Alpaca; simulated star-field imagers on simulated focusers (autofocus and imaging) |
-| guiders | one real guider service per telescope (`robofast_core.guider.service`, child processes): simulated FAU camera, tip/tilt and backlight |
+| guiders | one real guider service per telescope (`robofast.guider.service`, child processes): simulated FAU camera, tip/tilt and backlight |
 | KiwiSpec | the spectrograph PC simulator and the real KiwiSpec service (`kiwispec_service`, a child process) |
 | sequencer | the real sequencer service (`sequencer_service.build` and `run`) on `aqawan1.json`. It runs three times, as `deploy/robofast-sequencer@.service` does: evening calibrations, the night (the dispatch plan of `dispatch.example.json`, with autofocus triggers and the console's `operator_control`), and morning calibrations |
 
-One simulated clock (`clock.json` in `--out`, `robofast_core/clock.py`)
+One simulated clock (`clock.json` in `--out`, `robofast/clock.py`)
 gives every process its time: the scheduler, the sequencer (FITS times and
 directories, sidecars, autofocus results, the plan record) and the KiwiSpec
 service (raw file names, exposure start times). It runs at real speed for
@@ -111,7 +111,7 @@ and checks them (`console` in the checks).
 | `sequencer-night.log` | the sequencer's timeline: `spectrum_session`, `spectrum_joined`, `guiding`, `spectrum_started` (with the telescopes feeding it), `spectrum_dropped`, `spectrum_done`, `cancel_requested`, `spectrograph_aborted`, `cleanup_done`, ... |
 | `sequencer-evening.log`, `sequencer-morning.log` | the calibrations (`spectrograph_calibration_done`; no `observe_start`, so no lease) |
 | `supervisor.log` | the supervisor: weather verdicts, the lease, `close_commanded`, the heartbeat |
-| `plans/plan-2026-11-09.jsonl` | the nightly plan record: every decision with its score, `join`s, `held` entries, outcomes, the autofocus results, the ToO, the preemptions. `python -m robofast_core.plan_record FILE` lists it; add `--replay` to re-run the decisions |
+| `plans/plan-2026-11-09.jsonl` | the nightly plan record: every decision with its score, `join`s, `held` entries, outcomes, the autofocus results, the ToO, the preemptions. `python -m robofast.plan_record FILE` lists it; add `--replay` to re-run the decisions |
 | `dispatch-state.json` | request statuses and the data pointers of every completed observation |
 | `clock.json` | the simulated clock's current phase (start, scale, origin) |
 | `data/minerva/kiwispec/n*/` | one JSON sidecar per spectrum and calibration frame: the telescopes, who dropped out, guide statistics, the flux-weighted midpoint, `barycentric` (BJD_TDB and the RV correction), and the index `*.spectra.jsonl` (`docs/rv_night.md`) |
@@ -123,7 +123,7 @@ and checks them (`console` in the checks).
 
 ## The checks
 
-`robofast_core.testing.rv_night.check` checks the following, and the demo
+`robofast.testing.rv_night.check` checks the following, and the demo
 prints every check that failed:
 
 * **ordering**: calibrations with the roof closed and no lease, autofocus
@@ -151,7 +151,7 @@ prints every check that failed:
 
 ## Hardware rehearsal: real mounts and cameras, the enclosure closed
 
-`robofast_core.testing.rehearsal` runs the same night **in real time** with,
+`robofast.testing.rehearsal` runs the same night **in real time** with,
 for the telescopes you name, the **real mount** (its Alpaca Telescope, and
 the Focuser and Rotator read for the FITS headers) and the **real science
 camera** in place of the fakes. Everything else stays simulated as above:
@@ -169,7 +169,7 @@ Start the real device servers first, yourself, as for any hardware session
 Remote, docs/remote.md), and unpark the mounts. Then, for example:
 
 ```sh
-python -m robofast_core.testing.rehearsal --out /tmp/rehearsal \
+python -m robofast.testing.rehearsal --out /tmp/rehearsal \
     --telescope t1=127.0.0.1:11121/0 --camera t1=127.0.0.1:7151/0 \
     --telescope t2=127.0.0.1:11122/0 --camera t2=127.0.0.1:7152/0 \
     --i-know-the-enclosure-is-closed --duration 2h --end-action leave
@@ -182,13 +182,13 @@ python -m robofast_core.testing.rehearsal --out /tmp/rehearsal \
   `--i-know-the-enclosure-is-closed`, with a parked mount (it never sends
   a real mount `Park` or `Unpark`), a busy camera or an endpoint that does
   not answer. It logs, for each endpoint, whether it is a verified robofast
-  simulator (`robofast_core/hwgate.py`) or real.
+  simulator (`robofast/hwgate.py`) or real.
 * **What it starts** is only the simulated night's services, each on a
   verified simulator and none with `--hardware`: nothing it starts can
   reach a real enclosure, PAC or PDU. The hardware gate is unchanged: the
   real device servers are yours, and the rehearsal only talks Alpaca to
   them.
-* **The mount guard** (`robofast_core/testing/mount_guard.py`): the
+* **The mount guard** (`robofast/testing/mount_guard.py`): the
   supervisor and the sequencer reach each real mount only through it.
   Reads pass. It forwards `SlewToCoordinatesAsync` only within 21..83 deg
   of altitude (robofast's MINERVA limits) at that moment, and

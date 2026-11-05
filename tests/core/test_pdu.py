@@ -1,5 +1,5 @@
 """The APC PDU over SNMP, its simulator and its Alpaca Switch server
-(robofast_core/devices/snmp.py, apc_pdu.py, pdu_server.py; docs/recovery.md).
+(robofast/devices/snmp.py, apc_pdu.py, pdu_server.py; docs/recovery.md).
 Loopback only."""
 
 from __future__ import annotations
@@ -13,16 +13,16 @@ from pathlib import Path
 
 import pytest
 
-from robofast_core.alpaca_client import AlpacaDevice, InvalidOperationException
-from robofast_core.devices import snmp
-from robofast_core.devices.apc_pdu import APCPDU, APCPDUSim, Credentials, load_credentials
-from robofast_core.devices.pdu_server import (
+from robofast.alpaca_client import AlpacaDevice, InvalidOperationException
+from robofast.devices import snmp
+from robofast.devices.apc_pdu import APCPDU, APCPDUSim, Credentials, load_credentials
+from robofast.devices.pdu_server import (
     HardwareNotAllowed,
     PDUConfig,
     PDUServer,
     check_pdu_address,
 )
-from robofast_core.devices.pdu_server import main as pdu_main
+from robofast.devices.pdu_server import main as pdu_main
 
 CREDS = Credentials("test-read", "test-write")
 

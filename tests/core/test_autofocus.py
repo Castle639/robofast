@@ -1,4 +1,4 @@
-"""Autofocus (robofast_core.autofocus) on the simulated focuser and star field.
+"""Autofocus (robofast.autofocus) on the simulated focuser and star field.
 
 The scene: a 512x512 camera at 1"/px, 13.5 um pixels, f/6.5 with a 47 %
 central obstruction; the focuser moves the instrument (1 um of focal plane
@@ -18,7 +18,7 @@ import math
 import numpy as np
 import pytest
 
-from robofast_core.autofocus import (
+from robofast.autofocus import (
     Autofocus,
     AutofocusConfig,
     AutofocusSetup,
@@ -28,11 +28,11 @@ from robofast_core.autofocus import (
     FocusStore,
     publish_result,
 )
-from robofast_core.owner import DeviceError, DeviceOwner
-from robofast_core.registry import ValueRegistry
-from robofast_core.testing.focus_sim import FocusScene, SimFocuser, StarfieldCamera
-from robofast_core.testing.starfield import Detector, SimOptics, random_stars
-from robofast_core.timeline import Timeline
+from robofast.owner import DeviceError, DeviceOwner
+from robofast.registry import ValueRegistry
+from robofast.testing.focus_sim import FocusScene, SimFocuser, StarfieldCamera
+from robofast.testing.starfield import Detector, SimOptics, random_stars
+from robofast.timeline import Timeline
 
 PIXEL_SCALE, PIXEL_SIZE, F_RATIO, OBSTRUCTION = 1.0, 13.5, 6.5, 0.47
 OPTICS = FocusOptics(

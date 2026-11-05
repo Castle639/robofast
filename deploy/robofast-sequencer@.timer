@@ -3,7 +3,7 @@
 #
 #   systemctl enable --now robofast-sequencer@aqawan1.timer
 #
-# The service itself waits for the Sun (python -m robofast_core.when in its
+# The service itself waits for the Sun (python -m robofast.when in its
 # ExecStartPre), so the time here only has to be early enough for the
 # evening calibrations and before the earliest sunset of the year, and
 # after the latest sunrise (the previous night's process must have exited:

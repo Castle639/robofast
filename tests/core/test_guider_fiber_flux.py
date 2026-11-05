@@ -16,11 +16,11 @@ import httpx
 import numpy as np
 import pytest
 
-from robofast_core.guider.base import ROI, Frame, RealClock, VirtualClock
-from robofast_core.guider.flux_report import FluxReportConfig, FluxReporter
-from robofast_core.guider.loop import fiber_counts
-from robofast_core.guider.service import GuiderService
-from robofast_core.guider.sim import Fiber
+from robofast.guider.base import ROI, Frame, RealClock, VirtualClock
+from robofast.guider.flux_report import FluxReportConfig, FluxReporter
+from robofast.guider.loop import fiber_counts
+from robofast.guider.service import GuiderService
+from robofast.guider.sim import Fiber
 from tests.core.test_guider_loop import TARGET, _rig, _service_config
 from tests.core.test_kiwispec import FAST, service_config
 
@@ -82,8 +82,8 @@ class _FakeGuider:
 
 
 async def test_reporter_posts_unix_times_and_keeps_frames_on_failure():
-    from robofast_core.devices.kiwispec_service import KiwiSpecServer
-    from robofast_core.devices.kiwispec_sim import KiwiSpecSim, SimConfig
+    from robofast.devices.kiwispec_service import KiwiSpecServer
+    from robofast.devices.kiwispec_sim import KiwiSpecSim, SimConfig
 
     g = _FakeGuider()
     now = g.clock.now()

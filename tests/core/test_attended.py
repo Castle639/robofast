@@ -9,11 +9,11 @@ import json
 
 import pytest
 
-from robofast_core import SafetyConfig
-from robofast_core.safety import LeaseRevoked, RecoveryRefused
-from robofast_core.supervisor_service import SupervisorServer
-from robofast_core.testing.checks import wait_until
-from robofast_core.testing.processes import ROOT
+from robofast import SafetyConfig
+from robofast.safety import LeaseRevoked, RecoveryRefused
+from robofast.supervisor_service import SupervisorServer
+from robofast.testing.checks import wait_until
+from robofast.testing.processes import ROOT
 
 ATTENDED = dict(attended_only=True, duty_ttl=0.6, duty_grace=0.6)
 

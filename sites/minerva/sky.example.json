@@ -1,6 +1,6 @@
 {
   "_note": [
-    "Target vetting, the star catalog and per-port photometry (docs/sky.md; robofast_core/vetting.py).",
+    "Target vetting, the star catalog and per-port photometry (docs/sky.md; robofast/vetting.py).",
     "Used as the dispatch plan's 'vetting' entry: \"vetting\": \"sky.example.json\" (relative to the plan).",
     "catalog.cache_dir: the Gaia DR3 tile cache (scripts/build_catalog.py fills it; absolute in production).",
     "ports: '<telescope>/<port>' or '<port>'. fau: ZWO ASI174 behind the 2 % beamsplitter (98 % to the fiber);",

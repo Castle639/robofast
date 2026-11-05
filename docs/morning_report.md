@@ -1,10 +1,10 @@
 # Morning report and nightly QA
 
-After dawn, `python -m robofast_core.morning` summarizes the night from the
+After dawn, `python -m robofast.morning` summarizes the night from the
 files it left behind -- no device is read:
 
 ```sh
-python -m robofast_core.morning --night n20261109 --data-root /data \
+python -m robofast.morning --night n20261109 --data-root /data \
     --plan-record /var/lib/robofast/plans/plan-2026-11-09.jsonl \
     --log /var/log/robofast/supervisor.log --log /var/log/robofast/sequencer.log \
     --out /var/lib/robofast/reports [--history DIR] [--notifier notifier.json] \

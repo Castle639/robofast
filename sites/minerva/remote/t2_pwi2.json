@@ -3,7 +3,7 @@
     "robofast PWI server (Alpaca Telescope + Focuser + Rotator) for MINERVA T2, through an SSH tunnel: docs/pwi.md, docs/remote.md.",
     "PWI2 (legacy): stop the legacy control code (mainNew) before using this, so robofast is PWI2's only client.",
     "PWI is reached on 127.0.0.1:7102 (PWI2); the tunnel's far end is the telescope's control PC, set up by the operator, not here.",
-    "allow_hardware is true, but nothing talks to the real PWI without --hardware on the command line as well (robofast_core/hwgate.py).",
+    "allow_hardware is true, but nothing talks to the real PWI without --hardware on the command line as well (robofast/hwgate.py).",
     "Limits (deg): min_alt = legacy telescope_N.ini HORIZON (21), max_alt = legacy scheduler.ini MAXALT (83); park = legacy control.telescope_park defaults (alt 25, az 0).",
     "focus_min/focus_max (microns) = legacy telescope_N.ini MINFOCUS/MAXFOCUS (100/33000); ports = sites/minerva/instruments.json.",
     "max_jog_deg: robofast-pwi-jog's largest relative move per axis (first hardware session: keep it small).",

@@ -19,7 +19,7 @@ SERVERS = ("pdu_server", "pulizzi_server", "adc_server")
 
 @pytest.mark.parametrize("name", SERVERS)
 def test_ctrl_c_in_main_exits_quietly(name, monkeypatch):
-    mod = importlib.import_module(f"robofast_core.devices.{name}")
+    mod = importlib.import_module(f"robofast.devices.{name}")
     seen = []
 
     def interrupted(argv=None):
@@ -35,4 +35,4 @@ def test_the_console_scripts_are_these_mains():
     root = Path(__file__).resolve().parents[2]
     scripts = tomllib.loads((root / "pyproject.toml").read_text())["project"]["scripts"]
     for name in SERVERS:
-        assert f"robofast_core.devices.{name}:main" in scripts.values(), name
+        assert f"robofast.devices.{name}:main" in scripts.values(), name

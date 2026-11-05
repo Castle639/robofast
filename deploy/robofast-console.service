@@ -1,4 +1,4 @@
-# Example systemd unit for the observer console (robofast_core/console/,
+# Example systemd unit for the observer console (robofast/console/,
 # docs/console.md). Not installed anywhere; copy and adapt. Paths below are
 # placeholders.
 #
@@ -20,7 +20,7 @@ Wants=network-online.target
 Type=simple
 User=robofast-console
 WorkingDirectory=/opt/robofast/current
-ExecStart=/opt/robofast/current/venv/bin/python -m robofast_core.console serve --config /etc/robofast/console.json
+ExecStart=/opt/robofast/current/venv/bin/python -m robofast.console serve --config /etc/robofast/console.json
 Restart=always
 RestartSec=5
 NoNewPrivileges=yes

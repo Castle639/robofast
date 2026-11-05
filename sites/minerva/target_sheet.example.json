@@ -1,8 +1,8 @@
 {
   "_note": [
-    "MINERVA's target lists in their Google Sheet, read by robofast_core.sites.minerva.target_sheet (docs/minerva_sheet.md):",
-    "  python -m robofast_core.sites.minerva.target_sheet fetch --config target_sheet.json",
-    "  python -m robofast_core.sites.minerva.target_sheet export --config target_sheet.json -o minerva-requests.json",
+    "MINERVA's target lists in their Google Sheet, read by robofast.sites.minerva.target_sheet (docs/minerva_sheet.md):",
+    "  python -m robofast.sites.minerva.target_sheet fetch --config target_sheet.json",
+    "  python -m robofast.sites.minerva.target_sheet export --config target_sheet.json -o minerva-requests.json",
     "Copy this file to the control host and fill in the placeholders there; never commit the real values.",
     "key_file: MINERVA's Google service-account key (JSON) in /etc/robofast/secrets/, mode 600, owned by the service user;",
     "a key readable by group or others, or inside a git work tree, is refused. $ROBOFAST_MINERVA_SHEETS_KEY overrides it;",
@@ -12,7 +12,7 @@
     "bstars: limit soft -- after per_night B stars a further one is still taken when nothing else is observable.",
     "The red-side list is retired (docs/minerva_sheet.md); a list entry of its own brings it back.",
     "instrument: the spectrograph's instrument_type in dispatch.example.json (required).",
-    "snapshot_dir: omitted, snapshots go to $ROBOFAST_DATA_DIR/minerva_sheet (robofast_core.zenodo.data_dir); keep: how many.",
+    "snapshot_dir: omitted, snapshots go to $ROBOFAST_DATA_DIR/minerva_sheet (robofast.zenodo.data_dir); keep: how many.",
     "offset_check: each acquisition offset must land on a catalog star (docs/minerva_sheet.md, Acquisition offsets);",
     "  g_bright/g_faint: the FAU's saturation and faint limits (catalog magnitude); action refuse or flag; catalog: docs/sky.md."
   ],

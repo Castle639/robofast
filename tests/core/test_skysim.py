@@ -11,25 +11,25 @@ import numpy as np
 import pytest
 from astropy.io import fits
 
-from robofast_core.astrometry import SolverConfig
-from robofast_core.catalog import catalog_at, separation
-from robofast_core.fits_writer import FrameInfo, FrameStore, Optics
-from robofast_core.framesolve import FrameSolver
-from robofast_core.imagebytes import ImageArray
-from robofast_core.photometry import PortPhotometry, SkyConditions, sky_brightness, snr
-from robofast_core.pointing import PointingModel
-from robofast_core.registry import ValueRegistry
-from robofast_core.testing import TEST_OPTICS
-from robofast_core.testing.fakes import FakeTelescope
-from robofast_core.testing.focus_sim import SimFocuser, StarfieldCamera
-from robofast_core.testing.skysim import (
+from robofast.astrometry import SolverConfig
+from robofast.catalog import catalog_at, separation
+from robofast.fits_writer import FrameInfo, FrameStore, Optics
+from robofast.framesolve import FrameSolver
+from robofast.imagebytes import ImageArray
+from robofast.photometry import PortPhotometry, SkyConditions, sky_brightness, snr
+from robofast.pointing import PointingModel
+from robofast.registry import ValueRegistry
+from robofast.testing import TEST_OPTICS
+from robofast.testing.fakes import FakeTelescope
+from robofast.testing.focus_sim import SimFocuser, StarfieldCamera
+from robofast.testing.skysim import (
     SkyCamera,
     SkyFocusScene,
     SkyScene,
     lst_deg,
     sky_world_stars,
 )
-from robofast_core.testing.starfield import Detector
+from robofast.testing.starfield import Detector
 from tests.core.skydata import sky_dir
 
 HD185144 = (293.2035, 69.6611)
@@ -50,7 +50,7 @@ def test_lst_matches_astropy():
     from astropy import units as u
     from astropy.time import Time
 
-    from robofast_core.sky import offline_iers
+    from robofast.sky import offline_iers
 
     offline_iers()
     ours = lst_deg(WHEN, -110.878977)
@@ -158,8 +158,8 @@ def test_sky_focus_scene_follows_the_mount(catalog):
 
 
 def test_guider_world_from_the_sky(catalog):
-    from robofast_core.guider.base import ROI
-    from robofast_core.guider.sim import SimWorld
+    from robofast.guider.base import ROI
+    from robofast.guider.sim import SimWorld
 
     c = SkyCamera((1216, 1936), 0.265, detector=Detector(shape=(1216, 1936)))
     sky = SkyScene(catalog, c, PortPhotometry(**TEST_OPTICS), conditions=SkyConditions())
@@ -247,7 +247,7 @@ def test_frame_store_keeps_the_mount_wcs_when_unsolved(catalog, tmp_path):
 
 
 def test_imaging_config_solve_entry(tmp_path):
-    from robofast_core.imaging import Imaging, ImagingConfig
+    from robofast.imaging import Imaging, ImagingConfig
 
     cfg = ImagingConfig.from_dict(
         {

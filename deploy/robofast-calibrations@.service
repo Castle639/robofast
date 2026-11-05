@@ -18,8 +18,8 @@ Wants=network-online.target
 Type=oneshot
 User=robofast-sequencer
 WorkingDirectory=/opt/robofast/current
-ExecCondition=/opt/robofast/current/venv/bin/python -m robofast_core.when --config /etc/robofast/%i.json --sun-above -12 --check
-ExecStart=/opt/robofast/current/venv/bin/python -m robofast_core.sequencer_service --config /etc/robofast/%i.json --plan /etc/robofast/%i-calibration.json
+ExecCondition=/opt/robofast/current/venv/bin/python -m robofast.when --config /etc/robofast/%i.json --sun-above -12 --check
+ExecStart=/opt/robofast/current/venv/bin/python -m robofast.sequencer_service --config /etc/robofast/%i.json --plan /etc/robofast/%i-calibration.json
 TimeoutStartSec=2h
 # As for the sequencer: SIGTERM aborts the exposures and parks.
 TimeoutStopSec=180

@@ -7,7 +7,7 @@ itself is in `docs/kiwispec.md`; running a whole simulated night is in
 
 ## 1. Requests: the `SPECTRUM` configuration
 
-A configuration of type `SPECTRUM` (`robofast_core/request_model.py`) is
+A configuration of type `SPECTRUM` (`robofast/request_model.py`) is
 one target observed with the enclosure's spectrograph:
 
 ```json
@@ -25,7 +25,7 @@ degrees.)
 * Its `instrument_type` names an instrument whose type takes `SPECTRUM`:
   MINERVA's dispatch config declares its `spectrograph` as a `kiwispec`
   (`"instruments": {"spectrograph": {"type": "kiwispec"}}`;
-  `robofast_core/instruments.py`, docs/plugins.md). Without an
+  `robofast/instruments.py`, docs/plugins.md). Without an
   `instrument_type`, whichever of a telescope's instruments takes it. The
   telescopes that may feed it are the request's (`location.telescope`, or
   several in `extra_params.telescopes`), or every telescope with such an
@@ -33,7 +33,7 @@ degrees.)
 * It is always guided (`guiding_config.mode` `ON`; `OFF` is refused). Its
   instrument configs are light, with no `filter` or `port`. KiwiSpec's own
   `extra_params` (declared by its instrument type,
-  `robofast_core/devices/kiwispec_instrument.py`): `iodine` (true/false;
+  `robofast/devices/kiwispec_instrument.py`): `iodine` (true/false;
   absent: the spectrograph service's default) and `target_counts`
   (termination on the spectrograph's flux record -- at MINERVA the summed
   FAU guide-frame counts, a relative scale -- `exposure_time` then being
@@ -47,7 +47,7 @@ degrees.)
   `parallax` (mas) and `extra_params.radial_velocity` (km/s) are optional.
   The scheduler ignores them; the barycentric correction uses the proper
   motion.
-* `from_legacy_csv` (`robofast_core.sites.minerva.legacy_csv`; the
+* `from_legacy_csv` (`robofast.sites.minerva.legacy_csv`; the
   dispatch plan's `imports`, type `minerva.legacy_csv`) makes `SPECTRUM` configurations, and
   `sites/minerva/requests.example.json` uses them.
 
@@ -81,7 +81,7 @@ the sequencer's `preempt` with policy `next`, which interrupts nothing.
 * The plan record has `join` entries (a member given the spectrum),
   `member_outcome` entries, `held` (the telescopes under a hold) and
   `spectrograph` (down or back) entries, and its snapshots keep both;
-  `python -m robofast_core.plan_record FILE --replay` replays them.
+  `python -m robofast.plan_record FILE --replay` replays them.
 
 ## 3. The sequencer
 
@@ -161,7 +161,7 @@ telescope's error:
   (fresh, `?refresh=1`) every `spectrograph_recovery_interval` (300 s,
   `spectrograph_check` events). With `spectrograph_auto_recover` (default)
   a check that answers with no alarms marks it up again. Either way the
-  operator can clear it: `python -m robofast_core.console.hold CONTROL_DIR
+  operator can clear it: `python -m robofast.console.hold CONTROL_DIR
   clear_spectrograph --operator NAME --reason TEXT` (through the
   enclosure's `operator_control` directory, like the console's pause).
   Marked up (`spectrograph_up`), the plan is told, the count is reset and
@@ -177,7 +177,7 @@ Settings (`SequencerConfig`, defaults): `spectrum_ready_timeout` 300 s,
 ### One clock for every night name
 
 Every path that names a night or stamps a time on what it keeps takes
-"now" from one injected clock (`robofast_core/clock.py`): the FITS writer
+"now" from one injected clock (`robofast/clock.py`): the FITS writer
 (`DATE`, the night directory and `NIGHT`, from the clock at
 `StartExposure`; `DATE-OBS` is still the camera's) and its frame index,
 the spectrum sidecars and their index (the record's `night` and
@@ -193,7 +193,7 @@ The camera software's raw file is not legal FITS. The spectrograph service
 rewrites it once, in place, and only after the rewritten file is verified
 (valid FITS, identical pixels, checksums; `docs/kiwispec.md`, "The raw
 file"): one copy at rest. Everything robofast knows about a spectrum goes
-into a JSON **sidecar** (`robofast_core/spectra.py`):
+into a JSON **sidecar** (`robofast/spectra.py`):
 
 ```
 <data_root>/<site>/kiwispec/n<YYYYMMDD>/<raw file name>.json

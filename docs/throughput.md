@@ -5,7 +5,7 @@ cover is left on, a beamsplitter is knocked. Each shows up as fewer
 counts from the same star. robofast measures a photometric zero point on
 every plate-solved frame (docs/sky.md section 6: `ZPMAG`, the Gaia G
 magnitude giving 1 e-/s, or 1 ADU/s without a gain). The throughput monitor
-(`robofast_core/throughput.py`) keeps those zero points, corrects them for
+(`robofast/throughput.py`) keeps those zero points, corrects them for
 the atmosphere, compares them with what the optics should give, follows
 the trend of each telescope, port and filter through the clouds, and
 alarms when it drops.
@@ -77,19 +77,19 @@ so it gives the same answer at any time. A backfill shows when an alarm
 
 ```sh
 # each morning: ingest the night's frame indexes, analyze, write the status file
-python -m robofast_core.throughput --config throughput.json update \
+python -m robofast.throughput --config throughput.json update \
     --night n20261109 --data-root /data [--notifier notifier.json]
 # or as part of the morning report (same ingest, plus a report section and QA lines)
-python -m robofast_core.morning ... --throughput throughput.json
+python -m robofast.morning ... --throughput throughput.json
 # what is there
-python -m robofast_core.throughput --config throughput.json status [--json]
-python -m robofast_core.throughput --config throughput.json extinction
+python -m robofast.throughput --config throughput.json status [--json]
+python -m robofast.throughput --config throughput.json extinction
 # a cleaning (or a recoat, a new camera, ...)
-python -m robofast_core.throughput --config throughput.json annotate \
+python -m robofast.throughput --config throughput.json annotate \
     --telescope t2 --night 2026-11-12 --what cleaning --note "CO2 snow" --who jde
 # the past: robofast's frame indexes, or FITS files (solved when they have no ZPMAG)
-python -m robofast_core.throughput --config throughput.json backfill --data-root /data
-python -m robofast_core.throughput --config throughput.json backfill --solve \
+python -m robofast.throughput --config throughput.json backfill --data-root /data
+python -m robofast.throughput --config throughput.json backfill --solve \
     --plate-scale 0.265 --catalog /var/lib/robofast/catalog --jnow \
     --instruments sites/minerva/instruments.json --per-night 20 \
     /nas/t2/n2026*/n2026*.T2.FAU.*.fits
@@ -146,7 +146,7 @@ FAU frames is hundreds. Each solve takes about a second.
 
 ## How well it works (simulated)
 
-`robofast_core/testing/throughput_sim.py` makes the store records a
+`robofast/testing/throughput_sim.py` makes the store records a
 telescope would leave over months, with nothing rendered. Each frame's zero
 point is what the sky simulator renders and the frame solver measures: the
 port's zero point, times the injected throughput and the cloud

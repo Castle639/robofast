@@ -1,4 +1,4 @@
-# Example systemd unit for the alarm notifier (robofast_core/notifier/,
+# Example systemd unit for the alarm notifier (robofast/notifier/,
 # docs/notifier.md). Not installed anywhere; copy and adapt. Paths below are
 # placeholders.
 #
@@ -13,7 +13,7 @@
 # service, into $CREDENTIALS_DIRECTORY, which the config names. Check the
 # config with
 #
-#   sudo -u robofast-notifier /opt/robofast/current/venv/bin/python -m robofast_core.notifier \
+#   sudo -u robofast-notifier /opt/robofast/current/venv/bin/python -m robofast.notifier \
 #       --config /etc/robofast/notifier.json --check
 #
 # (--check and --test run outside the unit cannot see $CREDENTIALS_DIRECTORY;
@@ -33,7 +33,7 @@ User=robofast-notifier
 # acknowledgements.
 SupplementaryGroups=robofast
 WorkingDirectory=/opt/robofast/current
-ExecStart=/opt/robofast/current/venv/bin/python -m robofast_core.notifier --config /etc/robofast/notifier.json
+ExecStart=/opt/robofast/current/venv/bin/python -m robofast.notifier --config /etc/robofast/notifier.json
 LoadCredential=smtp.json:/etc/robofast/secrets/notifier-smtp.json
 LoadCredential=chat-webhook-url:/etc/robofast/secrets/notifier-chat-webhook-url
 StateDirectory=robofast-notifier

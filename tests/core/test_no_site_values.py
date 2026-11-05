@@ -2,16 +2,16 @@
 
 Every site value lives under ``sites/<site>/``; core code reads it from
 config and has no site's name or number in it. This test parses
-``robofast_core/**/*.py`` (the AST, so docstrings and comments are free to
+``robofast/**/*.py`` (the AST, so docstrings and comments are free to
 mention sites) and fails on a string literal or an identifier that names a
 site or a site-specific instrument, or on a site's coordinates or elevation
 as a number.
 
 Three directories are exempt:
 
-* ``robofast_core/sites/`` (site code: adapters, legacy importers, each
-  site's plug-in) and ``robofast_core/testing/`` (simulations and fixtures);
-* ``robofast_core/devices/``: drivers for specific hardware (the Aqawan
+* ``robofast/sites/`` (site code: adapters, legacy importers, each
+  site's plug-in) and ``robofast/testing/`` (simulations and fixtures);
+* ``robofast/devices/``: drivers for specific hardware (the Aqawan
   PAC, the KiwiSpec PC, the TCSGalil, the TRES front end, ...). A driver
   may name its own hardware; the core modules that use it (sequencer, plan,
   dispatch, request_*, console, safety, imaging, photometry, vetting, sun,
@@ -36,7 +36,7 @@ from collections import Counter
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-CORE = ROOT / "robofast_core"
+CORE = ROOT / "robofast"
 
 #: Site and site-specific instrument names (lowercase). Matched at the start
 #: of a word (so "metres" does not match "tres", "KiwiSpecBusy" matches).
@@ -69,7 +69,7 @@ COUPLINGS: dict[str, tuple[re.Pattern[str], tuple[str, ...] | None]] = {
     "ADC switch id": (re.compile(r"^ADC_(SWITCHES|TRACKING|SETTLED)$"), None),
 }
 
-#: Directories exempt as a whole (relative to robofast_core/).
+#: Directories exempt as a whole (relative to robofast/).
 EXEMPT_DIRS = ("sites/", "testing/", "devices/")
 
 #: What core still names: (module, name) -> (count, why). Every entry is
@@ -77,7 +77,7 @@ EXEMPT_DIRS = ("sites/", "testing/", "devices/")
 #: 3.10) and is tagged with it; delete the entry with the code it covers.
 ALLOWLIST: dict[tuple[str, str], tuple[int, str]] = {}
 
-#: Where a module may be named after a site (relative to robofast_core/).
+#: Where a module may be named after a site (relative to robofast/).
 SITE_NAMED_DIRS = ("sites/", "devices/")
 
 
@@ -178,7 +178,7 @@ def test_core_names_no_site():
         for what, line, text in scan(path):
             key = (rel, what)
             found[key] += 1
-            where.setdefault(key, []).append(f"robofast_core/{rel}:{line}: {text!r}")
+            where.setdefault(key, []).append(f"robofast/{rel}:{line}: {text!r}")
     errors = []
     for key, n in sorted(found.items()):
         allowed = ALLOWLIST.get(key, (0, ""))[0]
@@ -206,11 +206,11 @@ def test_no_site_named_module_in_core():
             continue
         parts = [*rel.parts[:-1], p.stem]
         if any(_NAME_RE.search(part.lower()) for part in parts):
-            named.append(f"robofast_core/{rel.as_posix()}")
+            named.append(f"robofast/{rel.as_posix()}")
     assert not named, (
         f"{named}: named after a site or a site's instrument; site code goes under "
-        "robofast_core/sites/<site>/ (a plug-in), a hardware driver under "
-        "robofast_core/devices/ (docs/design.md 3.10)"
+        "robofast/sites/<site>/ (a plug-in), a hardware driver under "
+        "robofast/devices/ (docs/design.md 3.10)"
     )
 
 
@@ -219,8 +219,8 @@ def test_the_scanner_sees_names_and_numbers_but_not_docstrings(tmp_path):
     p.write_text(
         '"""Docstring: MINERVA, the FLWO 60-inch, 31.68."""\n'
         "# comment: tres\n"
-        "import robofast_core.devices.kiwispec_client as kc\n"
-        "from robofast_core.devices.tres_frontend_server import TRESFrontEndConfig\n"
+        "import robofast.devices.kiwispec_client as kc\n"
+        "from robofast.devices.tres_frontend_server import TRESFrontEndConfig\n"
         "def f(metres, stress):\n"
         '    """f: Tillinghast."""\n'
         "    x = 'sites/minerva/aqawan1.json'\n"

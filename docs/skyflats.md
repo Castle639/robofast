@@ -1,6 +1,6 @@
 # Twilight sky flats
 
-`robofast_core/skyflats.py` (legacy `control.py` `doSkyFlat`). An
+`robofast/skyflats.py` (legacy `control.py` `doSkyFlat`). An
 observation of `kind="sky_flat"` -- a `SKY_FLAT` request configuration,
 one instrument config per filter with its `exposure_count` -- takes flats of
 the twilight sky. They need the enclosure open (a light observation under

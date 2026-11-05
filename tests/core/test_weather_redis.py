@@ -1,6 +1,6 @@
 """The site Redis source, and the shipped MINERVA config (Redis primary, pages advisory).
 
-A fake Redis server (:mod:`robofast_core.testing.redis_feed`) speaks RESP on
+A fake Redis server (:mod:`robofast.testing.redis_feed`) speaks RESP on
 a loopback port; the SAO pages come from an in-memory HTTP transport. With
 an injected clock, the fake server stamps db 7's timestamp keys from that
 clock (minus a per-key age), as the site's writer would. ``REDIS_DB7`` is
@@ -18,17 +18,17 @@ from pathlib import Path
 import httpx
 import pytest
 
-from robofast_core import resp
-from robofast_core.testing.redis_feed import (
+from robofast import resp
+from robofast.testing.redis_feed import (
     GOOD_REDIS,
     REDIS_DB7,
     REDIS_DB8,
     RedisFeed,
     RedisFeedState,
 )
-from robofast_core.weather_bridge import WeatherBridge, build_sources, load_config, parse_config
-from robofast_core.weather_eval import SAFE, UNKNOWN, UNSAFE
-from robofast_core.weather_sources import RedisSource, SourceConfig, SourceError, convert
+from robofast.weather_bridge import WeatherBridge, build_sources, load_config, parse_config
+from robofast.weather_eval import SAFE, UNKNOWN, UNSAFE
+from robofast.weather_sources import RedisSource, SourceConfig, SourceError, convert
 from tests.core.test_weather_bridge import CLOUD_URL, NIGHT, RIDGE_URL, Clock, Pages
 
 CONFIG = Path(__file__).resolve().parents[2] / "sites" / "minerva" / "weather.yaml"
@@ -574,9 +574,9 @@ def test_dynamic_limit_config_errors(raw, change, match):
 
 
 def test_shadow_once_json_reports_would_close(raw, tmp_path, capsys):
-    from robofast_core.sun import now_utc
-    from robofast_core.testing.weather_feed import FeedServer, FeedState
-    from robofast_core.weather_bridge import main
+    from robofast.sun import now_utc
+    from robofast.testing.weather_feed import FeedServer, FeedState
+    from robofast.weather_bridge import main
 
     feed = FeedServer(FeedState(user="u", password="p")).start()
     redis = RedisFeed(RedisFeedState(clock=now_utc)).start()

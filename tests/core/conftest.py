@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 
 import pytest
 
-from robofast_core import (
+from robofast import (
     DeviceOwner,
     Observation,
     SafetyConfig,
@@ -26,12 +26,12 @@ from robofast_core import (
     SequencerConfig,
     Timeline,
 )
-from robofast_core.lease_client import RemoteSupervisor
-from robofast_core.modes import modes_from_config
-from robofast_core.safety import ENCLOSURE_MEMBERS
-from robofast_core.sequencer import TelescopeUnit
-from robofast_core.supervisor_service import SupervisorServer
-from robofast_core.testing.fakes import (
+from robofast.lease_client import RemoteSupervisor
+from robofast.modes import modes_from_config
+from robofast.safety import ENCLOSURE_MEMBERS
+from robofast.sequencer import TelescopeUnit
+from robofast.supervisor_service import SupervisorServer
+from robofast.testing.fakes import (
     FakeCamera,
     FakeDome,
     FakeFilterWheel,

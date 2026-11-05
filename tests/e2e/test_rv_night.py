@@ -1,8 +1,8 @@
 """A whole simulated MINERVA RV night, end to end (docs/demo.md).
 
 Run it with ``python -m pytest -m e2e tests/e2e`` (the ``e2e`` CI job). The
-night itself is :mod:`robofast_core.testing.rv_night`; this test runs it and
-fails on any of :func:`~robofast_core.testing.rv_night.check`'s findings:
+night itself is :mod:`robofast.testing.rv_night`; this test runs it and
+fails on any of :func:`~robofast.testing.rv_night.check`'s findings:
 the timeline (calibrations with the roof closed, autofocus, spectra fed by
 both telescopes, the imaging field, the weather interruption and the
 re-observation, the ToO, T2's fault, the console's pause and resume, dawn),
@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 
-from robofast_core.testing.rv_night import check, simulate, summary
+from robofast.testing.rv_night import check, simulate, summary
 
 pytestmark = [pytest.mark.e2e, pytest.mark.timeout(900)]
 
@@ -32,10 +32,10 @@ async def test_a_whole_rv_night(tmp_path):
 
 
 def morning_report(out: Path) -> None:
-    """The morning report (robofast_core/morning.py) on the night's files."""
+    """The morning report (robofast/morning.py) on the night's files."""
     import json
 
-    from robofast_core.morning import build_report, gather, render_markdown
+    from robofast.morning import build_report, gather, render_markdown
 
     [night] = sorted({p.name for p in (out / "data").rglob("n2*") if p.is_dir()})
     logs = [out / "supervisor.log", *sorted(out.glob("sequencer-*.log"))]

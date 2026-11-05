@@ -1,7 +1,7 @@
 {
  "_note": [
   "The nightly TRES calibration on the FLWO 60-inch, with the sequences of flwo60.json (docs/sequences.md):",
-  "  python -m robofast_core.sequencer_service --config sites/flwo60/flwo60.json --plan sites/flwo60/calibration.example.json",
+  "  python -m robofast.sequencer_service --config sites/flwo60/flwo60.json --plan sites/flwo60/calibration.example.json",
   "From the live TRES system 2026-11-02, confirm: 5 biases, ThAr 5 x 10 s on the object then the sky fiber,",
   "flats 11 x 0.05 s on each fiber, 20 s between the groups; all with the dome closed (dark sequences: no sky light)."
  ],

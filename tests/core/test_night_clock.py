@@ -1,4 +1,4 @@
-"""One clock for every night name and time stamp (robofast_core.clock), and
+"""One clock for every night name and time stamp (robofast.clock), and
 the dispatch scheduler's view of operator holds and of a spectrograph that
 is down (docs/rv_night.md)."""
 
@@ -10,12 +10,12 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from robofast_core.autofocus_plan import AutofocusTriggers
-from robofast_core.clock import FileClock, ScaledClock, clock_from_config, real_clock
-from robofast_core.console.hold import OperatorHold
-from robofast_core.plan import Idle, Observation, StaticPlan
-from robofast_core.plan_record import PlanRecord, read_record, replay
-from robofast_core.spectra import SpectrumRecorder
+from robofast.autofocus_plan import AutofocusTriggers
+from robofast.clock import FileClock, ScaledClock, clock_from_config, real_clock
+from robofast.console.hold import OperatorHold
+from robofast.plan import Idle, Observation, StaticPlan
+from robofast.plan_record import PlanRecord, read_record, replay
+from robofast.spectra import SpectrumRecorder
 
 from .test_imaging import attach, run_night
 from .test_rv_spectra import (

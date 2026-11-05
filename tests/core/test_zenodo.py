@@ -1,4 +1,4 @@
-"""robofast_core.zenodo: fetch, verify, cache -- against a loopback HTTP
+"""robofast.zenodo: fetch, verify, cache -- against a loopback HTTP
 server, never the network."""
 
 from __future__ import annotations
@@ -12,8 +12,8 @@ from types import MappingProxyType
 import numpy as np
 import pytest
 
-from robofast_core import catalog as cat
-from robofast_core import zenodo, zenodo_assets
+from robofast import catalog as cat
+from robofast import zenodo, zenodo_assets
 
 
 def _md5(b: bytes) -> str:

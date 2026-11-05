@@ -13,9 +13,9 @@ is downloaded from Zenodo once its record is pinned; `docs/sky.md`,
   sprinkle.
 
 Regenerate with `python scripts/build_catalog.py synthetic` (generator:
-`robofast_core/testing/sky_fixture.py`; `tests/core/test_sky_fixture.py`
+`robofast/testing/sky_fixture.py`; `tests/core/test_sky_fixture.py`
 checks these files are what it writes).
 
 * `wds.npy`: 15 real lines of the Washington Double Star catalog (US Naval
   Observatory, a US Government work, public domain), parsed by
-  `robofast_core.catalog.parse_wds`. Used with either sky.
+  `robofast.catalog.parse_wds`. Used with either sky.

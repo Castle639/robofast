@@ -1,16 +1,16 @@
 {
   "_note": [
     "MINERVA Aqawan 1 (roll-off; holds T1 and T2; their slews are not vetted against each other).",
-    "One file for the enclosure, read by both services (robofast_core/config.py):",
-    "  python -m robofast_core.supervisor_service --config sites/minerva/aqawan1.json",
-    "  python -m robofast_core.sequencer_service --config sites/minerva/aqawan1.json",
+    "One file for the enclosure, read by both services (robofast/config.py):",
+    "  python -m robofast.supervisor_service --config sites/minerva/aqawan1.json",
+    "  python -m robofast.sequencer_service --config sites/minerva/aqawan1.json",
     "Every address is a 127.0.0.1 placeholder: replace it on the control network.",
     "dome: the Aqawan Alpaca server (deploy/aqawan.example.json listens on 11113).",
     "safetymonitor, observingconditions: the site weather bridge (sites/minerva/weather.yaml listens on 11111).",
     "t1, t2: ASCOM Remote on each telescope's Windows PC, serving its mount (PWI4) and camera as device 0.",
     "safety and sequencer: SafetyConfig and SequencerConfig fields; omitted ones take the defaults in docs/design.md section 6.",
     "plan: calibration frames only (taken with the enclosure closed); or run with --plan dispatch.example.json (the dispatch scheduler) or --plan targets.example.json (a static list).",
-    "site: Mt. Hopkins (minerva-control site_mtHopkins.ini), for python -m robofast_core.when (start the night at a Sun altitude; deploy/robofast-sequencer@.service).",
+    "site: Mt. Hopkins (minerva-control site_mtHopkins.ini), for python -m robofast.when (start the night at a Sun altitude; deploy/robofast-sequencer@.service).",
     "A telescope may also name a filterwheel (an Alpaca FilterWheel) and a port_action (its Alpaca Action that selects an M3 port), and a focuser and rotator (read only, for the FITS headers).",
     "images: every frame is saved under data_root (docs/data.md); the optics give an approximate WCS. plate_scale (arcsec per unbinned imager pixel) from minerva-control imager_t1.ini/imager_t2.ini PLATESCALE; aperture and focal length from the legacy FITS headers (control.py APTDIA, FOCALLEN). position_angle 0 (north up, east left) assumes PWI4 derotates the imager port to PA 0 as legacy did (sites/minerva/README.md: rotator offsets).",
     "limits: the observer console's manual-slew altitude limits (deg): legacy telescope_N.ini HORIZON (21) and scheduler.ini MAXALT (83).",
@@ -19,7 +19,7 @@
     "safety.fault_auto_clear (JDE 2026-10-31): the supervisor clears a PAC fault itself only with both shutters closed, never an E-stop, at most once per fault_auto_clear_interval (s), alarming each time; a recurrence within it stops automatic clearing until an operator clears faults (docs/aqawan.md).",
     "help.no_lamps: the request API adds this to its refusal of a lamp calibration (ARC, LAMP_FLAT): MINERVA's advice, not every site's.",
     "spectrograph: the KiwiSpec service (kiwispec.example.json listens on 8130); its telescopes are named T1, T2 (docs/rv_night.md). Spectrum sidecars go under images.data_root.",
-    "mode: the operating mode it starts in when its mode file (modes/aqawan1.json under the data directory) is missing or unreadable: robotic (JDE 2026-11-02: MINERVA is a robotic observatory, and the Aqawan's hardware heartbeat closes it if the supervisor dies). Switch to attended, engineering or shadow with python -m robofast_core.modes --config sites/minerva/aqawan1.json set MODE --operator NAME --reason WHY (or the observer console); the mode is kept across restarts. The built-in modes (robotic, attended, engineering, shadow) apply unchanged; docs/modes.md."
+    "mode: the operating mode it starts in when its mode file (modes/aqawan1.json under the data directory) is missing or unreadable: robotic (JDE 2026-11-02: MINERVA is a robotic observatory, and the Aqawan's hardware heartbeat closes it if the supervisor dies). Switch to attended, engineering or shadow with python -m robofast.modes --config sites/minerva/aqawan1.json set MODE --operator NAME --reason WHY (or the observer console); the mode is kept across restarts. The built-in modes (robotic, attended, engineering, shadow) apply unchanged; docs/modes.md."
   ],
   "name": "aqawan1",
   "listen": "127.0.0.1:8100",

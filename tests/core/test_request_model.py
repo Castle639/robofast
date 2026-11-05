@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from robofast_core.request_model import (
+from robofast.request_model import (
     RequestGroup,
     Status,
     load_request_groups,

@@ -1,4 +1,4 @@
-"""Registries and plug-ins (robofast_core.plugins, docs/plugins.md)."""
+"""Registries and plug-ins (robofast.plugins, docs/plugins.md)."""
 
 from __future__ import annotations
 
@@ -9,17 +9,17 @@ from types import SimpleNamespace
 
 import pytest
 
-from robofast_core import plugins
-from robofast_core.instruments import INSTRUMENT_TYPES
-from robofast_core.kinds import OBSERVATION_KINDS, ObservationKind
-from robofast_core.plan import PLAN_TYPES, Observation, StaticPlan, plan_from_config
-from robofast_core.plugins import Registry, load_config_plugins, load_plugins
-from robofast_core.weather_sources import SOURCE_TYPES
+from robofast import plugins
+from robofast.instruments import INSTRUMENT_TYPES
+from robofast.kinds import OBSERVATION_KINDS, ObservationKind
+from robofast.plan import PLAN_TYPES, Observation, StaticPlan, plan_from_config
+from robofast.plugins import Registry, load_config_plugins, load_plugins
+from robofast.weather_sources import SOURCE_TYPES
 
 PLUGIN = """
-from robofast_core.kinds import OBSERVATION_KINDS, ObservationKind
-from robofast_core.plan import PLAN_TYPES, StaticPlan
-from robofast_core.weather_sources import SOURCE_TYPES, HttpSource, Reading
+from robofast.kinds import OBSERVATION_KINDS, ObservationKind
+from robofast.plan import PLAN_TYPES, StaticPlan
+from robofast.weather_sources import SOURCE_TYPES, HttpSource, Reading
 
 CALLS = []
 
@@ -81,8 +81,8 @@ def test_core_registers_its_own_entries_and_the_drivers_theirs():
     assert {"expose", "spectrum", "arc", "lamp_flat"} <= set(OBSERVATION_KINDS.names())
     assert {"imager", "camera_spectrograph", "kiwispec"} <= set(INSTRUMENT_TYPES)
     # KiwiSpec is the devices package's built-in plug-in, not core's.
-    assert INSTRUMENT_TYPES.origin("kiwispec") == "robofast_core.devices"
-    assert INSTRUMENT_TYPES.origin("imager") == "robofast_core.instruments"
+    assert INSTRUMENT_TYPES.origin("kiwispec") == "robofast.devices"
+    assert INSTRUMENT_TYPES.origin("imager") == "robofast.instruments"
 
 
 def test_a_config_lists_a_plugin_and_its_entries_work(plugin):
@@ -109,10 +109,10 @@ def test_bad_plugins_are_refused_with_the_reason(plugin):
     with pytest.raises(ValueError, match="plugins: no_such_module_xyz: No module named"):
         load_plugins(["no_such_module_xyz"])
     with pytest.raises(ValueError, match="a list of module names"):
-        load_config_plugins({"plugins": "robofast_core.sites.minerva"})
+        load_config_plugins({"plugins": "robofast.sites.minerva"})
     with pytest.raises(ValueError, match="module has no register"):
-        load_plugins(["robofast_core.kinds"])
-    plugins._loaded.discard("robofast_core.kinds")
+        load_plugins(["robofast.kinds"])
+    plugins._loaded.discard("robofast.kinds")
 
 
 def test_entry_points_are_run_once(plugin, monkeypatch):
@@ -138,11 +138,11 @@ def test_entry_points_are_run_once(plugin, monkeypatch):
 
 
 def test_the_weather_bridge_loads_the_sites_adapters_from_its_config():
-    from robofast_core.weather_bridge import load_config, parse_config
+    from robofast.weather_bridge import load_config, parse_config
 
     raw = load_config(Path(__file__).resolve().parents[2] / "sites/minerva/weather.yaml")
-    assert raw["plugins"] == ["robofast_core.sites.minerva"]
+    assert raw["plugins"] == ["robofast.sites.minerva"]
     cfg = parse_config(raw)
     assert "minerva.ridge" in SOURCE_TYPES
-    assert SOURCE_TYPES.origin("minerva.ridge") == "robofast_core.sites.minerva"
+    assert SOURCE_TYPES.origin("minerva.ridge") == "robofast.sites.minerva"
     assert {s.type for s, _ in cfg.sources} >= {"redis", "minerva.ridge"}

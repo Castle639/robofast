@@ -20,10 +20,10 @@ from pathlib import Path
 import httpx
 import pytest
 
-from robofast_core.api_auth import TokenStore
-from robofast_core.console.hold import OperatorHold, read_holds, send_command
-from robofast_core.console.page import render_page
-from robofast_core.console.server import (
+from robofast.api_auth import TokenStore
+from robofast.console.hold import OperatorHold, read_holds, send_command
+from robofast.console.page import render_page
+from robofast.console.server import (
     Console,
     ConsoleHttpServer,
     NotAllowed,
@@ -32,10 +32,10 @@ from robofast_core.console.server import (
     load_console_config,
     main,
 )
-from robofast_core.plan import CallablePlan, Idle, Observation, StaticPlan
-from robofast_core.sequencer_service import write_snapshot
-from robofast_core.supervisor_service import SupervisorServer
-from robofast_core.testing.checks import wait_until
+from robofast.plan import CallablePlan, Idle, Observation, StaticPlan
+from robofast.sequencer_service import write_snapshot
+from robofast.supervisor_service import SupervisorServer
+from robofast.testing.checks import wait_until
 from tests.core.test_request_api import plan_entry
 
 LEASE_TOKEN = "e0e0e0e0e0e0.7"
@@ -873,8 +873,8 @@ async def test_the_hold_wrapper_forwards_reports_and_hooks(tmp_path):
 
 
 async def test_the_sequencer_service_wraps_the_plan(tmp_path):
-    from robofast_core.sequencer_service import build
-    from robofast_core.timeline import Timeline
+    from robofast.sequencer_service import build
+    from robofast.timeline import Timeline
 
     config = {
         "name": "e",
@@ -1081,7 +1081,7 @@ def test_the_hold_wrapper_parks_and_clears_through_the_sequencer_hooks(tmp_path)
 
 
 def test_the_spectrograph_panel_is_described_by_its_instrument_type(tmp_path):
-    from robofast_core.console.aggregate import _spectrograph_fields
+    from robofast.console.aggregate import _spectrograph_fields
 
     fields = _spectrograph_fields({"spectrograph": {"type": "kiwispec"}}, tmp_path)
     assert fields is not None and ("iodine stage", "stage", None, "") in fields

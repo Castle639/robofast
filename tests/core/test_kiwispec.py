@@ -16,7 +16,7 @@ import time
 import httpx
 import pytest
 
-from robofast_core.devices.kiwispec_client import (
+from robofast.devices.kiwispec_client import (
     COMMANDS,
     FORBIDDEN,
     HEADER_CHUNK,
@@ -31,14 +31,14 @@ from robofast_core.devices.kiwispec_client import (
     format_command,
     header_chunks,
 )
-from robofast_core.devices.kiwispec_service import (
+from robofast.devices.kiwispec_service import (
     KiwiSpecConfig,
     KiwiSpecRemote,
     KiwiSpecServer,
     flux_weighted_midpoint,
     main,
 )
-from robofast_core.devices.kiwispec_sim import KiwiSpecSim, SimConfig
+from robofast.devices.kiwispec_sim import KiwiSpecSim, SimConfig
 
 FAST = dict(
     readout=0.2,

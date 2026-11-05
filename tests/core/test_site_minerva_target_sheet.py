@@ -21,9 +21,9 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from robofast_core.dispatch import DispatchScheduler, TelescopeLimits
-from robofast_core.request_model import load_request_groups
-from robofast_core.sites.minerva import target_sheet as ms
+from robofast.dispatch import DispatchScheduler, TelescopeLimits
+from robofast.request_model import load_request_groups
+from robofast.sites.minerva import target_sheet as ms
 
 DATA = Path(__file__).parent / "data" / "minerva_sheet"
 SITE = Path(__file__).resolve().parents[2] / "sites" / "minerva"
@@ -146,7 +146,7 @@ def test_bstars_share_one_visit_a_night():
 
 
 def ms_site():
-    from robofast_core import sky
+    from robofast import sky
 
     return sky.Site(31.680407, -110.878977, 2316.0)
 
@@ -517,8 +517,8 @@ def test_cli_offline_and_snapshot(tmp_path, capsys, monkeypatch):
 
 # -- acquisition offsets against the catalog ----------------------------------------
 
-from robofast_core import catalog as cat  # noqa: E402
-from robofast_core.guider.offset import OffsetCheck, TargetPosition  # noqa: E402
+from robofast import catalog as cat  # noqa: E402
+from robofast.guider.offset import OffsetCheck, TargetPosition  # noqa: E402
 
 #: SYN-ZETA (row 8): its guide star is 5" south of it.
 ZETA = TargetPosition(105.0, 32.0, 10.5, -3.25, 2000.0)

@@ -10,15 +10,15 @@ import asyncio
 
 import pytest
 
-from robofast_core.alpaca import alpaca_owner
-from robofast_core.devices.pulizzi_server import PulizziServer
-from robofast_core.devices.tres_frontend_server import TRESFrontEndConfig, TRESFrontEndServer
-from robofast_core.lamps import LampSetup
-from robofast_core.plan import StaticPlan
-from robofast_core.sequencer import Sequencer, SequencerConfig, TelescopeUnit
-from robofast_core.sequences import sequences_from_config
-from robofast_core.testing.checks import wait_until
-from robofast_core.timeline import Timeline
+from robofast.alpaca import alpaca_owner
+from robofast.devices.pulizzi_server import PulizziServer
+from robofast.devices.tres_frontend_server import TRESFrontEndConfig, TRESFrontEndServer
+from robofast.lamps import LampSetup
+from robofast.plan import StaticPlan
+from robofast.sequencer import Sequencer, SequencerConfig, TelescopeUnit
+from robofast.sequences import sequences_from_config
+from robofast.testing.checks import wait_until
+from robofast.timeline import Timeline
 from tests.core.test_pulizzi import lamp_config
 
 from .conftest import COMMAND_TIMEOUT, SIM_SEQ

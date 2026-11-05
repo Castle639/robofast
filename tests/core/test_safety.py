@@ -7,8 +7,8 @@ import time
 
 import pytest
 
-from robofast_core.safety import RecoveryRefused
-from robofast_core.testing.checks import wait_until
+from robofast.safety import RecoveryRefused
+from robofast.testing.checks import wait_until
 
 
 async def _open(rig, holder="test"):
@@ -121,7 +121,7 @@ async def test_no_new_lease_until_previous_released(make_rig):
 
 
 async def test_sequencer_cannot_command_the_dome(make_rig):
-    from robofast_core import NotAuthorized
+    from robofast import NotAuthorized
 
     rig = make_rig()
     g = rig.owners["dome"].grant("seq")
@@ -289,7 +289,7 @@ async def test_one_unreadable_shutter_read_is_tolerated(make_rig):
 
 
 async def test_the_clear_faults_action_is_configurable(make_rig):
-    from robofast_core.safety import ENCLOSURE_MEMBERS, SafetyConfig, enclosure_members
+    from robofast.safety import ENCLOSURE_MEMBERS, SafetyConfig, enclosure_members
 
     assert enclosure_members(SafetyConfig()) == ENCLOSURE_MEMBERS
     cfg = SafetyConfig(clear_faults_action="ResetFaults")
@@ -320,7 +320,7 @@ def _stuck(tel) -> None:
 
 
 def test_the_interlock_needs_park_before_close():
-    from robofast_core.safety import SafetyConfig
+    from robofast.safety import SafetyConfig
 
     with pytest.raises(ValueError, match="needs park_before_close"):
         SafetyConfig(require_park_before_close=True, allow_unattended_without_watchdog=True)

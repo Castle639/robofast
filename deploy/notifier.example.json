@@ -1,8 +1,8 @@
 {
   "_note": [
-    "The alarm notifier (robofast_core/notifier/; docs/notifier.md).",
-    "  python -m robofast_core.notifier --config /etc/robofast/notifier.json --check   # validate",
-    "  python -m robofast_core.notifier --config /etc/robofast/notifier.json --test    # one message per sink",
+    "The alarm notifier (robofast/notifier/; docs/notifier.md).",
+    "  python -m robofast.notifier --config /etc/robofast/notifier.json --check   # validate",
+    "  python -m robofast.notifier --config /etc/robofast/notifier.json --test    # one message per sink",
     "console: the observer console's config; the notifier reads the same enclosures and the console's",
     "acknowledgements file (acks), so an observer's ack on the console stops the escalation.",
     "Secrets live outside the repository, mode 0600, owned by the notifier's user: here they come from",

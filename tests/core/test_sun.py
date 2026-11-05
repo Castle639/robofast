@@ -1,4 +1,4 @@
-"""The Sun's altitude (robofast_core.sun, astropy): legacy agreement, offline use."""
+"""The Sun's altitude (robofast.sun, astropy): legacy agreement, offline use."""
 
 from __future__ import annotations
 
@@ -11,13 +11,13 @@ from pathlib import Path
 
 import pytest
 
-from robofast_core.sun import (
+from robofast.sun import (
     PYEPHEM_PRESSURE_HPA,
     PYEPHEM_TEMPERATURE_C,
     standard_atmosphere,
     sun_altitude,
 )
-from robofast_core.weather_sources import SourceConfig, SunSource
+from robofast.weather_sources import SourceConfig, SunSource
 
 ROOT = Path(__file__).resolve().parents[2]
 MINERVA = (31.680407, -110.878977, 2316.0)
@@ -163,7 +163,7 @@ _OFFLINE = textwrap.dedent(
     # long out of date: what a machine running an old install meets.
     from astropy.time import Time
     Time.now = classmethod(lambda cls: Time("2029-01-01T00:00:00", scale="utc"))
-    from robofast_core.sun import sun_altitude
+    from robofast.sun import sun_altitude
     t0 = time.monotonic()
     for when in (
         datetime.now(UTC),

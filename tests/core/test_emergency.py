@@ -1,6 +1,6 @@
 """The emergency close (docs/console.md, "Emergency close"): the console
 asks the supervisor; if the supervisor is down or slow, it closes through
-the dome's close-only channel (robofast_core.emergency), which is latched,
+the dome's close-only channel (robofast.emergency), which is latched,
 audited and alarmed, and can never open anything.
 
 Unit tests run the console on fakes (an ``httpx.MockTransport``); the
@@ -19,9 +19,9 @@ import time
 import httpx
 import pytest
 
-from robofast_core.alpaca_client import InvalidOperationException
-from robofast_core.devices.aqawan_server import CLOSED, OPEN
-from robofast_core.emergency import (
+from robofast.alpaca_client import InvalidOperationException
+from robofast.devices.aqawan_server import CLOSED, OPEN
+from robofast.emergency import (
     PATH,
     EmergencyConfig,
     EmergencyFailed,
@@ -31,7 +31,7 @@ from robofast_core.emergency import (
     new_token,
     read_token,
 )
-from robofast_core.testing.checks import wait_until
+from robofast.testing.checks import wait_until
 
 from . import test_aqawan_server as _aqawan
 from . import test_console as _console
@@ -203,7 +203,7 @@ async def test_emergency_close_needs_operator_and_confirm_but_no_rate_limit(mc):
 
 
 async def test_config_validation(tmp_path):
-    from robofast_core.console.aggregate import ConsoleEnclosure
+    from robofast.console.aggregate import ConsoleEnclosure
     from tests.core.test_console import write_site
 
     write_site(tmp_path)
@@ -349,7 +349,7 @@ async def test_supervisor_dead_the_console_closes_the_sim_enclosure(make_rig, mc
 
 
 def test_the_page_has_the_button_and_its_dialog():
-    from robofast_core.console.page import render_page
+    from robofast.console.page import render_page
 
     page = render_page("n0nce")
     assert 'id="emergency"' in page and 'id="emergency-dialog"' in page

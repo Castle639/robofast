@@ -7,10 +7,10 @@ import time
 
 import pytest
 
-from robofast_core import DeviceError, DeviceOwner, DeviceTimeout, GrantRevoked, NotAuthorized
-from robofast_core.safety import ENCLOSURE_MEMBERS
-from robofast_core.testing.fakes import FakeDome, FakeTelescope
-from robofast_core.timeline import Timeline
+from robofast import DeviceError, DeviceOwner, DeviceTimeout, GrantRevoked, NotAuthorized
+from robofast.safety import ENCLOSURE_MEMBERS
+from robofast.testing.fakes import FakeDome, FakeTelescope
+from robofast.timeline import Timeline
 
 
 class Slow:

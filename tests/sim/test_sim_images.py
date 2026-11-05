@@ -12,10 +12,10 @@ import numpy as np
 import pytest
 from astropy.io import fits
 
-from robofast_core.alpaca_client import AlpacaDevice
-from robofast_core.imaging import Imaging, ImagingConfig
-from robofast_core.plan import StaticPlan
-from robofast_core.sequencer import Sequencer, SequencerConfig
+from robofast.alpaca_client import AlpacaDevice
+from robofast.imaging import Imaging, ImagingConfig
+from robofast.plan import StaticPlan
+from robofast.sequencer import Sequencer, SequencerConfig
 
 from .conftest import SIM_SEQ
 

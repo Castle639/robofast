@@ -16,14 +16,14 @@ ports **by URL**, and serves them as standard ASCOM Alpaca devices:
 
 | Module | What it is |
 |---|---|
-| `robofast_core/devices/serial_url.py` | serial ports by URL (pyserial `serial_for_url`: `rfc2217://`, `socket://`, a local device, `loop://`) or `sim`; the hardware gate; bounded async reads |
-| `robofast_core/devices/tc200.py` | Thorlabs TC200 (the iodine cell heater) |
-| `robofast_core/devices/thorlabs_apt.py` | the Thorlabs APT binary protocol (the iodine stage), with the motion supervised |
-| `robofast_core/devices/dynamixel2.py` | Robotis Dynamixel protocol 2.0 (the backlight arm's XM servo) |
-| `robofast_core/devices/kiwispec_serial.py` | the backlight LED controller, the vacuum gauge controller (read only), the Oasis chiller (read only) |
-| `robofast_core/devices/kiwispec_aux_sim.py` | a byte-level simulator of each device, in process or on a registered loopback TCP port |
-| `robofast_core/devices/kiwispec_aux_server.py` | the Alpaca server (`robofast-kiwispec-aux-server`) |
-| `robofast_core/devices/kiwispec_aux.py` | `AuxRouted`: the KiwiSpec service's calls for these devices, sent to the Alpaca server |
+| `robofast/devices/serial_url.py` | serial ports by URL (pyserial `serial_for_url`: `rfc2217://`, `socket://`, a local device, `loop://`) or `sim`; the hardware gate; bounded async reads |
+| `robofast/devices/tc200.py` | Thorlabs TC200 (the iodine cell heater) |
+| `robofast/devices/thorlabs_apt.py` | the Thorlabs APT binary protocol (the iodine stage), with the motion supervised |
+| `robofast/devices/dynamixel2.py` | Robotis Dynamixel protocol 2.0 (the backlight arm's XM servo) |
+| `robofast/devices/kiwispec_serial.py` | the backlight LED controller, the vacuum gauge controller (read only), the Oasis chiller (read only) |
+| `robofast/devices/kiwispec_aux_sim.py` | a byte-level simulator of each device, in process or on a registered loopback TCP port |
+| `robofast/devices/kiwispec_aux_server.py` | the Alpaca server (`robofast-kiwispec-aux-server`) |
+| `robofast/devices/kiwispec_aux.py` | `AuxRouted`: the KiwiSpec service's calls for these devices, sent to the Alpaca server |
 | `tests/core/test_kiwispec_aux.py` | fast-tier tests, all against the simulators |
 | `scripts/conformu_kiwispec_aux.py` | ConformU against all four Alpaca devices (three Switches, one FilterWheel) (CI job `conformu`) |
 | `sites/minerva/kiwispec_aux.example.json` | MINERVA's config (bridge host and ports are placeholders) |
@@ -264,11 +264,11 @@ these reads in `except: pass`).
 
 ## 7. Running
 
-    python -m robofast_core.devices.kiwispec_aux_server --config kiwispec_aux.json [--hardware] [--simulate]
+    python -m robofast.devices.kiwispec_aux_server --config kiwispec_aux.json [--hardware] [--simulate]
 
 `--simulate` puts every port on its simulator. A real port needs
 `"allow_hardware": true` in the config **and** `--hardware`; without both,
 only `sim`, `loop://` and a verified robofast simulator on loopback are
-opened (`python -m robofast_core.devices.kiwispec_aux_sim` serves the
+opened (`python -m robofast.devices.kiwispec_aux_sim` serves the
 simulators on loopback TCP ports, for the `socket://` path). Starting the
 server moves nothing: connecting reads, and turns the backlight LED off.

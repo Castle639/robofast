@@ -1,7 +1,7 @@
 # robofast data: frames on disk
 
 The sequencer saves every frame it takes when the enclosure config has an
-`images` entry (`robofast_core/imaging.py`, `robofast_core/fits_writer.py`;
+`images` entry (`robofast/imaging.py`, `robofast/fits_writer.py`;
 design.md sections 3.4 and 3.8). This page is the contract for anything that
 reads those files: the layout, the times, and the header keywords.
 
@@ -52,7 +52,7 @@ devices). They are only read, for the headers.
   `night_rollover_hour` (12:00) local time belongs to the previous date's
   night. Local time comes from `timezone` (an IANA name) if it is set, otherwise
   from mean solar time at the site's longitude. This is the convention the
-  plan record uses (`robofast_core.plan_record.night_of`). The night is
+  plan record uses (`robofast.plan_record.night_of`). The night is
   computed from the frame's own `DATE-OBS`.
 * **Object**: the observation's `object`. That is the target name from the
   dispatch scheduler, or the observation name for static and calibration

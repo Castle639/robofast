@@ -1,4 +1,4 @@
-"""The acquisition cascade (robofast_core/guider/acquire.py, docs/acquisition.md)
+"""The acquisition cascade (robofast/guider/acquire.py, docs/acquisition.md)
 on the sky simulator with a realistic FAU: ~2 % of the light, short
 exposures, so only the bright stars show -- nu Draconis (an equal pair, 62
 arcsec), a closer unequal pair, a triple, a single star; a correct PA
@@ -13,13 +13,13 @@ from datetime import UTC, datetime
 import numpy as np
 import pytest
 
-from robofast_core.catalog import Stars, catalog_at, separation
-from robofast_core.guider.acquire import AcqConfig, Acquirer, neighbours_from_catalog
-from robofast_core.guider.base import ROI, Frame
-from robofast_core.photometry import PortPhotometry, SkyConditions
-from robofast_core.testing import TEST_OPTICS
-from robofast_core.testing.skysim import SkyCamera, SkyScene
-from robofast_core.testing.starfield import Detector
+from robofast.catalog import Stars, catalog_at, separation
+from robofast.guider.acquire import AcqConfig, Acquirer, neighbours_from_catalog
+from robofast.guider.base import ROI, Frame
+from robofast.photometry import PortPhotometry, SkyConditions
+from robofast.testing import TEST_OPTICS
+from robofast.testing.skysim import SkyCamera, SkyScene
+from robofast.testing.starfield import Detector
 from tests.core.skydata import sky_dir
 
 WHEN = datetime(2026, 7, 1, 6, 0, tzinfo=UTC)
@@ -236,7 +236,7 @@ def test_trace_records_every_frame(nu):
 def test_fits_and_guider_conventions_agree(pa, flip):
     """The PA calibration's (FITS, plate-solve) PA and parity give the same
     pixel->sky map as the sky simulator's camera."""
-    from robofast_core.guider.calibration import fits_sky_matrix
+    from robofast.guider.calibration import fits_sky_matrix
 
     cam = SkyCamera(plate_scale=0.5, pa=pa, flip=flip)
     assert np.allclose(cam.cd() * 3600.0, fits_sky_matrix(0.5, pa, flip), atol=1e-9)
@@ -248,12 +248,12 @@ def test_fits_and_guider_conventions_agree(pa, flip):
 def _loop(nu, *, pa_cal=30.0, flip=False, sigma=None):
     """The guider simulator with nu Dra's real field, a short (0.02 s) FAU
     acquisition frame, and the cascade for nu2."""
-    from robofast_core.guider.base import VirtualClock
-    from robofast_core.guider.calibration import Calibration
-    from robofast_core.guider.loop import GuideConfig, Guider
-    from robofast_core.guider.sim import SimCamera, SimMount, SimWorld
-    from robofast_core.guider.tiptilt import MountOffset
-    from robofast_core.testing.skysim import sky_world_stars
+    from robofast.guider.base import VirtualClock
+    from robofast.guider.calibration import Calibration
+    from robofast.guider.loop import GuideConfig, Guider
+    from robofast.guider.sim import SimCamera, SimMount, SimWorld
+    from robofast.guider.tiptilt import MountOffset
+    from robofast.testing.skysim import sky_world_stars
 
     cat, s = nu
     cam = SkyCamera((1216, 1936), SCALE, pa=30.0, detector=Detector(shape=(1216, 1936)))
@@ -306,7 +306,7 @@ async def test_guide_loop_with_a_wrong_pa_says_target_not_identified(nu):
 
 
 def test_request_acquisition_config_round_trips():
-    from robofast_core.request_model import Configuration
+    from robofast.request_model import Configuration
 
     from .test_dispatch import group
 
@@ -331,7 +331,7 @@ def test_request_acquisition_config_round_trips():
 
 
 def test_vetting_predicts_the_acquisition_branch(nu):
-    from robofast_core.vetting import PortGeometry, vet
+    from robofast.vetting import PortGeometry, vet
 
     cat, s = nu
     port = PortGeometry(

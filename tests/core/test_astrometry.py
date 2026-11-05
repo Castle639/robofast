@@ -17,13 +17,13 @@ from datetime import UTC, datetime
 import numpy as np
 import pytest
 
-from robofast_core import astrometry as ast
-from robofast_core.catalog import catalog_at, separation
-from robofast_core.photometry import PortPhotometry, SkyConditions
-from robofast_core.pointing import PointingModel
-from robofast_core.testing import TEST_OPTICS
-from robofast_core.testing.skysim import SkyCamera, SkyScene
-from robofast_core.testing.starfield import Detector
+from robofast import astrometry as ast
+from robofast.catalog import catalog_at, separation
+from robofast.photometry import PortPhotometry, SkyConditions
+from robofast.pointing import PointingModel
+from robofast.testing import TEST_OPTICS
+from robofast.testing.skysim import SkyCamera, SkyScene
+from robofast.testing.starfield import Detector
 from tests.core.skydata import sky_dir
 
 SPARSE = (212.720875, 62.522197)

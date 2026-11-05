@@ -1,4 +1,4 @@
-"""The Zenodo registry (robofast_core/zenodo_assets.py).
+"""The Zenodo registry (robofast/zenodo_assets.py).
 
 Offline checks always run; the comparison with the live record runs only
 with ``ROBOFAST_NETWORK_TESTS=1`` (run it after pinning a new version).
@@ -12,9 +12,9 @@ import urllib.request
 
 import pytest
 
-from robofast_core import zenodo_assets
-from robofast_core.catalog import BRIGHT_FILE
-from robofast_core.testing.sky_fixture import FIXTURE_FILE
+from robofast import zenodo_assets
+from robofast.catalog import BRIGHT_FILE
+from robofast.testing.sky_fixture import FIXTURE_FILE
 
 #: The files of each record the code reads.
 NEEDED = {zenodo_assets.GAIA_EXTRACTS: {BRIGHT_FILE, FIXTURE_FILE}}

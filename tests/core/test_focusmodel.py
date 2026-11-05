@@ -1,5 +1,5 @@
 """The focus model's gravity term and its fit from autofocus history
-(robofast_core/autofocus.py FocusModel, robofast_core/focusmodel.py)."""
+(robofast/autofocus.py FocusModel, robofast/focusmodel.py)."""
 
 from __future__ import annotations
 
@@ -8,9 +8,9 @@ import math
 import numpy as np
 import pytest
 
-from robofast_core.autofocus import FocusModel, FocusStore
-from robofast_core.focusmodel import fit, main
-from robofast_core.sites.minerva.focus_model import legacy_model
+from robofast.autofocus import FocusModel, FocusStore
+from robofast.focusmodel import fit, main
+from robofast.sites.minerva.focus_model import legacy_model
 
 T2 = {"F0": 16500.0, "C0": -52.94, "T0": 8.95, "C1": 46.18, "dT0": 0.2237, "C2": 2220.265,
       "G0": 0.7824}  # fmt: skip
@@ -82,8 +82,8 @@ def test_command_line(tmp_path, capsys):
 async def test_the_sequencer_starts_from_the_gravity_term_and_records_altitude(make_rig):
     """The start position includes C2 (sin(alt) - G0); the measured focus is
     still what is used."""
-    from robofast_core.autofocus_plan import AutofocusTriggers
-    from robofast_core.plan import StaticPlan
+    from robofast.autofocus_plan import AutofocusTriggers
+    from robofast.plan import StaticPlan
 
     from .test_autofocus_sequencer import FIELD, TRUE_FOCUS, focus_rig, run_to_end
 

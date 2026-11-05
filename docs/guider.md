@@ -1,6 +1,6 @@
 # The guider
 
-`robofast_core/guider/` is a generic guide-camera service: it keeps a star on
+`robofast/guider/` is a generic guide-camera service: it keeps a star on
 a spectrograph fiber (or any target pixel) by moving a tip/tilt mirror, the
 mount, or both. One service runs **on the computer the guide camera is
 plugged into**. Frames never leave that computer while guiding: centroids
@@ -27,7 +27,7 @@ confirmed on the real device is marked *assumed* or listed under
 ```
          sequencer (control computer)                guide computer (camera attached)
   +----------------------------------+        +-------------------------------------------+
-  | observation with guide: true     |  HTTP  | guider service  (robofast_core.guider.     |
+  | observation with guide: true     |  HTTP  | guider service  (robofast.guider.     |
   |   GuiderRemote.start/check/stop  | -----> |                  service)                 |
   |   status -> value registry       | <----- |  Camera -> Centroider -> Controller ->    |
   |   (FITS headers)                 |  JSON  |  Calibration -> TipTilt     (every frame) |
@@ -39,7 +39,7 @@ confirmed on the real device is marked *assumed* or listed under
                                                                                          PulseGuide)
 ```
 
-The parts are typed protocols (`robofast_core/guider/base.py`), so each
+The parts are typed protocols (`robofast/guider/base.py`), so each
 setup is a configuration:
 
 - **Camera** (`camera.py`, `sim.py`): `expose(exposure, roi, gain) ->
@@ -181,8 +181,8 @@ The matrix replaces MINERVA's `ARCSEC_PER_STEP` and `ROTOFFSET`
 (`config/ao_*.ini`) and tres-guider's `STEPS_PER_PIXEL_TIP/TILT`, `THETA`
 and `FLIP`: scales, rotation, flip (`det M < 0`) and any non-orthogonality
 all come out of the fit, so no sign convention has to be guessed.
-The sites' importers `robofast_core.sites.minerva.guider_calibration.from_sx_legacy`
-and `robofast_core.sites.flwo60.guider_calibration.from_tres_legacy` turn the old numbers into a matrix
+The sites' importers `robofast.sites.minerva.guider_calibration.from_sx_legacy`
+and `robofast.sites.flwo60.guider_calibration.from_tres_legacy` turn the old numbers into a matrix
 to compare with a measurement. With a plate scale and position angle
 (`sky_matrix`: arcsec east/north per pixel; PA of the detector's +y axis
 east of north; parity for a mirrored field) a calibration also maps to the
@@ -222,14 +222,14 @@ the fiber. `guide.fiber_flux: true` (turned on by `flux_report`) sums every
 guide frame's counts inside the fiber's footprint: an aperture of
 `fiber_aperture` pixels (default `fiber_radius`) around the fiber pixel,
 less the median of the annulus `fiber_annulus` (default 2x..3x the
-aperture) per pixel (`robofast_core.guider.loop.fiber_counts`). Each
+aperture) per pixel (`robofast.guider.loop.fiber_counts`). Each
 frame's record has it (`fiber_counts`, `GET /telemetry`). With
 
     "flux_report": {"url": "http://<kiwispec>:8130", "telescope": "T1", "interval": 2.0}
 
 the service sends `[t_start, t_end, counts]` for every frame (Unix
 seconds) to the KiwiSpec service's `POST /flux` every `interval` seconds
-(`robofast_core/guider/flux_report.py`); a failed report is kept, bounded,
+(`robofast/guider/flux_report.py`); a failed report is kept, bounded,
 and resent, and the loop never waits for it. `GET /status` `flux_report`
 shows what was sent and the last error. The KiwiSpec service sums the
 telescopes feeding a spectrum into its flux-weighted midpoint
@@ -297,17 +297,17 @@ mount is the fine device: the same loop at ~1 Hz with long exposures.
 
 ## The service
 
-`python -m robofast_core.guider.service --config guider.json [--hardware]`
+`python -m robofast.guider.service --config guider.json [--hardware]`
 (`deploy/guider.example.json` runs entirely on simulators). The hardware
 backends' packages are the `guider-hardware` dependency group
 (`pip install --group guider-hardware`: pyserial, pipython, zwoasi, redis),
 needed only on a guide computer with real devices. The API and the config
 are in the module docstring. Each part's `kind` (`camera`, `tiptilt`,
 `mount`, `backlight`) is a backend registered in
-`robofast_core/guider/hardware.py` (`CAMERAS`, `TIPTILTS`, `MOUNTS`,
+`robofast/guider/hardware.py` (`CAMERAS`, `TIPTILTS`, `MOUNTS`,
 `BACKLIGHTS`); a plug-in adds more (docs/plugins.md). MINERVA's fiber
 backlight is `{"kind": "kiwispec", "url": ...}`, registered by the
-built-in `robofast_core.devices` plug-in. In short:
+built-in `robofast.devices` plug-in. In short:
 
 - `GET /status`, `GET /telemetry?n=`, `GET /values`;
 - `GET /frame?max=N`: the last frame the camera took (the guide window, or
@@ -378,7 +378,7 @@ service's tests check every backend against the gate.
 
 ## The simulator
 
-`sim.py` (rendering with the shared `robofast_core/testing/starfield.py`,
+`sim.py` (rendering with the shared `robofast/testing/starfield.py`,
 written for autofocus): `SimWorld` holds the truth -- star position = nominal +
 atmospheric jitter (`Jitter`: power-law spectrum with a knee, wind-shake
 lines, drift) + tip/tilt matrix @ tip/tilt position + mount matrix @ mount

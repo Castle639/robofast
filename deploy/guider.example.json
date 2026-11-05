@@ -1,7 +1,7 @@
 {
   "_note": [
     "A guider service for one guide camera, run on the computer the camera is plugged into:",
-    "  python -m robofast_core.guider.service --config deploy/guider.example.json",
+    "  python -m robofast.guider.service --config deploy/guider.example.json",
     "This example is all simulators (docs/guider.md): a simulated sky and FAU camera, the SX AO",
     "protocol simulator, a simulated mount and backlight. For T2: camera kind zwo, tiptilt kind sxao",
     "with its serial port, mount kind alpaca with the telescope's address, backlight kiwispec with the",

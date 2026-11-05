@@ -13,8 +13,8 @@ import time
 
 import pytest
 
-from robofast_core.alpaca_client import AlpacaDevice
-from robofast_core.testing.checks import (
+from robofast.alpaca_client import AlpacaDevice
+from robofast.testing.checks import (
     assert_fenced_after_cancel,
     assert_generations_disjoint,
     await_until,

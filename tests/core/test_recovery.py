@@ -1,4 +1,4 @@
-"""The recovery ladder (robofast_core/recovery.py, docs/recovery.md): rungs,
+"""The recovery ladder (robofast/recovery.py, docs/recovery.md): rungs,
 escalation, the power-cycle guards, bounds, and the sequencer using it --
 with fakes and, for the power cycle, the PDU server on its simulator."""
 
@@ -9,12 +9,12 @@ import sys
 
 import pytest
 
-from robofast_core.devices.apc_pdu import APCPDUSim, Credentials
-from robofast_core.devices.pdu_server import PDUConfig, PDUServer
-from robofast_core.recovery import DevicePolicy, PDUSwitch, RecoveryLadder
-from robofast_core.sequencer_service import snapshot
-from robofast_core.testing.checks import wait_until
-from robofast_core.testing.fakes import FakeCamera, FakeDeviceError
+from robofast.devices.apc_pdu import APCPDUSim, Credentials
+from robofast.devices.pdu_server import PDUConfig, PDUServer
+from robofast.recovery import DevicePolicy, PDUSwitch, RecoveryLadder
+from robofast.sequencer_service import snapshot
+from robofast.testing.checks import wait_until
+from robofast.testing.fakes import FakeCamera, FakeDeviceError
 
 OK_HOOK = {"command": [sys.executable, "-c", "print('restarted')"]}
 
@@ -108,7 +108,7 @@ async def test_restart_hook_runs_a_command():
     assert [s for s, _ in r.tried] == ["reconnect", "restart"] and r.recovered
     assert seen == [OK_HOOK]
     # The default hook really runs the command (and a failing one is an error).
-    from robofast_core.recovery import run_hook
+    from robofast.recovery import run_hook
 
     assert await run_hook(OK_HOOK, 10) == "restarted"
     with pytest.raises(RuntimeError, match="exited 3"):
@@ -268,7 +268,7 @@ async def test_sequencer_climbs_the_ladder_and_observes_on(make_rig):
     rig = make_rig(exptime=0.05, count=3, telescopes=2, seq={"error_backoff": 0.1})
     cam = FlakyCamera()
     unit = rig.sequencer.units["t1"]
-    from robofast_core.owner import DeviceOwner
+    from robofast.owner import DeviceOwner
 
     unit.camera = DeviceOwner("t1.camera", lambda: cam, rig.timeline, default_timeout=0.5)
 
@@ -302,7 +302,7 @@ async def test_sequencer_gives_up_when_the_ladder_is_exhausted(make_rig):
     rig = make_rig(exptime=0.05, count=3, telescopes=2, seq={"error_backoff": 0.1})
     cam = FlakyCamera()
     unit = rig.sequencer.units["t1"]
-    from robofast_core.owner import DeviceOwner
+    from robofast.owner import DeviceOwner
 
     unit.camera = DeviceOwner("t1.camera", lambda: cam, rig.timeline, default_timeout=0.5)
     unit.recovery = RecoveryLadder(

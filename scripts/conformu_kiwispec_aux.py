@@ -2,7 +2,7 @@
 
     python scripts/conformu_kiwispec_aux.py --conformu PATH [--out DIR]
 
-Starts ``robofast_core.devices.kiwispec_aux_server`` with every port
+Starts ``robofast.devices.kiwispec_aux_server`` with every port
 ``"sim"`` (the in-process TC200, APT, Dynamixel, LED, gauge and chiller
 simulators) on a free loopback port, then runs ConformU's ``conformance``
 and ``alpacaprotocol`` checks against its four devices: the iodine cell
@@ -66,7 +66,7 @@ def main() -> None:
         )
     )
     server, hello = start(
-        ["robofast_core.devices.kiwispec_aux_server", "--config", str(config)],
+        ["robofast.devices.kiwispec_aux_server", "--config", str(config)],
         out / "server.log",
     )
     summaries = []

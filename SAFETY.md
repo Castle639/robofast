@@ -26,7 +26,7 @@ is responsible for its safe operation.
   sure it cannot move while they are near it.
 - **Testing before trusting.** Try every new configuration, driver or
   version with the enclosure closed and someone watching, starting from
-  the simulators (`robofast_core/testing`) and small motions.
+  the simulators (`robofast/testing`) and small motions.
 - **Supervision suited to the site.** Decide, for your site, when an
   operator must be on duty (`docs/modes.md`).
 

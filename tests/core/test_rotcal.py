@@ -1,4 +1,4 @@
-"""Rotator / PA calibration (robofast_core/rotcal.py, docs/rotcal.md): the
+"""Rotator / PA calibration (robofast/rotcal.py, docs/rotcal.md): the
 fit, the store, the routine on the simulated sky (a rotator port and a
 flipped fixed port), the sequencer, and the consumers -- the frame
 pipeline's WCS and header, the plate solver's hint, the guider's seed."""
@@ -13,14 +13,14 @@ import numpy as np
 import pytest
 from astropy.io import fits
 
-from robofast_core.astrometry import SolverConfig, solve_near
-from robofast_core.config import load_config
-from robofast_core.guider.service import GuiderService
-from robofast_core.guider.sim import SimWorld
-from robofast_core.owner import DeviceOwner
-from robofast_core.plan import Observation, StaticPlan
-from robofast_core.request_model import load_request_groups
-from robofast_core.rotcal import (
+from robofast.astrometry import SolverConfig, solve_near
+from robofast.config import load_config
+from robofast.guider.service import GuiderService
+from robofast.guider.sim import SimWorld
+from robofast.owner import DeviceOwner
+from robofast.plan import Observation, StaticPlan
+from robofast.request_model import load_request_groups
+from robofast.rotcal import (
     PACalibration,
     PAMeasurement,
     PAStore,
@@ -30,11 +30,11 @@ from robofast_core.rotcal import (
     main,
     seed_mount_matrix,
 )
-from robofast_core.sequencer_service import build
-from robofast_core.testing.pointing_sim import SimRotator, SyntheticCatalog
-from robofast_core.testing.skysim import SkyCamera, SkyScene, lst_deg
-from robofast_core.testing.starfield import Detector
-from robofast_core.timeline import Timeline
+from robofast.sequencer_service import build
+from robofast.testing.pointing_sim import SimRotator, SyntheticCatalog
+from robofast.testing.skysim import SkyCamera, SkyScene, lst_deg
+from robofast.testing.starfield import Detector
+from robofast.timeline import Timeline
 
 from .test_guider_loop import _service_config
 from .test_imaging import headers
@@ -165,7 +165,7 @@ def test_command_line_on_fits_frames(tmp_path, capsys, monkeypatch):
 
     sky = scene(pa=101.3, flip=True)
     cat = sky.catalog
-    monkeypatch.setattr("robofast_core.catalog.catalog_from_config", lambda *a, **k: cat)
+    monkeypatch.setattr("robofast.catalog.catalog_from_config", lambda *a, **k: cat)
     paths = []
     for k in range(2):
         t = T0 + timedelta(minutes=10 * k)
@@ -297,7 +297,7 @@ async def test_request_type_and_service_config(tmp_path):
 def test_fits_and_guider_conventions_agree(pa, flip):
     """The PA calibration's (FITS, plate-solve) PA and parity give the same
     pixel->sky map as the sky simulator's camera and the guider's matrix."""
-    from robofast_core.guider.calibration import fits_sky_matrix, sky_matrix
+    from robofast.guider.calibration import fits_sky_matrix, sky_matrix
 
     cam = SkyCamera(plate_scale=0.5, pa=pa, flip=flip)
     assert np.allclose(cam.cd() * 3600.0, fits_sky_matrix(0.5, pa, flip), atol=1e-9)

@@ -11,12 +11,12 @@ import logging
 
 import pytest
 
-from robofast_core import SafetyConfig
-from robofast_core.console.aggregate import Aggregator
-from robofast_core.modes import ModeGate, modes_from_config
-from robofast_core.morning import build_report, gather, render_markdown
-from robofast_core.safety import UNWATCHED_TEXT
-from robofast_core.testing.checks import wait_until
+from robofast import SafetyConfig
+from robofast.console.aggregate import Aggregator
+from robofast.modes import ModeGate, modes_from_config
+from robofast.morning import build_report, gather, render_markdown
+from robofast.safety import UNWATCHED_TEXT
+from robofast.testing.checks import wait_until
 
 # -- the config ------------------------------------------------------------------
 
@@ -48,7 +48,7 @@ def test_the_opt_in_is_explicit():
 
 async def test_the_supervisor_warns_at_start_on_switch_and_periodically(make_rig, caplog):
     # The fakes have no heartbeat and opt in (tests/core/conftest.py FAST_SAFETY).
-    caplog.set_level(logging.WARNING, logger="robofast_core.safety")
+    caplog.set_level(logging.WARNING, logger="robofast.safety")
     rig = make_rig(modes={"mode": "attended"}, safety=dict(unwatched_warning_interval=0.2))
     sup = rig.supervisor
     (start,) = rig.timeline.events("unwatched")
@@ -143,9 +143,9 @@ def test_the_console_alarms_for_as_long_as_it_lasts():
 def test_the_morning_report_says_it_first(tmp_path):
     log = tmp_path / "supervisor.log"
     log.write_text(
-        "2026-11-10 01:00:00,000 WARNING robofast_core.timeline: roof: unwatched"
+        "2026-11-10 01:00:00,000 WARNING robofast.timeline: roof: unwatched"
         " {'why': 'switch from attended', 'mode': 'robotic', 'active': True}\n"
-        "2026-11-10 01:15:00,000 WARNING robofast_core.timeline: roof: unwatched"
+        "2026-11-10 01:15:00,000 WARNING robofast.timeline: roof: unwatched"
         " {'why': 'still unattended with no watchdog', 'mode': 'robotic', 'active': True}\n"
     )
     rep = build_report(gather("n20261109", tmp_path / "data", plan_records=[], logs=[log]))

@@ -1,6 +1,6 @@
-# MINERVA site weather bridge (robofast_core.weather_bridge).
+# MINERVA site weather bridge (robofast.weather_bridge).
 #
-#   python -m robofast_core.weather_bridge --config sites/minerva/weather.yaml --shadow
+#   python -m robofast.weather_bridge --config sites/minerva/weather.yaml --shadow
 #
 # Limits are ported from the legacy minerva-control code,
 # minerva_library/env.py (site.load_config openLimits/closeLimits and
@@ -25,7 +25,7 @@
 # The site's own source types (minerva.ridge, minerva.sky_temps): a plug-in
 # shipped with robofast, loaded because it is listed here (docs/plugins.md).
 plugins:
-  - robofast_core.sites.minerva
+  - robofast.sites.minerva
 
 site:
   name: minerva

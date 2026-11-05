@@ -3,7 +3,7 @@
 An enclosure runs in one **operating mode** at a time: a named bundle of
 policy that the safety supervisor, the sequencer, the observer console and
 the request API all read from the supervisor and honor
-(`robofast_core/modes.py`; design.md 3.10 (b)). The site config says which
+(`robofast/modes.py`; design.md 3.10 (b)). The site config says which
 modes exist and what each means, so "robotic at MINERVA, attended at the
 60-inch" is configuration, never an `if site == ...` in core.
 
@@ -88,7 +88,7 @@ Every mode is a `ModePolicy`:
 | Key | Values | Meaning |
 |---|---|---|
 | `open` | bool | the supervisor may grant a lease (and so open) at all |
-| `observe` | `plan`, `manual`, `shadow` | what the sequencer asks of its plan (`robofast_core.modes.ModeGate`) |
+| `observe` | `plan`, `manual`, `shadow` | what the sequencer asks of its plan (`robofast.modes.ModeGate`) |
 | `enclosure` | `command`, `watch` | `watch`: the supervisor reads the enclosure and commands nothing; needs `open` false |
 | `requests` | bool | the request API accepts submissions and ToOs |
 | `attended_only` | bool | no lease unless an operator is on duty |
@@ -210,8 +210,8 @@ buttons, which ask for a reason and a confirmation; audited), or from a
 shell on the control network:
 
 ```
-python -m robofast_core.modes --config sites/minerva/aqawan1.json show   # or robofast-mode
-python -m robofast_core.modes --config sites/minerva/aqawan1.json \
+python -m robofast.modes --config sites/minerva/aqawan1.json show   # or robofast-mode
+python -m robofast.modes --config sites/minerva/aqawan1.json \
     set robotic --operator jde --reason "unattended tonight"
 ```
 
@@ -254,10 +254,10 @@ A switch between modes that do the same work and may both open
 
 ## How each part honors it
 
-* **The supervisor** (`robofast_core/safety.py`): `open` and the duty checks
+* **The supervisor** (`robofast/safety.py`): `open` and the duty checks
   in `open_allowed`, so `request_open` grants nothing a mode forbids;
   `enclosure: watch` in its enclosure loop; `fault_auto_clear` per mode.
-* **The sequencer** (`robofast_core/sequencer.py`) asks its plan through a
+* **The sequencer** (`robofast/sequencer.py`) asks its plan through a
   `ModeGate`, which reads the supervisor's mode (at most every 2 s; the
   in-process supervisor, or `RemoteSupervisor.mode_status`): `plan` passes
   through; `manual` answers Idle to every telescope not under manual control

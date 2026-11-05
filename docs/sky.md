@@ -1,11 +1,11 @@
 # The sky: catalog, simulator, plate solving
 
-robofast knows where the stars are (`robofast_core/catalog.py`), can render
-what a camera on a mis-pointing telescope sees (`robofast_core/testing/skysim.py`),
+robofast knows where the stars are (`robofast/catalog.py`), can render
+what a camera on a mis-pointing telescope sees (`robofast/testing/skysim.py`),
 and can work out from an image where the telescope really points
-(`robofast_core/astrometry.py`). Every light frame can be solved as it is
+(`robofast/astrometry.py`). Every light frame can be solved as it is
 written, with its WCS and photometric zero point in the header
-(`robofast_core/framesolve.py`). The pieces are pure numpy plus astropy
+(`robofast/framesolve.py`). The pieces are pure numpy plus astropy
 (already a dependency); nothing needs the network once the catalog cache
 and the data directory are filled (section 1, "Pre-filling a host").
 
@@ -79,7 +79,7 @@ overrides the source's own service (the Gaia archive, IRSA).
 
 ### Catalog sources
 
-`robofast_core.catalog.CATALOG_SOURCES` is a registry (docs/plugins.md):
+`robofast.catalog.CATALOG_SOURCES` is a registry (docs/plugins.md):
 core registers three, and a plug-in may add its own (a `CatalogSource`:
 its licence, epoch, tile directory and fetcher).
 
@@ -95,7 +95,7 @@ it, the guider chooses guide stars by it, the simulator puts it through
 each port's zero point, vetting compares it. The estimates use the Gaia
 EDR3 documentation's photometric relations (section 5.5.1, tables 5.7 and
 5.8; Riello et al. 2021): `G - V` from `B - V`, `G - Ks` and `BP - RP`
-from `J - Ks` (`robofast_core/catalog_sources.py` has the coefficients).
+from `J - Ks` (`robofast/catalog_sources.py` has the coefficients).
 Measured against Gaia DR3 on one high-latitude tile (2026-11-02, the 81
 Gaia stars with G < 16 around (213.0, +62.3)): UCAC4 matched 74, estimated
 G off by -0.01 mag median, 0.12 rms, BP-RP 0.12 rms, positions 0.05"
@@ -145,7 +145,7 @@ refuse every non-commercial file: a Gaia source is an error when the
 config is loaded (`NonCommercialRefused`, saying why and what to do), as
 is the live VizieR service; the Gaia bright-star list and the Hipparcos
 supplement are never read; the environment variable also stops the
-Zenodo download of the Gaia extracts (`python -m robofast_core.zenodo
+Zenodo download of the Gaia extracts (`python -m robofast.zenodo
 fetch` skips that record). The test suite's own fixtures are exempt only
 because the tests do not set it. Configure the `catalog` entry of every
 service that has one (guider, frame solver, vetting, pointing model,
@@ -181,7 +181,7 @@ decision 2026-10-31). Everything is fetched on first use and cached:
 |---|---|---|---|
 | Gaia DR3 tiles (G < 16) | CC BY-NC 3.0 IGO | the ESA Gaia archive (TAP), per tile, as needed | `<cache_dir>` (catalog config) |
 | UCAC4 or 2MASS tiles (`source: ucac4` / `2mass`) | US Government catalogs (above, "Licences") | IRSA (TAP), per tile, as needed | `<cache_dir>` |
-| `bright_stars.npy` (Gaia DR3, G < 6.5) | CC BY-NC 3.0 IGO | Zenodo record `gaia_extracts` (pinned by size and md5 in `robofast_core/zenodo_assets.py`) | the data directory |
+| `bright_stars.npy` (Gaia DR3, G < 6.5) | CC BY-NC 3.0 IGO | Zenodo record `gaia_extracts` (pinned by size and md5 in `robofast/zenodo_assets.py`) | the data directory |
 | `test_fixture_tiles.npz` (Gaia DR3 tiles of the five test fields) | CC BY-NC 3.0 IGO | the same Zenodo record; read by the test suite only | the data directory |
 | Hipparcos stars Gaia lacks | ESA; terms not stated plainly, so never redistributed | the Gaia archive (`build_catalog.py hipparcos`) | `<cache_dir>` |
 | WDS (Washington Double Star catalog) | US Naval Observatory, a US Government work (public domain) | its home at Georgia State (`build_catalog.py wds`) | `<cache_dir>`; 15 of its lines are in the test data |
@@ -199,7 +199,7 @@ without it.
 subdirectory per Zenodo record (`gaia_extracts/bright_stars.npy`). A
 file of the pinned size is used as it is; a download lands on a temporary
 name, is checked against the pinned size and md5 and only then renamed
-into place (`robofast_core/zenodo.py`). `ROBOFAST_OFFLINE=1` forbids
+into place (`robofast/zenodo.py`). `ROBOFAST_OFFLINE=1` forbids
 downloads. On a host where home directories are small or shared, point
 `ROBOFAST_DATA_DIR` (and the catalog's `cache_dir`) at local disk, e.g.
 `/var/lib/robofast/data` in the systemd units' environment.
@@ -209,8 +209,8 @@ downloads. On a host where home directories are small or shared, point
 ```sh
 # on the host, while it has network (or on any machine, then copy the tree):
 export ROBOFAST_DATA_DIR=/var/lib/robofast/data
-python -m robofast_core.zenodo fetch       # every pinned Zenodo file
-python -m robofast_core.zenodo status      # what is there, what is missing
+python -m robofast.zenodo fetch       # every pinned Zenodo file
+python -m robofast.zenodo status      # what is there, what is missing
 python scripts/build_catalog.py tiles --cache /var/lib/robofast/catalog \
     --targets sites/minerva/targets.example.json
 python scripts/build_catalog.py wds --cache /var/lib/robofast/catalog
@@ -240,7 +240,7 @@ rebuilds every file from the Gaia archive, byte for byte reproducibly, and
 `scripts/zenodo_publish.py` uploads it as a draft; docs/zenodo.md has the
 whole workflow.
 
-Earlier commits of the repository did contain `robofast_core/data/bright_stars.npy`
+Earlier commits of the repository did contain `robofast/data/bright_stars.npy`
 and real Gaia fixture tiles under `tests/core/data/catalog/` (under CC BY-NC
 3.0 IGO, as their README said); they were removed from the tip, not from
 the history.
@@ -261,7 +261,7 @@ Dra), a dense field near the Galactic plane (285.79, +25.29), nu Draconis
   where the tests need them (nu1/nu2 Dra in their WDS geometry, sigma Dra,
   tau Ceti, a bright pair in the sparse field). No Gaia data;
   `python scripts/build_catalog.py synthetic` regenerates it
-  (`robofast_core/testing/sky_fixture.py`).
+  (`robofast/testing/sky_fixture.py`).
 
 Both carry the real WDS lines (`wds.npy`). The two tests that only mean
 something on real data (the HEALPix check against Gaia's own `source_id`s,
@@ -269,7 +269,7 @@ and the bright-star list's size) skip on the synthetic sky; every other
 catalog, vetting, simulator and plate-solving test runs on either. CI never
 queries the Gaia archive.
 
-## 2. Pointing-error models (`robofast_core/pointing.py`)
+## 2. Pointing-error models (`robofast/pointing.py`)
 
 `PointingModel(terms, mount, latitude)` holds TPOINT terms (arcsec):
 equatorial IH, ID, CH, NP, MA, ME, TF, FO, DAF, HCES/HCEC, DCES/DCEC; alt-az
@@ -282,7 +282,7 @@ fits them by least squares (residuals weighted by cos dec) with formal
 errors and the rms before and after -- what a pointing-model run does with
 plate-solved images.
 
-## 3. The simulator (`robofast_core/testing/skysim.py`)
+## 3. The simulator (`robofast/testing/skysim.py`)
 
 `SkyScene(catalog, camera, photometry, site, pointing, seeing, ...)`:
 
@@ -296,7 +296,7 @@ plate-solved images.
    airmass; the sky from the Sun, Moon and dark sky (Krisciunas & Schaefer
    1991; a twilight ramp); seeing, defocus, Poisson and read noise, bias,
    gain, saturation, subframes and binning by the shared renderer
-   (`robofast_core/testing/starfield.py`).
+   (`robofast/testing/starfield.py`).
 
 `frame.truth` carries the commanded and true pointing, the PA, and every
 catalog star with its exact pixel. Commanded coordinates are taken as ICRS
@@ -309,7 +309,7 @@ whose stars follow a mount's `RightAscension`/`Declination` (the simulated
 night's imagers); `sky_world_stars(sky, ra, dec, when)` gives the guider
 simulator's `SimWorld` its target and field stars.
 
-## 4. Photometry (`robofast_core/photometry.py`)
+## 4. Photometry (`robofast/photometry.py`)
 
 `PortPhotometry` per telescope and port: `zp` is the catalog magnitude
 giving 1 e-/s through that port, measured (`zero_point`, with its error and
@@ -321,7 +321,7 @@ other 98 % (`with_fraction("beamsplitter", 0.98)`, for exposure-meter and
 spectrum S/N estimates). Also: the CCD-equation `snr`, and
 `sky_brightness`/`sky_conditions` for the sky.
 
-## 5. Plate solving (`robofast_core/astrometry.py`)
+## 5. Plate solving (`robofast/astrometry.py`)
 
 **Near-blind** (`solve_near`, the default for acquisition, pointing models
 and every frame): given the approximate pointing (`search_radius`, default
@@ -367,7 +367,7 @@ skips.
 of the image centre, `pa` (+y east of north), `scale`, `flip`, `rms`,
 `n_matched`, the matched stars, `method`, `seconds`, `degenerate`.
 
-## 6. Solved frames and zero points (`robofast_core/framesolve.py`)
+## 6. Solved frames and zero points (`robofast/framesolve.py`)
 
 With `images.solve` in the enclosure config,
 
@@ -392,7 +392,7 @@ The index's `solve` entry also carries the frame's conditions
 throughput monitor, which follows each telescope's zero points over months
 (mirror cleanliness, dew, a cover left on): docs/throughput.md.
 
-## 7. Target vetting (`robofast_core/vetting.py`)
+## 7. Target vetting (`robofast/vetting.py`)
 
 Before a target is ever observed, `vet(catalog, name, ra, dec, port)` looks
 at its field through one port (the FAU with the target on the fiber, or the
@@ -418,7 +418,7 @@ rejecting flag makes the group invalid. A spectrum's observation carries
 
 ## 8. Acquisition that a twin cannot fool
 
-The guider's `select: "catalog"` (`robofast_core/guider/identify.py`)
+The guider's `select: "catalog"` (`robofast/guider/identify.py`)
 plate-solves each acquisition frame near the target and takes the detected
 star within `identify_tolerance` pixels of the target's catalog position;
 the sequencer sends the target (`target_radec`) and vetting's
@@ -449,14 +449,14 @@ Detection rejects the ASI174's many hot pixels by their sharpness.
 ## 10. What is left
 
 - Measured plate scales, PAs and parities for each MINERVA port (T2's FAU:
-  section 9), saved with `python -m robofast_core.rotcal solve`
+  section 9), saved with `python -m robofast.rotcal solve`
   (`docs/rotcal.md`); the imagers' and T1's FAU zero points; the ASI174's
   e-/ADU.
-- ~~A pointing-model builder~~: `robofast_core/pointmodel.py`,
+- ~~A pointing-model builder~~: `robofast/pointmodel.py`,
   `docs/pointing_model.md`.
 - astrometry.net index files on the control hosts, if a blind fallback is
   wanted.
-- ~~A throughput monitor~~: `robofast_core/throughput.py`,
+- ~~A throughput monitor~~: `robofast/throughput.py`,
   `docs/throughput.md` (its extinction coefficients and baselines still
   need real data).
 - The Gaia cache filled for the target list on each host; `select:

@@ -6,7 +6,7 @@
     "Only inst (the Apogee camera) and panel (the mount electronics and the Apogee filter wheel) may be switched or power-cycled. Cycling panel drops the mount controller: re-home in PWI4 afterwards.",
     "The telcom PC, the heater, the Aqawan router (the enclosure's network) and CAMAL's outlets can never be switched from here.",
     "credentials: {\"read\": ..., \"write\": ...} SNMP communities, chmod 600, outside every repository.",
-    "allow_hardware is true, but nothing talks to the real PDU without --hardware on the command line as well (robofast_core/hwgate.py)."
+    "allow_hardware is true, but nothing talks to the real PDU without --hardware on the command line as well (robofast/hwgate.py)."
   ],
   "name": "pdu-t2",
   "listen": "127.0.0.1:11132",

@@ -19,19 +19,19 @@ import time
 import erfa
 import pytest
 
-from robofast_core.adc import DEFAULT_NAMES, HEADER, ADCSwitches, adc_entry
-from robofast_core.alpaca import alpaca_owner
-from robofast_core.alpaca_client import (
+from robofast.adc import DEFAULT_NAMES, HEADER, ADCSwitches, adc_entry
+from robofast.alpaca import alpaca_owner
+from robofast.alpaca_client import (
     AlpacaDevice,
     InvalidOperationException,
     InvalidValueException,
     NotConnectedException,
     NotImplementedException,
 )
-from robofast_core.config import device_address, telescopes
-from robofast_core.devices import adc_math
-from robofast_core.devices.adc_mdrive import MOVING, MotorError, Motors, MotorTimeout
-from robofast_core.devices.adc_server import (
+from robofast.config import device_address, telescopes
+from robofast.devices import adc_math
+from robofast.devices.adc_mdrive import MOVING, MotorError, Motors, MotorTimeout
+from robofast.devices.adc_server import (
     SWITCH_IDS,
     SWITCHES,
     ADCConfig,
@@ -39,15 +39,15 @@ from robofast_core.devices.adc_server import (
     AlpacaTelescopeFeed,
     Reading,
 )
-from robofast_core.devices.adc_sim import ADCMotorsSim
-from robofast_core.devices.mearth_roof_port import HardwareNotAllowed
-from robofast_core.imaging import Imaging, ImagingConfig
-from robofast_core.owner import DeviceError
-from robofast_core.plan import StaticPlan
-from robofast_core.sequencer_service import build_units
-from robofast_core.testing.checks import wait_until
-from robofast_core.testing.processes import ROOT
-from robofast_core.timeline import Timeline
+from robofast.devices.adc_sim import ADCMotorsSim
+from robofast.devices.mearth_roof_port import HardwareNotAllowed
+from robofast.imaging import Imaging, ImagingConfig
+from robofast.owner import DeviceError
+from robofast.plan import StaticPlan
+from robofast.sequencer_service import build_units
+from robofast.testing.checks import wait_until
+from robofast.testing.processes import ROOT
+from robofast.timeline import Timeline
 
 SITE = ROOT / "sites" / "flwo60"
 VECTORS = json.loads((ROOT / "tests" / "core" / "data" / "adc_legacy_vectors.json").read_text())
@@ -672,7 +672,7 @@ async def test_switch_ids_come_from_the_servers_names(serve):
 
 def test_the_command_line_refuses_hardware_and_runs_the_simulator(tmp_path):
     cfg = str(SITE / "adc.json")
-    mod = "robofast_core.devices.adc_server"
+    mod = "robofast.devices.adc_server"
     p = subprocess.run(
         [sys.executable, "-m", mod, "--config", cfg, "--hardware"],
         capture_output=True,
@@ -701,8 +701,8 @@ def test_the_command_line_refuses_hardware_and_runs_the_simulator(tmp_path):
 async def test_reads_robofasts_own_telescope_server():
     """The feed against the TCSGO server on its simulated TCS: the input
     the ADC uses on the 60-inch, with no legacy software in between."""
-    from robofast_core.devices.tcsgo_server import TCSGOConfig, TCSGOServer
-    from robofast_core.devices.tcsgo_sim import SIM_SERVER_SITE, TCSGOSim
+    from robofast.devices.tcsgo_server import TCSGOConfig, TCSGOServer
+    from robofast.devices.tcsgo_sim import SIM_SERVER_SITE, TCSGOSim
 
     sim = TCSGOSim().start()
     server = None

@@ -1,14 +1,14 @@
 # The alarm notifier
 
-`robofast_core/notifier/` sends the observer console's alarms off the page:
+`robofast/notifier/` sends the observer console's alarms off the page:
 by email, to a chat channel (a Slack-style webhook), or by running a command
 (to page or phone the observer on duty at the 60-inch, for example). It is
 its own small process:
 
 ```
-python -m robofast_core.notifier --config notifier.json           # run
-python -m robofast_core.notifier --config notifier.json --check   # validate the config and secrets
-python -m robofast_core.notifier --config notifier.json --test    # one test message to every sink
+python -m robofast.notifier --config notifier.json           # run
+python -m robofast.notifier --config notifier.json --check   # validate the config and secrets
+python -m robofast.notifier --config notifier.json --test    # one test message to every sink
 ```
 
 `deploy/robofast-notifier.service` is an example unit and
@@ -19,7 +19,7 @@ installing both).
 
 The notifier does not invent alarms and the services push nothing to it. It
 loads the console's own config and reuses the console's
-`Aggregator` (`robofast_core/console/aggregate.py`), so each poll (every
+`Aggregator` (`robofast/console/aggregate.py`), so each poll (every
 `interval` seconds, 10 by default) it sees exactly the alarms the page
 shows, with the same ids:
 

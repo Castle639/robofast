@@ -1,5 +1,5 @@
 {
- "catalog": "SYNTHETIC (not Gaia): robofast_core.testing.sky_fixture",
+ "catalog": "SYNTHETIC (not Gaia): robofast.testing.sky_fixture",
  "licence": "BSD 3-Clause, like the code",
  "seed": 20261031,
  "epoch": 2016.0,

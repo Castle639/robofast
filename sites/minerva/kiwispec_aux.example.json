@@ -1,5 +1,5 @@
 {
-  "_doc": "KiwiSpec's auxiliary devices served as Alpaca devices by robofast_core.devices.kiwispec_aux_server (docs/kiwispec_aux.md). Each port is a serial-to-TCP bridge on the spectrograph PC (RFC 2217); the host and ports here are placeholders until the bridge is deployed.",
+  "_doc": "KiwiSpec's auxiliary devices served as Alpaca devices by robofast.devices.kiwispec_aux_server (docs/kiwispec_aux.md). Each port is a serial-to-TCP bridge on the spectrograph PC (RFC 2217); the host and ports here are placeholders until the bridge is deployed.",
   "name": "kiwispec",
   "listen": "127.0.0.1:11170",
   "allow_hardware": false,

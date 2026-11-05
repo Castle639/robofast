@@ -1,6 +1,6 @@
 # The observer console
 
-`robofast_core/console/` is one web page for the people watching a night:
+`robofast/console/` is one web page for the people watching a night:
 the observer on site at the FLWO 60-inch, where robofast runs the night as
 *attended automation* (the observer supervises, gets every alarm and can
 override), and the PI and collaborators watching MINERVA's robotic nights.
@@ -8,7 +8,7 @@ It is a small robofast service like the others: plain asyncio HTTP, the page
 and its script inline, no build step, nothing loaded from the internet.
 
 ```
-python -m robofast_core.console serve --config console.json
+python -m robofast.console serve --config console.json
 ```
 
 prints `{"url": ...}` once listening (`deploy/robofast-console.service` is an
@@ -53,8 +53,8 @@ once after any action) and falls back to polling `/console/api/status`.
 | Spectrograph | busy, job, phase, frame *n* of *m*, exposure progress, target counts, exposure meter, CCD temperature, iodine stage, pressure | KiwiSpec `GET /status` |
 | Plan | the night's plan record, newest first (decisions with score and runner-up count, outcomes, idles, preemptions, ToOs); the pending queue (ToOs first, then priority) | `record` directory of the dispatch plan; the scheduler's state file, read as the request API reads it |
 | Timeline | the supervisor's recent commands and events | supervisor `GET /timeline` |
-| Log | one merged, scrolling, colour-coded stream: the supervisor's and the sequencer's timelines, alarms raised and cleared, weather verdict and sources, shutter, telescope and guider states, the spectrograph's job, holds, and every console action; filter by source and level, search, pause | supervisor `GET /timeline`, the snapshot's `timeline`, the changes between reads (`robofast_core/console/logstream.py`) |
-| Sky | an alt/az chart: each telescope's pointing, the targets (current ones highlighted, ToOs marked), the Sun and the Moon, the altitude limits; a target table with altitude, azimuth, airmass now and in 1 and 2 h, and hour angle | the snapshot's `tel.alt`/`tel.az` and `current`; the dispatch scheduler's requests; astropy (`robofast_core/console/skyview.py`) |
+| Log | one merged, scrolling, colour-coded stream: the supervisor's and the sequencer's timelines, alarms raised and cleared, weather verdict and sources, shutter, telescope and guider states, the spectrograph's job, holds, and every console action; filter by source and level, search, pause | supervisor `GET /timeline`, the snapshot's `timeline`, the changes between reads (`robofast/console/logstream.py`) |
+| Sky | an alt/az chart: each telescope's pointing, the targets (current ones highlighted, ToOs marked), the Sun and the Moon, the altitude limits; a target table with altitude, azimuth, airmass now and in 1 and 2 h, and hour angle | the snapshot's `tel.alt`/`tel.az` and `current`; the dispatch scheduler's requests; astropy (`robofast/console/skyview.py`) |
 | Images | each guider's live frame with the fiber, the centroid and the guide window drawn on it; each telescope's latest saved frame; the spectrograph's latest raw frame (below) | guider `GET /frame`, the frame index, `spectrograph_frames` |
 | Requests | submit, validate or cancel a request group or ToO; list one's own groups | the request API, in process |
 | Throughput | per telescope, port and filter: last night, efficiency against the optics, change against the baseline, slope per 30 days, the latest event (shown only with a `throughput` entry) | the throughput monitor's status file (docs/throughput.md) |
@@ -208,7 +208,7 @@ own groups; `admin` any) and drop box.
 
 The console has no channel into the sequencer. An enclosure config with
 `"operator_control": "control"` makes the sequencer service wrap its plan in
-`OperatorHold` (`robofast_core/console/hold.py`); the console drops a command
+`OperatorHold` (`robofast/console/hold.py`); the console drops a command
 file into `control/inbox/`, and the wrapper, polling every second, applies it
 through the two hooks every plan has: while a telescope is held its plan
 answers `Idle` (so the sequencer starts nothing on it), and the observation in
@@ -222,7 +222,7 @@ parked. The held telescopes are also told to the dispatch scheduler
 and a leader does not wait for it (`docs/rv_night.md`). The same directory
 takes `clear_spectrograph` (the operator's clear of a spectrograph the
 sequencer marked down): the console's `clear_spectrograph` action, or from
-a shell `python -m robofast_core.console.hold CONTROL_DIR clear_spectrograph
+a shell `python -m robofast.console.hold CONTROL_DIR clear_spectrograph
 --operator NAME --reason TEXT`. The wrapper
 writes `control/holds.json` (the holds and the commands applied) after every
 poll, which the console shows and an enclosure stop waits for (up to
@@ -259,7 +259,7 @@ of them, or the one chosen in the dialog), in this order:
 3. **If the supervisor does not answer within `emergency_timeout`**
    (2 s), or answers with an error, close **through the dome's emergency
    channel**: `PUT /robofast/v1/emergency_close` on the dome server, with a
-   bearer token (`robofast_core/emergency.py`). The dialog's *skip the
+   bearer token (`robofast/emergency.py`). The dialog's *skip the
    supervisor* box goes straight to this step (for a supervisor that
    answers but whose close does not happen).
 
@@ -287,7 +287,7 @@ Set it up (Aqawan; the TCSGO server for the 60-inch has no such channel
 yet):
 
 ```
-python -m robofast_core.emergency token         # {"token": ..., "sha256": ...}
+python -m robofast.emergency token         # {"token": ..., "sha256": ...}
 ```
 
 The token goes in a file only the console's user can read (mode 600; the
@@ -414,7 +414,7 @@ banner and the alarm list a warning for as long as it lasts.
 
 The supervisor's `GET /status` carries `duty` (`attended_only`, `on_duty`,
 `attended`, `renewed_ago`, `expires_in`, `closes_in`); its endpoint is
-`POST /duty` (`robofast_core/supervisor_service.py`). Going on duty does
+`POST /duty` (`robofast/supervisor_service.py`). Going on duty does
 not open anything: it only allows the supervisor's own policy to grant a
 lease.
 
@@ -462,10 +462,10 @@ The request API's posture (design.md 3.7):
   events unbuffered, e.g. nginx `proxy_buffering off`). A non-loopback
   `listen` needs `tls_cert`/`tls_key` here, or `--insecure-bind`.
 * **Tokens.** The request API's tokens file and scheme
-  (`robofast_core/api_auth.py`): `read` sees the page, `operator` acts,
+  (`robofast/api_auth.py`): `read` sees the page, `operator` acts,
   `submit`/`too` submit, `admin` is everything. Give each observer a named
   token so the audit log says who:
-  `python -m robofast_core.request_api tokens add --config request_api.json --name alice --scope read,operator,submit,too`.
+  `python -m robofast.request_api tokens add --config request_api.json --name alice --scope read,operator,submit,too`.
   A revoked or expired token ends its sessions at their next request.
 * **No secrets in the page.** The observer pastes their token once; the
   answer sets an `HttpOnly`, `SameSite=Strict` session cookie (`Secure` when

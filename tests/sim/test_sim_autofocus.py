@@ -4,7 +4,7 @@ OmniSim's focuser is absolute (MaxStep 50000, StepSize 20 um, about 700
 steps/s); its camera's pixels are not a star field, so each exposure is
 taken on OmniSim's camera (StartExposure, ImageReady, the ImageBytes
 download) and its pixels replaced by the synthetic star field
-(robofast_core.testing.starfield) rendered at the focuser position OmniSim
+(robofast.testing.starfield) rendered at the focuser position OmniSim
 reports. That exercises the real Alpaca focuser path: Move, IsMoving,
 Position, the backlash approach and the units taken from ``StepSize``.
 """
@@ -14,11 +14,11 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from robofast_core.alpaca import alpaca_owner
-from robofast_core.autofocus import Autofocus, AutofocusConfig, FocusOptics, camera_exposer
-from robofast_core.testing.focus_sim import FocusScene
-from robofast_core.testing.starfield import Detector, SimOptics, random_stars
-from robofast_core.timeline import Timeline
+from robofast.alpaca import alpaca_owner
+from robofast.autofocus import Autofocus, AutofocusConfig, FocusOptics, camera_exposer
+from robofast.testing.focus_sim import FocusScene
+from robofast.testing.starfield import Detector, SimOptics, random_stars
+from robofast.timeline import Timeline
 
 from .conftest import COMMAND_TIMEOUT
 

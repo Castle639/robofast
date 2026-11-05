@@ -15,9 +15,9 @@ from datetime import timedelta
 
 import pytest
 
-from robofast_core.dispatch import DispatchScheduler
-from robofast_core.request_model import Status
-from robofast_core.testing.checks import assert_fenced_after_cancel, wait_until
+from robofast.dispatch import DispatchScheduler
+from robofast.request_model import Status
+from robofast.testing.checks import assert_fenced_after_cancel, wait_until
 from tests.core.test_dispatch import NIGHT, Clock, group, make, too
 
 DEVICES = ("t1.telescope", "t1.camera", "t2.telescope", "t2.camera")

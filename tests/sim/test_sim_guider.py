@@ -9,9 +9,9 @@ import time
 
 import pytest
 
-from robofast_core.alpaca_client import AlpacaDevice
-from robofast_core.guider.base import ROI, RealClock
-from robofast_core.guider.camera import AlpacaCamera
+from robofast.alpaca_client import AlpacaDevice
+from robofast.guider.base import ROI, RealClock
+from robofast.guider.camera import AlpacaCamera
 
 pytestmark = pytest.mark.alpaca_sim
 

@@ -9,8 +9,8 @@ from datetime import UTC, datetime
 
 import pytest
 
-from robofast_core import sky
-from robofast_core.console.skyview import sky_for
+from robofast import sky
+from robofast.console.skyview import sky_for
 
 from . import test_console as _console
 from .test_console import snapshot_doc
@@ -43,8 +43,8 @@ async def test_the_sky_endpoint(make_console):
 
 
 def test_altitudes_agree_with_the_scheduler(tmp_path):
-    """The table's altitude is the scheduler's (robofast_core.sky)."""
-    from robofast_core.console.aggregate import ConsoleEnclosure
+    """The table's altitude is the scheduler's (robofast.sky)."""
+    from robofast.console.aggregate import ConsoleEnclosure
     from tests.core.test_console import write_site
 
     write_site(tmp_path)
@@ -63,7 +63,7 @@ def test_altitudes_agree_with_the_scheduler(tmp_path):
 
 
 def test_without_a_site_there_are_no_targets(tmp_path):
-    from robofast_core.console.aggregate import ConsoleEnclosure
+    from robofast.console.aggregate import ConsoleEnclosure
 
     (tmp_path / "e.json").write_text(
         json.dumps({"name": "e", "telescopes": {"t1": {"telescope": "x:1", "camera": "x:1"}}})
@@ -75,14 +75,14 @@ def test_without_a_site_there_are_no_targets(tmp_path):
 
 
 def test_the_page_has_the_sky():
-    from robofast_core.console.page import render_page
+    from robofast.console.page import render_page
 
     page = render_page("n")
     assert 'id="sky"' in page and "/console/api/sky" in page and "createElementNS" in page
 
 
 def _enclosure(tmp_path, **tel):
-    from robofast_core.console.aggregate import ConsoleEnclosure
+    from robofast.console.aggregate import ConsoleEnclosure
 
     site = {"latitude": 31.68, "longitude": -110.88, "elevation": 2316.0}
     t1 = {"telescope": "x:1", "camera": "x:1", **tel}
@@ -94,7 +94,7 @@ def _enclosure(tmp_path, **tel):
 
 def _slew(enc, alt_target: float):
     """A manual slew check to a target on the meridian at ``alt_target``."""
-    from robofast_core.console.server import Console
+    from robofast.console.server import Console
 
     site = sky.Site(31.68, -110.88, 2316.0)
     lst = sky.sky_now(site, datetime.now(UTC)).lst_hours
@@ -106,7 +106,7 @@ def _slew(enc, alt_target: float):
 def test_manual_slew_limits_come_from_the_telescope_config(tmp_path):
     """Without a dispatch plan the limits are the telescope's ``limits``
     (never another site's numbers)."""
-    from robofast_core.console.server import ApiError
+    from robofast.console.server import ApiError
 
     enc = _enclosure(tmp_path, limits={"min_alt": 30.0, "max_alt": 80.0})
     doc = sky_for(enc, {}, {})
@@ -117,7 +117,7 @@ def test_manual_slew_limits_come_from_the_telescope_config(tmp_path):
 
 
 def test_manual_slew_is_refused_without_configured_limits(tmp_path):
-    from robofast_core.console.server import ApiError
+    from robofast.console.server import ApiError
 
     enc = _enclosure(tmp_path)
     doc = sky_for(enc, {}, {})

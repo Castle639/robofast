@@ -1,7 +1,7 @@
 {
   "_note": [
     "The TRES front end's calibration stage on the FLWO 60-inch: Alpaca filterwheel/0 (named positions) and focuser/0 (microns) over a PI C-663 + L-505 (docs/tres_frontend.md).",
-    "  python -m robofast_core.devices.tres_frontend_server --config sites/flwo60/tres_frontend.json --simulate",
+    "  python -m robofast.devices.tres_frontend_server --config sites/flwo60/tres_frontend.json --simulate",
     "Hardware is NOT allowed: allow_hardware stays false until every item under 'Confirm on the mountain' in docs/tres_frontend.md is checked.",
     "Then: allow_hardware true here AND --hardware on the command line, on the front-end computer the controller is plugged into.",
     "port.device is a placeholder for that computer's serial device for the controller.",

@@ -19,33 +19,33 @@ import time
 import httpx
 import pytest
 
-from robofast_core.alpaca import alpaca_owner
-from robofast_core.config import device_address, telescopes
-from robofast_core.devices.mearth_roof_port import HardwareNotAllowed
-from robofast_core.devices.pulizzi import (
+from robofast.alpaca import alpaca_owner
+from robofast.config import device_address, telescopes
+from robofast.devices.mearth_roof_port import HardwareNotAllowed
+from robofast.devices.pulizzi import (
     PulizziError,
     PulizziIPC,
     PulizziTimeout,
     allowed,
     parse_status,
 )
-from robofast_core.devices.pulizzi_server import PulizziConfig, PulizziServer
-from robofast_core.devices.pulizzi_sim import PulizziSim
-from robofast_core.dispatch import TelescopeLimits
-from robofast_core.lamps import LampSetup
-from robofast_core.plan import Observation, StaticPlan
-from robofast_core.request_model import NO_LAMPS, RequestGroup
-from robofast_core.sequencer_service import build_units, load_plan
-from robofast_core.testing.checks import wait_until
-from robofast_core.testing.processes import ROOT
-from robofast_core.timeline import Timeline
+from robofast.devices.pulizzi_server import PulizziConfig, PulizziServer
+from robofast.devices.pulizzi_sim import PulizziSim
+from robofast.dispatch import TelescopeLimits
+from robofast.lamps import LampSetup
+from robofast.plan import Observation, StaticPlan
+from robofast.request_model import NO_LAMPS, RequestGroup
+from robofast.sequencer_service import build_units, load_plan
+from robofast.testing.checks import wait_until
+from robofast.testing.processes import ROOT
+from robofast.timeline import Timeline
 from tests.core.test_dispatch import group
 from tests.core.test_request_api import make_api  # noqa: F401 (fixture)
 
 
 def tlimits(**kw):
     """TelescopeLimits with the test suite's generic values (no defaults in core)."""
-    from robofast_core.dispatch import TelescopeLimits
+    from robofast.dispatch import TelescopeLimits
 
     return TelescopeLimits(**{"instruments": ["imager"], "min_alt": 21.0, "max_alt": 83.0, **kw})
 
@@ -375,7 +375,7 @@ def test_shipped_site_configs(tmp_path):
 
 def test_the_command_line_refuses_hardware_and_runs_the_simulator():
     cfg = str(SITE / "pulizzi.json")
-    mod = "robofast_core.devices.pulizzi_server"
+    mod = "robofast.devices.pulizzi_server"
     p = subprocess.run(
         [sys.executable, "-m", mod, "--config", cfg],
         cwd=ROOT,
@@ -657,7 +657,7 @@ def test_lamp_setup_validation():
 
 
 async def test_the_lamp_switchs_action_names_are_configurable():
-    from robofast_core.lamps import lamps_off, switch_status
+    from robofast.lamps import lamps_off, switch_status
 
     default = LampSetup.from_dict({"switch": "h:1/0", "lamps": {"a": {}}})
     assert (default.status_action, default.off_action) == ("Status", "LampsOff")
@@ -681,7 +681,7 @@ async def test_instruments_lists_a_camera_spectrograph_with_its_lamp_types(make_
     advertised as a spectrograph, with ARC and LAMP_FLAT where its telescope
     has lamps (before, every instrument not named "spectrograph" was
     advertised as an imager and the lamp types never were)."""
-    from robofast_core.instruments import INSTRUMENT_TYPES
+    from robofast.instruments import INSTRUMENT_TYPES
 
     api = await make_api()
     planner = api.app.enclosures["aqawan1"].planner

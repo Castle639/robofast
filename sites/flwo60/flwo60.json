@@ -1,9 +1,9 @@
 {
   "_note": [
     "FLWO 60-inch (Tillinghast) with TRES: one telescope in one dome.",
-    "One file for the enclosure, read by both services (robofast_core/config.py):",
-    "  python -m robofast_core.supervisor_service --config sites/flwo60/flwo60.json",
-    "  python -m robofast_core.sequencer_service --config sites/flwo60/flwo60.json",
+    "One file for the enclosure, read by both services (robofast/config.py):",
+    "  python -m robofast.supervisor_service --config sites/flwo60/flwo60.json",
+    "  python -m robofast.sequencer_service --config sites/flwo60/flwo60.json",
     "Every address is a 127.0.0.1 placeholder.",
     "tillinghast.telescope: the TCSGO server (sites/flwo60/tcsgo.json listens on 11140).",
     "tillinghast.camera: the TRES CCD's Alpaca camera (to be written; placeholder).",

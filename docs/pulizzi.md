@@ -5,7 +5,7 @@ telescope, is calibrated with thorium-argon (ThAr) and incandescent lamps.
 They are switched as outlets of a **Pulizzi** (Pulizzi Engineering, later
 Eaton) remote power controller on a serial line. robofast serves those
 outlets as a standard Alpaca **Switch**
-(`robofast_core/devices/pulizzi_server.py`), so the sequencer switches the
+(`robofast/devices/pulizzi_server.py`), so the sequencer switches the
 lamps itself for `ARC` and `LAMP_FLAT` requests, with the device owner's
 fencing, a simulator and ConformU like every other device.
 
@@ -61,7 +61,7 @@ From the Pulizzi IPC34xx manual ("Programmers Guide"), unless marked
 | Model | *inferred*: the legacy program's `DX0`/`Nxx`/`Fxx` are the IPC34xx command set; the model and firmware at FLWO are not recorded |
 
 robofast sends **only** the unit name, `DX0`, `Nxx` and `Fxx`
-(`robofast_core/devices/pulizzi.py`, an allowlist with a test). In
+(`robofast/devices/pulizzi.py`, an allowlist with a test). In
 particular it never sends the commands that switch every outlet (`A0n`,
 `A1n`, `S0n`, `S1n`), reboot an outlet (`SR0`), arm the unit's watchdog
 (`WE0`: it reboots the unit when communication stops), or change its name,
@@ -98,7 +98,7 @@ for a lamp switch other than this server.
 
 ThAr and incandescent lamps age as they burn, and are replaced from their
 accumulated hours, so the server keeps them
-(`robofast_core/devices/lamp_hours.py`).
+(`robofast/devices/lamp_hours.py`).
 
 * **Counted from what the unit reports**, not from commands: every status
   the server reads (its `poll_interval` monitor, and the read-back after
@@ -204,7 +204,7 @@ label, and the Sun, altitude and Moon limits do not apply.
   time and count (docs/sequences.md, "Requests").
 
 **Sequencer.** The telescope's `lamps` entry in the enclosure config
-(`sites/flwo60/flwo60.json`; `robofast_core/lamps.py`) gives the switch's
+(`sites/flwo60/flwo60.json`; `robofast/lamps.py`) gives the switch's
 address and, per lamp, its warm-up and its calibration-stage position. An
 `ARC` (`kind="arc"`) or `LAMP_FLAT` (`kind="lamp_flat"`) observation then
 runs, without a lease (the dome stays as it is and the telescope does not
@@ -247,7 +247,7 @@ its own, and `LampsOff` in every cleanup.
 ## 5. Running and testing
 
 ```
-python -m robofast_core.devices.pulizzi_server --config sites/flwo60/pulizzi.json --simulate
+python -m robofast.devices.pulizzi_server --config sites/flwo60/pulizzi.json --simulate
 ```
 
 prints `{"url": ..., "port": "simulator"}`. Tests:

@@ -2,7 +2,7 @@
 
     python scripts/conformu_pdu.py --conformu PATH [--out DIR]
 
-Starts ``robofast_core.devices.pdu_server --simulate`` (a simulated APC PDU
+Starts ``robofast.devices.pdu_server --simulate`` (a simulated APC PDU
 on loopback, random SNMP communities) with two writable outlets and one
 protected one, then runs ConformU's ``conformance`` check (with the
 switch-writing tests enabled by ``scripts/conformu-switch.settings.json``)
@@ -94,7 +94,7 @@ def main() -> None:
         )
     )
     server, hello = start(
-        ["robofast_core.devices.pdu_server", "--config", str(config), "--simulate"],
+        ["robofast.devices.pdu_server", "--config", str(config), "--simulate"],
         out / "server.log",
     )
     try:

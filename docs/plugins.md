@@ -2,7 +2,7 @@
 
 A site that needs new code -- a weather page in its own format, a plan
 type, an observation kind, an instrument -- adds it as a **plug-in**, not as
-a patch to `robofast_core` (docs/design.md 3.10). A plug-in is a Python
+a patch to `robofast` (docs/design.md 3.10). A plug-in is a Python
 module with a `register()` function that adds entries to core's
 **registries**; a config then names those entries by their keys, exactly as
 it names core's own.
@@ -11,19 +11,19 @@ it names core's own.
 
 | Registry | Key in a config | Core's entries |
 |---|---|---|
-| `robofast_core.plan.PLAN_TYPES` | a plan's `type` | `static`, `calibration`, `dispatch` |
-| `robofast_core.kinds.OBSERVATION_KINDS` | an observation's `kind`; each kind's `request_types` are OCS configuration `type`s | `expose` (EXPOSE, DARK, BIAS), `autofocus` (AUTO_FOCUS), `spectrum` (SPECTRUM), `spectrograph_calibration`, `manual`, `pointing_model` (POINTING_MODEL), `rotator_calibration` (ROTATOR_CALIBRATION), `sky_flat` (SKY_FLAT), `arc` (ARC), `lamp_flat` (LAMP_FLAT), `sequence` (a config-defined sequence; plans only) |
-| `robofast_core.sequences.SEQUENCE_STEPS` | a step of an enclosure config's `sequences` (docs/sequences.md) | `calstage`, `filter`, `port`, `adc`, `lamp`, `focus`, `wait`, `expose`, `spectrograph` |
-| `robofast_core.sequences.SEQUENCE_TEMPLATES` | a `sequences` entry's `template` (docs/sequences.md, "Templates"; an enclosure config's `sequence_templates` override them by name) | `arc_set`, `lamp_flat_set`, `bias_set`, `dark_set` |
-| `robofast_core.instruments.INSTRUMENT_TYPES` | a dispatch config's `instruments.<name>.type`; an enclosure config's `spectrograph.type` | `imager`, `camera_spectrograph`, `kiwispec` |
-| `robofast_core.guider.hardware.CAMERAS`, `TIPTILTS`, `MOUNTS`, `BACKLIGHTS` | a guider config's `camera`, `tiptilt`, `mount`, `backlight` `kind` | cameras `sim`, `alpaca`, `zwo`, `framegrabber`; tip/tilts `sim`, `sxao`, `sxao-sim`, `pi`, `pi-sim`; mounts `sim`, `alpaca`; backlights `sim`, `kiwispec` (by `robofast_core.devices`) |
-| `robofast_core.notifier.sinks.SINK_TYPES` | a notifier sink's `type` | `email`, `webhook`, `command` |
-| `robofast_core.weather_sources.SOURCE_TYPES` | a weather source's `type` | `sun`, `redis`; MINERVA's `minerva.ridge`, `minerva.sky_temps`, `minerva.mearth` (a plug-in) |
-| `robofast_core.catalog.CATALOG_SOURCES` | a `catalog` entry's `source` (docs/sky.md) | `gaia`, `ucac4`, `2mass` |
-| `robofast_core.seeing.SEEING_SOURCES` | a dispatch plan's `seeing.source` (docs/seeing.md) | `guider`, `fixed` |
-| `robofast_core.request_model.REQUEST_IMPORTERS` | a dispatch plan's `imports`: `[{"type", "path", ...options}]` | none; MINERVA's `minerva.legacy_csv` (a plug-in) |
+| `robofast.plan.PLAN_TYPES` | a plan's `type` | `static`, `calibration`, `dispatch` |
+| `robofast.kinds.OBSERVATION_KINDS` | an observation's `kind`; each kind's `request_types` are OCS configuration `type`s | `expose` (EXPOSE, DARK, BIAS), `autofocus` (AUTO_FOCUS), `spectrum` (SPECTRUM), `spectrograph_calibration`, `manual`, `pointing_model` (POINTING_MODEL), `rotator_calibration` (ROTATOR_CALIBRATION), `sky_flat` (SKY_FLAT), `arc` (ARC), `lamp_flat` (LAMP_FLAT), `sequence` (a config-defined sequence; plans only) |
+| `robofast.sequences.SEQUENCE_STEPS` | a step of an enclosure config's `sequences` (docs/sequences.md) | `calstage`, `filter`, `port`, `adc`, `lamp`, `focus`, `wait`, `expose`, `spectrograph` |
+| `robofast.sequences.SEQUENCE_TEMPLATES` | a `sequences` entry's `template` (docs/sequences.md, "Templates"; an enclosure config's `sequence_templates` override them by name) | `arc_set`, `lamp_flat_set`, `bias_set`, `dark_set` |
+| `robofast.instruments.INSTRUMENT_TYPES` | a dispatch config's `instruments.<name>.type`; an enclosure config's `spectrograph.type` | `imager`, `camera_spectrograph`, `kiwispec` |
+| `robofast.guider.hardware.CAMERAS`, `TIPTILTS`, `MOUNTS`, `BACKLIGHTS` | a guider config's `camera`, `tiptilt`, `mount`, `backlight` `kind` | cameras `sim`, `alpaca`, `zwo`, `framegrabber`; tip/tilts `sim`, `sxao`, `sxao-sim`, `pi`, `pi-sim`; mounts `sim`, `alpaca`; backlights `sim`, `kiwispec` (by `robofast.devices`) |
+| `robofast.notifier.sinks.SINK_TYPES` | a notifier sink's `type` | `email`, `webhook`, `command` |
+| `robofast.weather_sources.SOURCE_TYPES` | a weather source's `type` | `sun`, `redis`; MINERVA's `minerva.ridge`, `minerva.sky_temps`, `minerva.mearth` (a plug-in) |
+| `robofast.catalog.CATALOG_SOURCES` | a `catalog` entry's `source` (docs/sky.md) | `gaia`, `ucac4`, `2mass` |
+| `robofast.seeing.SEEING_SOURCES` | a dispatch plan's `seeing.source` (docs/seeing.md) | `guider`, `fixed` |
+| `robofast.request_model.REQUEST_IMPORTERS` | a dispatch plan's `imports`: `[{"type", "path", ...options}]` | none; MINERVA's `minerva.legacy_csv` (a plug-in) |
 
-Every registry is a `robofast_core.plugins.Registry`: `register(name,
+Every registry is a `robofast.plugins.Registry`: `register(name,
 entry)` adds an entry, and a name that is already taken is refused (the
 error names both origins), so a plug-in can never silently replace core's
 entry or another plug-in's. A config that names something nobody
@@ -31,7 +31,7 @@ registered is an error listing what is registered.
 
 Core registers its own entries with the same call, so the table above is
 just what is there before any plug-in runs. The hardware drivers'
-handlers (KiwiSpec) are a built-in plug-in, `robofast_core.devices`.
+handlers (KiwiSpec) are a built-in plug-in, `robofast.devices`.
 
 ## Loading a plug-in
 
@@ -47,13 +47,13 @@ mysite = "mysite.robofast:register"
 ```
 
 **Code that is not installed** (a module on the Python path, or a site
-adapter shipped under `robofast_core/sites/`) is listed in the config that
+adapter shipped under `robofast/sites/`) is listed in the config that
 needs it, under `plugins` (module names, or `module:function`):
 
 ```yaml
 # sites/minerva/weather.yaml
 plugins:
-  - robofast_core.sites.minerva
+  - robofast.sites.minerva
 ```
 
 The services load the `plugins` of the configs they read: the weather
@@ -70,7 +70,7 @@ weather source type `mysite.station`:
 # mysite/robofast.py
 from datetime import datetime
 
-from robofast_core.weather_sources import SOURCE_TYPES, HttpSource, Reading
+from robofast.weather_sources import SOURCE_TYPES, HttpSource, Reading
 
 
 class StationSource(HttpSource):
@@ -97,9 +97,9 @@ The other registries work the same way:
 
 * **A plan type**: `PLAN_TYPES.register("lookahead", factory)` with
   `factory(config, telescopes, *, base, clock) -> PlanProvider`
-  (`robofast_core/plan.py`).
+  (`robofast/plan.py`).
 * **An instrument type**: `INSTRUMENT_TYPES.register(name,
-  InstrumentType(...))` (`robofast_core/instruments.py`): the OCS
+  InstrumentType(...))` (`robofast/instruments.py`): the OCS
   configuration types it takes and advertises, its own `extra_params`
   (`Param`: how each is parsed, for which types, and how it goes to the
   instrument with each frame), and, for a spectrograph service the
@@ -112,16 +112,16 @@ The other registries work the same way:
   `TIPTILTS`, `MOUNTS`, `BACKLIGHTS`) with `factory(spec, ctx)`: `spec` the
   part's config less its `kind`, `ctx` a `BuildContext` (`allowed`: the
   hardware gate, which a real device's driver must honor; `clock`; `world`,
-  the simulated sky) (`robofast_core/guider/hardware.py`).
+  the simulated sky) (`robofast/guider/hardware.py`).
 * **A request importer**: `REQUEST_IMPORTERS.register("mysite.list",
   fn)` with `fn(path, **options) -> list[RequestGroup]`; a dispatch plan
   then has `"imports": [{"type": "mysite.list", "path": "targets.txt"}]`.
-* **An observation kind**: subclass `robofast_core.kinds.ObservationKind`
+* **An observation kind**: subclass `robofast.kinds.ObservationKind`
   and register an instance under its `name`. The kind owns its validation
   (`validate`, `fields`), its request mapping (`request_types`,
   `check_instrument_config`, `check_configuration`, `observation`) and its
   execution (`run`, called at its `stage` of the sequencer's set-up). Core's
-  kinds in `robofast_core/kinds.py` are the worked examples.
+  kinds in `robofast/kinds.py` are the worked examples.
 
 A plug-in that fails to import, or registers a name that is taken, stops
 the service at start-up with the reason: a config that names it cannot be
@@ -129,22 +129,22 @@ served without it.
 
 ## Site code shipped with robofast
 
-`robofast_core/sites/<site>/` holds each site's code: its plug-in (a
+`robofast/sites/<site>/` holds each site's code: its plug-in (a
 `register()` in the package, listed in that site's configs) and its legacy
 importers with their own command lines:
 
 | Module | What |
 |---|---|
-| `robofast_core.sites.minerva` | the plug-in: weather pages (`minerva.*` sources), the legacy target CSV (`minerva.legacy_csv`) |
-| `robofast_core.sites.minerva.target_sheet` | the target lists from their Google Sheet (`python -m`; docs/minerva_sheet.md) |
-| `robofast_core.sites.minerva.focus_model` | the legacy `guessFocus` model as a `FocusModel` (docs/autofocus.md) |
-| `robofast_core.sites.minerva.guider_calibration` | the legacy SX AO calibration as a matrix (docs/guider.md) |
-| `robofast_core.sites.flwo60.catalogs` | the telshell catalogs, `.mct`/`.off`/`.sec` (`python -m`; docs/catalogs.md) |
-| `robofast_core.sites.flwo60.guider_calibration` | tres-guider's tip/tilt calibration as a matrix |
+| `robofast.sites.minerva` | the plug-in: weather pages (`minerva.*` sources), the legacy target CSV (`minerva.legacy_csv`) |
+| `robofast.sites.minerva.target_sheet` | the target lists from their Google Sheet (`python -m`; docs/minerva_sheet.md) |
+| `robofast.sites.minerva.focus_model` | the legacy `guessFocus` model as a `FocusModel` (docs/autofocus.md) |
+| `robofast.sites.minerva.guider_calibration` | the legacy SX AO calibration as a matrix (docs/guider.md) |
+| `robofast.sites.flwo60.catalogs` | the telshell catalogs, `.mct`/`.off`/`.sec` (`python -m`; docs/catalogs.md) |
+| `robofast.sites.flwo60.guider_calibration` | tres-guider's tip/tilt calibration as a matrix |
 
 Core never imports them; `tests/core/test_no_site_values.py` refuses a
 site's name, number or site-named module anywhere else in core but the
-hardware drivers (`robofast_core/devices/`).
+hardware drivers (`robofast/devices/`).
 
 ## Not code: device action names
 

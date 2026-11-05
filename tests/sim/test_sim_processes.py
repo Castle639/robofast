@@ -15,13 +15,13 @@ import time
 import httpx
 import pytest
 
-from robofast_core import Observation, Sequencer, SequencerConfig, Timeline
-from robofast_core.alpaca import alpaca_owner
-from robofast_core.cancel import stop_task
-from robofast_core.heartbeat_watchdog import HeartbeatWatchdog
-from robofast_core.lease_client import RemoteSupervisor
-from robofast_core.testing.checks import await_until, wait_until
-from robofast_core.testing.processes import SequencerProcess, Service, SupervisorProcess
+from robofast import Observation, Sequencer, SequencerConfig, Timeline
+from robofast.alpaca import alpaca_owner
+from robofast.cancel import stop_task
+from robofast.heartbeat_watchdog import HeartbeatWatchdog
+from robofast.lease_client import RemoteSupervisor
+from robofast.testing.checks import await_until, wait_until
+from robofast.testing.processes import SequencerProcess, Service, SupervisorProcess
 
 from .conftest import BOUND, COMMAND_TIMEOUT, SIM_SAFETY, SIM_SEQ
 
@@ -125,7 +125,7 @@ async def test_supervisor_dies_watchdog_closes(
 
 
 def _sequencer_process(omnisim, supervisor, services, tag: str = "sequencer") -> Service:
-    """The production entry point (robofast_core.sequencer_service)."""
+    """The production entry point (robofast.sequencer_service)."""
     config = {
         "name": "enclosure",
         "sequencer_name": "seq",

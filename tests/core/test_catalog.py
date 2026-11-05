@@ -15,7 +15,7 @@ from datetime import UTC, datetime
 import numpy as np
 import pytest
 
-from robofast_core import catalog as cat
+from robofast import catalog as cat
 from tests.core.skydata import require_gaia, sky_dir
 
 #: The test fields (ra, dec deg): a sparse high-latitude field, HD 185144,

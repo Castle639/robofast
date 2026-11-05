@@ -1,7 +1,7 @@
 {
   "_note": [
     "The FLWO 60-inch's atmospheric dispersion corrector: Alpaca switch/0 (tracking) and rotator/0, rotator/1 (prisms A, B) over the two prism motors on one serial line (docs/adc.md).",
-    "  python -m robofast_core.devices.adc_server --config sites/flwo60/adc.json --simulate",
+    "  python -m robofast.devices.adc_server --config sites/flwo60/adc.json --simulate",
     "The ADC belongs to the telescope and serves both instruments (TRES, FAST); 'instrument' only picks the band of the refraction model.",
     "Hardware is NOT allowed: allow_hardware stays false until every item under 'Confirm on the mountain' in docs/adc.md is checked.",
     "Then: allow_hardware true here AND --hardware on the command line, on the computer the motors' serial cable is plugged into.",

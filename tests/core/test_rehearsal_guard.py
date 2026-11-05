@@ -1,5 +1,5 @@
-"""The hardware rehearsal's safety pieces (robofast_core.testing.rehearsal,
-robofast_core.testing.mount_guard; docs/demo.md): the mount guard between
+"""The hardware rehearsal's safety pieces (robofast.testing.rehearsal,
+robofast.testing.mount_guard; docs/demo.md): the mount guard between
 robofast and a real mount, the refusals before anything starts, and the
 plan. The whole rehearsal runs in tests/e2e/test_rehearsal.py."""
 
@@ -11,10 +11,10 @@ from datetime import UTC, datetime, timedelta
 import httpx
 import pytest
 
-from robofast_core.testing.alpaca_server import FakeAlpacaServer
-from robofast_core.testing.fakes import FakeCamera, FakeFocuser, FakeTelescope
-from robofast_core.testing.mount_guard import Endpoint, MountGuard, azimuth, lst_hours
-from robofast_core.testing.rehearsal import (
+from robofast.testing.alpaca_server import FakeAlpacaServer
+from robofast.testing.fakes import FakeCamera, FakeFocuser, FakeTelescope
+from robofast.testing.mount_guard import Endpoint, MountGuard, azimuth, lst_hours
+from robofast.testing.rehearsal import (
     MAX_ALT,
     MIN_ALT,
     MINERVA,

@@ -17,18 +17,18 @@ import time
 import httpx
 import pytest
 
-from robofast_core.alpaca_client import (
+from robofast.alpaca_client import (
     AlpacaDevice,
     DriverException,
     InvalidOperationException,
     InvalidValueException,
     NotImplementedException,
 )
-from robofast_core.devices import dynamixel2 as dx
-from robofast_core.devices import thorlabs_apt as apt
-from robofast_core.devices.kiwispec_aux import AuxConfig
-from robofast_core.devices.kiwispec_aux_server import KiwiSpecAuxConfig, KiwiSpecAuxServer
-from robofast_core.devices.kiwispec_aux_sim import (
+from robofast.devices import dynamixel2 as dx
+from robofast.devices import thorlabs_apt as apt
+from robofast.devices.kiwispec_aux import AuxConfig
+from robofast.devices.kiwispec_aux_server import KiwiSpecAuxConfig, KiwiSpecAuxServer
+from robofast.devices.kiwispec_aux_sim import (
     APTSim,
     GaugeSim,
     LEDSim,
@@ -37,15 +37,15 @@ from robofast_core.devices.kiwispec_aux_sim import (
     XMServoSim,
     serve,
 )
-from robofast_core.devices.kiwispec_serial import (
+from robofast.devices.kiwispec_serial import (
     BacklightLED,
     GaugeController,
     OasisChiller,
     SerialDeviceError,
 )
-from robofast_core.devices.kiwispec_service import KiwiSpecServer
-from robofast_core.devices.kiwispec_sim import KiwiSpecSim, SimConfig
-from robofast_core.devices.serial_url import (
+from robofast.devices.kiwispec_service import KiwiSpecServer
+from robofast.devices.kiwispec_sim import KiwiSpecSim, SimConfig
+from robofast.devices.serial_url import (
     HardwareNotAllowed,
     PortConfig,
     PortTimeout,
@@ -54,9 +54,9 @@ from robofast_core.devices.serial_url import (
     check_url,
     open_port,
 )
-from robofast_core.devices.tc200 import TC200, TC200Error
-from robofast_core.testing.checks import wait_until
-from robofast_core.testing.processes import ROOT
+from robofast.devices.tc200 import TC200, TC200Error
+from robofast.testing.checks import wait_until
+from robofast.testing.processes import ROOT
 from tests.core.test_kiwispec import FAST, run_job, service_config
 
 serial = pytest.importorskip("serial")  # pyserial: the URL path
@@ -632,10 +632,10 @@ def test_minerva_example_config_loads_and_needs_the_gate():
 
 def test_no_valve_or_pump_control_anywhere():
     """The aux devices can read the vacuum, never control it (docs)."""
-    import robofast_core.devices.kiwispec_serial as ks
+    import robofast.devices.kiwispec_serial as ks
 
     assert GaugeController(SimPort(GaugeSim())).allowed == {"#  RDCG1", "#  RDCG2"}
-    source = (ROOT / "robofast_core" / "devices" / "kiwispec_aux_server.py").read_text().lower()
+    source = (ROOT / "robofast" / "devices" / "kiwispec_aux_server.py").read_text().lower()
     for word in ("ventvalve", "pumpvalve", "vent_valve", "pump_valve"):
         assert word not in source
     assert not any(c.startswith(("SETTEMP ", "RUN", "STOP")) for c in ks.OasisChiller.allowed)

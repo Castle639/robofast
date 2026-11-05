@@ -2,7 +2,7 @@
 
     python scripts/conformu_mearth_roof.py --conformu PATH [--out DIR]
 
-Starts ``robofast_core.devices.mearth_roof_server`` with ``port.type`` "sim"
+Starts ``robofast.devices.mearth_roof_server`` with ``port.type`` "sim"
 (the in-process roof simulator, a 3 s stroke) on a free loopback port, then
 runs ConformU's ``conformance`` check (shutter tests enabled by
 ``scripts/conformu-dome.settings.json``) and its ``alpacaprotocol`` check.
@@ -44,7 +44,7 @@ def main() -> None:
         )
     )
     server, hello = start(
-        ["robofast_core.devices.mearth_roof_server", "--config", str(config)], out / "server.log"
+        ["robofast.devices.mearth_roof_server", "--config", str(config)], out / "server.log"
     )
     try:
         url = json.loads(hello)["url"] + "/api/v1/dome/0"

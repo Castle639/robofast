@@ -1,4 +1,4 @@
-"""The morning report and nightly QA (robofast_core/morning.py) on a small
+"""The morning report and nightly QA (robofast/morning.py) on a small
 synthetic night; the e2e test runs it on the whole simulated night."""
 
 from __future__ import annotations
@@ -6,7 +6,7 @@ from __future__ import annotations
 import json
 import sys
 
-from robofast_core.morning import QAConfig, build_report, gather, main, render_markdown
+from robofast.morning import QAConfig, build_report, gather, main, render_markdown
 
 NIGHT = "n20261109"
 
@@ -43,13 +43,13 @@ def write_night(root, zp=19.7):
     )  # fmt: skip
     log = root / "supervisor.log"
     lines = [
-        "2026-11-10 01:00:00,000 INFO robofast_core.timeline: aqawan1: enclosure_open {'lease': 1}",
-        "2026-11-10 03:00:00,000 INFO robofast_core.timeline: aqawan1: unsafe {'reason': 'rain'}",
-        "2026-11-10 03:00:05,000 INFO robofast_core.timeline: aqawan1: lease_revoked {'reason': 'unsafe: rain'}",  # noqa: E501
-        "2026-11-10 03:01:00,000 INFO robofast_core.timeline: aqawan1: enclosure_closed {'t': 5}",
-        "2026-11-10 04:00:00,000 INFO robofast_core.timeline: seq: alarm {'telescope': 't1', 'text': 't1 port None: pointing drift 30 arcsec'}",  # noqa: E501
-        "2026-11-10 04:10:00,000 INFO robofast_core.timeline: seq: guiding {'telescope': 't1', 'acq_method': 'pair', 'acq_stars': 2}",  # noqa: E501
-        "2026-11-10 04:20:00,000 INFO robofast_core.timeline: seq: telescope_error {'telescope': 't1', 'error': 'camera timeout'}",  # noqa: E501
+        "2026-11-10 01:00:00,000 INFO robofast.timeline: aqawan1: enclosure_open {'lease': 1}",
+        "2026-11-10 03:00:00,000 INFO robofast.timeline: aqawan1: unsafe {'reason': 'rain'}",
+        "2026-11-10 03:00:05,000 INFO robofast.timeline: aqawan1: lease_revoked {'reason': 'unsafe: rain'}",  # noqa: E501
+        "2026-11-10 03:01:00,000 INFO robofast.timeline: aqawan1: enclosure_closed {'t': 5}",
+        "2026-11-10 04:00:00,000 INFO robofast.timeline: seq: alarm {'telescope': 't1', 'text': 't1 port None: pointing drift 30 arcsec'}",  # noqa: E501
+        "2026-11-10 04:10:00,000 INFO robofast.timeline: seq: guiding {'telescope': 't1', 'acq_method': 'pair', 'acq_stars': 2}",  # noqa: E501
+        "2026-11-10 04:20:00,000 INFO robofast.timeline: seq: telescope_error {'telescope': 't1', 'error': 'camera timeout'}",  # noqa: E501
         "garbage line",
     ]
     log.write_text("\n".join(lines) + "\n")

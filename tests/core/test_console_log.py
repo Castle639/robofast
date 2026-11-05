@@ -7,8 +7,8 @@ from __future__ import annotations
 import asyncio
 import json
 
-from robofast_core.console.logstream import LogStream
-from robofast_core.timeline import Timeline
+from robofast.console.logstream import LogStream
+from robofast.timeline import Timeline
 
 from . import test_console as _console
 from .test_console import read_event, snapshot_doc
@@ -175,7 +175,7 @@ async def test_the_console_streams_and_serves_the_log(make_console):
 
 
 def test_the_page_has_the_log():
-    from robofast_core.console.page import render_page
+    from robofast.console.page import render_page
 
     page = render_page("n")
     assert 'id="log-list"' in page and 'addEventListener("log"' in page and "log-pause" in page

@@ -1,15 +1,12 @@
-This code is (will be) a generic robotic observatory code that autonomously executes 
-astronomical observations. 
+robofast is open-source control software for robotic observatories. It drives
+telescopes, enclosures, cameras and instruments as ASCOM Alpaca devices, and
+runs a safety supervisor, a sequencer and a scheduler on top of them, so an
+observatory can observe autonomously.
 
-New observatories must write new configuration files (see config/* for examples) 
-and Hardware Abstraction Layer (HAL) classes (see hal/*.py for examples) that 
-translate the specific hardware (e.g., Paramount, Cdk700) into generic commands 
-(slew). As such, these HAL classes must expose standardized function names, which
-are enforced by the high-level wrappers (e.g., telescope.py). See existing codes 
-for examples.
-
-After that, they can take advantage of the generalized robotic code and all of its 
-infrastructure.
+A new observatory describes itself in a site configuration (see `sites/` for
+examples) and, where its hardware has no Alpaca driver yet, adds a device
+server for it (see `robofast/devices/`); site-specific behavior plugs in
+through `robofast.plugins` ([docs/plugins.md](docs/plugins.md)).
 
 If you write code to support new hardware, please consider a pull request or sending
 it to me so other users can use (and improve) it.
@@ -19,19 +16,18 @@ it to me so other users can use (and improve) it.
 
 ## Install
 
-The new core, `robofast_core/`, is the installable package (distribution
-name `robofast`, Python 3.12 or later):
+robofast installs as a Python package (Python 3.12 or later):
 
 ```
 python3.12 -m venv venv && . venv/bin/activate
 pip install .                        # or: pip install ".[guider-hardware]" on a guide computer
-python -c "import robofast_core"
+python -c "import robofast"
 robofast-supervisor --help           # every service and device server is a robofast-* command
 ```
 
 Each `robofast-*` command (listed under `[project.scripts]` in
 [pyproject.toml](pyproject.toml)) is the same program as its
-`python -m robofast_core...` spelling, which also works uninstalled from
+`python -m robofast...` spelling, which also works uninstalled from
 the repository root. For development and the tests, install the test
 dependencies and run from the root (pip 25.1 or later):
 
@@ -40,11 +36,11 @@ pip install --group test
 python -m pytest
 ```
 
-The legacy `robofast/` directory (the code this README's first paragraphs
-describe) stays in the repository for reference; it is not packaged or
-installed.
+The code this repository started from (the earlier, Windows-era `robofast/`
+package) was removed on 2026-11-04; its last tree is the git tag
+`legacy-robofast`.
 
-To see the new core (`robofast_core/`) run a whole simulated MINERVA RV night
+To see robofast run a whole simulated MINERVA RV night
 on your machine, see [docs/demo.md](docs/demo.md).
 
 To deploy it on a control host (users, systemd units, secrets, firewall,

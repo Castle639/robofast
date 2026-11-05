@@ -1,14 +1,14 @@
 {
   "_note": [
-    "A dispatch-scheduler plan entry for Aqawan 1 (robofast_core/dispatch.py; docs/design.md 3.7):",
-    "  python -m robofast_core.sequencer_service --config sites/minerva/aqawan1.json --plan sites/minerva/dispatch.example.json",
+    "A dispatch-scheduler plan entry for Aqawan 1 (robofast/dispatch.py; docs/design.md 3.7):",
+    "  python -m robofast.sequencer_service --config sites/minerva/aqawan1.json --plan sites/minerva/dispatch.example.json",
     "or paste it (without _note) as the 'plan' entry of aqawan1.json.",
     "site: Mt. Hopkins (legacy site_mtHopkins.ini). Limits: legacy scheduler.ini (MINALT 21, MAXALT 83,",
     "HORIZON -12, MINMOONSEP 10), which the legacy scheduler read but never applied; MINALT equals",
     "telescope_N.ini HORIZON (21). No hour-angle limits: legacy had none (min_ha/max_ha default to -12/+12 h).",
     "filters: imager_t1.ini and imager_t2.ini [FILTERS] (legacy names; the Alpaca wheel's Names must match).",
     "ports are not listed: no telescope has a port_action yet (instruments.json has the M3 port numbers).",
-    "instruments: each instrument name's type (robofast_core/instruments.py): 'spectrograph' is KiwiSpec",
+    "instruments: each instrument name's type (robofast/instruments.py): 'spectrograph' is KiwiSpec",
     "(SPECTRUM requests, with extra_params iodine and target_counts); 'imager' is its own type.",
     "state and too_dropbox are relative to this file here; use absolute paths (e.g. under",
     "/var/lib/robofast) in production. A ToO is a JSON request group with a 'too' entry dropped",
@@ -28,7 +28,7 @@
       "type": "kiwispec",
       "guiding": {
         "_note": [
-          "When to offset guide (robofast_core/guider/recommend.py; docs/offset_guiding.md): guide 'auto'.",
+          "When to offset guide (robofast/guider/recommend.py; docs/offset_guiding.md): guide 'auto'.",
           "CDK700 0.7 m. The FAU has NO fiber hole: a beamsplitter in front of the fiber sends ~2 % of the",
           "light (the DESIGN value) to the FAU, which sees the whole star (on_target 'beamsplitter').",
           "fiber_diameter 2.27 arcsec = the 50 um core at 22 um/arcsec (Swift et al. 2015, JATIS 1, 027002,",

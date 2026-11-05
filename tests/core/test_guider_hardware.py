@@ -1,12 +1,12 @@
-"""The guider's hardware backends are registries (robofast_core/guider/hardware.py)."""
+"""The guider's hardware backends are registries (robofast/guider/hardware.py)."""
 
 from __future__ import annotations
 
 import pytest
 
-from robofast_core.guider import hardware as hw
-from robofast_core.guider.base import RealClock
-from robofast_core.guider.service import GuiderServiceConfig, build_parts
+from robofast.guider import hardware as hw
+from robofast.guider.base import RealClock
+from robofast.guider.service import GuiderServiceConfig, build_parts
 
 
 def parts(**cfg):
@@ -19,7 +19,7 @@ def test_core_registers_its_backends():
     assert {"sim", "alpaca"} <= set(hw.MOUNTS.names())
     assert "sim" in hw.BACKLIGHTS
     # A spectrograph's backlight is registered by the plug-in that drives it.
-    assert hw.BACKLIGHTS.origin("kiwispec") == "robofast_core.devices"
+    assert hw.BACKLIGHTS.origin("kiwispec") == "robofast.devices"
 
 
 def test_an_unknown_kind_lists_the_registered_ones():

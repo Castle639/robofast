@@ -1,11 +1,11 @@
 # robofast's pointing model
 
-`robofast_core/pointmodel.py` gives each telescope (and each M3 port) a
+`robofast/pointmodel.py` gives each telescope (and each M3 port) a
 pointing model of robofast's own, built from plate solves, applied before
 the mount, and watched for drift. It replaces the legacy
 `cdk700.makePointingModel` / `addPointToModel` runs, whose models lived
 only inside PWI. The TPOINT terms, their formulae and the least-squares fit
-are in `robofast_core/pointing.py` (`docs/sky.md` section 2).
+are in `robofast/pointing.py` (`docs/sky.md` section 2).
 
 ## 1. Samples
 
@@ -52,9 +52,9 @@ as `model-<UTC>.json` beside it.
 From logged samples (e.g. a month of solved frames):
 
 ```sh
-python -m robofast_core.pointmodel build --store /var/lib/robofast/pointing_t1 \
+python -m robofast.pointmodel build --store /var/lib/robofast/pointing_t1 \
     --telescope t1 --port 1 --latitude 31.680407 [--since 2026-10-01] [--source frame]
-python -m robofast_core.pointmodel show --store /var/lib/robofast/pointing_t1 --telescope t1 --port 1
+python -m robofast.pointmodel show --store /var/lib/robofast/pointing_t1 --telescope t1 --port 1
 ```
 
 ## 3. The pointing run
@@ -156,8 +156,8 @@ is to be confirmed on the CDK700s before `vendor_off` is set there.
 noise), outlier rejection, cross-validation, the store and sample log, the
 command line, the local correction, the drift alarm, the grid; and a
 pointing run on the catalog-based sky simulator
-(`robofast_core/testing/skysim.py` with an all-sky synthetic catalog,
-`robofast_core/testing/pointing_sim.py`) with injected TPOINT truth:
+(`robofast/testing/skysim.py` with an all-sky synthetic catalog,
+`robofast/testing/pointing_sim.py`) with injected TPOINT truth:
 pointing errors of ~140 arcsec rms drop to ~0.02 arcsec (the solver's
 noise), the injected terms recovered within 1 arcsec.
 `tests/core/test_pointmodel_sequencer.py`: the whole loop in the
