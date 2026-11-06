@@ -121,7 +121,7 @@ Intake and status
 The dispatch scheduler, running in the sequencer process, is the source of
 truth. A submission or cancellation is a file renamed into the enclosure's
 drop box (``<time>-submit-<id>.json``, ``<time>-cancel-<id>.json``); the
-scheduler takes the files in, in order, every ``too_poll`` seconds (10 by
+scheduler takes the files in, in order, every ``dropbox_poll`` seconds (1 by
 default) and records the result in its state file, which this process reads
 (never writes). So a submission made while the sequencer is down waits in the
 drop box and is taken in when it starts. A group's ``intake`` is ``QUEUED``

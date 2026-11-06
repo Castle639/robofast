@@ -627,7 +627,7 @@ may be wrong about the 60-inch's focus.
   chunked bodies, JSON errors without stack traces.
   **Intake.** The API never writes the scheduler's state. A submission or
   cancellation is a file renamed into the plan's drop box, taken in by the
-  scheduler (in the sequencer process) in order every `too_poll` seconds
+  scheduler (in the sequencer process) in order every `dropbox_poll` seconds
   through `submit()`, `submit_too()` and `cancel()`; status is read back
   from the scheduler's state file, which also keeps the groups submitted at
   run time and a record of each completed observation. So the scheduler
@@ -1083,7 +1083,8 @@ support is often worse. So:
 | `w_setting`, `w_airmass`, `w_cadence` | 1, 1, 1 | dispatch score weights (section 3.7) |
 | `setting_horizon` | 2 h | a target lost within this gets a setting bonus |
 | `idle_poll` | 60 s | with nothing observable, ask again this often |
-| `too_poll` | 10 s | re-check waiting ToOs and the drop box this often |
+| `too_poll` | 10 s | re-check waiting ToOs this often |
+| `dropbox_poll` | 1 s | take in the drop box this often (a ToO is checked as it is taken in) |
 | `reserve_timeout` | 60 s | a ToO is held for the telescope it preempted this long |
 | `images.queue_size` | 4 | frames per telescope waiting to be written before the next exposure waits (`docs/data.md`) |
 | `images.imagebytes` | on | camera images by the Alpaca ImageBytes transfer (JSON fallback) |

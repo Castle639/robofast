@@ -307,8 +307,12 @@ class DispatchConfig:
     setting_horizon: float = 7200.0
     #: Idle: ask again after this long when nothing is observable.
     idle_poll: float = 60.0
-    #: How often the background task re-checks waiting ToOs and the drop box.
+    #: How often the background task re-checks waiting ToOs.
     too_poll: float = 10.0
+    #: How often it takes in the drop box (never less often than
+    #: ``too_poll``). A ToO is checked as it is taken in, so this bounds a
+    #: dropped ToO's wait; a tick with nothing dropped is one directory glob.
+    dropbox_poll: float = 1.0
     #: A ToO stays reserved for the telescope it preempted this long.
     reserve_timeout: float = 60.0
     #: Completed visits kept per request in the state file.
@@ -923,17 +927,25 @@ class DispatchScheduler:
         return accepted
 
     async def serve(self) -> None:
-        """Background task: take in dropped ToO files, expire and re-check
-        waiting ToOs, every ``too_poll`` seconds. Never raises (but for
-        cancellation)."""
+        """Background task: take in dropped files every ``dropbox_poll``
+        seconds (a ToO among them is checked as it arrives), and expire and
+        re-check waiting ToOs every ``too_poll`` seconds. Never raises (but
+        for cancellation)."""
+        cfg = self.config
+        loop = asyncio.get_running_loop()
+        tick = min(cfg.dropbox_poll, cfg.too_poll) if self.dropbox is not None else cfg.too_poll
+        last_check: float | None = None
         while True:
             try:
                 if self.dropbox is not None:
                     await self.poll_dropbox()
-                self.check_toos()
+                now = loop.time()
+                if last_check is None or now - last_check >= cfg.too_poll - tick / 2:
+                    last_check = now
+                    self.check_toos()
             except Exception:
                 log.exception("dispatch background check")
-            await asyncio.sleep(self.config.too_poll)
+            await asyncio.sleep(tick)
 
     async def poll_dropbox(self) -> list[str]:
         """Take in every ``*.json`` file in the drop box, in name order: a
