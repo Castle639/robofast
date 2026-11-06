@@ -1611,6 +1611,15 @@ class SafetySupervisor:
         # Re-check immediately before the command: the status read awaited.
         if not self._want_open(time.monotonic()):
             return
+        # The verdict above is the weather loop's, up to one poll (plus a
+        # read timeout) old: read the weather itself now, so an open never
+        # goes out on a reading taken before the weather turned unsafe.
+        safe, reason, ok = await self._read_weather()
+        if ok:
+            self._last_good_read = time.monotonic()
+        self._set_safety(safe, reason)
+        if not self._want_open(time.monotonic()):
+            return
         try:
             await self._dome.call("OpenShutter", timeout=cfg.dome_timeout)
         except DeviceError as exc:
