@@ -10,6 +10,7 @@ import json
 import threading
 from datetime import UTC, datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from typing import ClassVar
 
 import httpx
 import pytest
@@ -24,7 +25,7 @@ FIELD = (2.0965, 29.0904, 2.0)
 
 
 class _Recorder(BaseHTTPRequestHandler):
-    seen: list[tuple[str, str]] = []
+    seen: ClassVar[list[tuple[str, str]]] = []
 
     def _reply(self) -> None:
         self.seen.append((self.command, self.path))
