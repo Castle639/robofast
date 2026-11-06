@@ -17,7 +17,7 @@
   "min_snr": 20.0,
   "ports": {
     "fau": {
-      "shape": [1216, 1936], "plate_scale": 0.265, "fiber": [949.0, 617.0],
+      "shape": [1216, 1936], "plate_scale": 0.265, "fiber": [949.3, 618.8],
       "max_star_distance": 400.0, "capture_radius": 8.0, "exposure": 0.5, "seeing": 1.5,
       "photometry": {
         "band": "G", "aperture": 700.0, "obstruction": 0.47,
@@ -26,7 +26,7 @@
       }
     },
     "t2/fau": {
-      "shape": [1216, 1936], "plate_scale": 0.2655, "fiber": [948.0, 626.0],
+      "shape": [1216, 1936], "plate_scale": 0.2655, "fiber": [951.0, 623.3],
       "max_star_distance": 400.0, "capture_radius": 8.0, "exposure": 0.5, "seeing": 1.5,
       "photometry": {
         "band": "G", "aperture": 700.0, "obstruction": 0.47,
