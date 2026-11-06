@@ -9,7 +9,12 @@ exactly as in the simulated night: the weather (forced safe), the Aqawan
 opens; the real enclosure is never contacted), the supervisor, the guiders
 (simulated FAU cameras: they acquire and guide on synthetic star fields
 wherever the real mount points), KiwiSpec (simulator and service). A
-telescope not named on the command line stays simulated.
+telescope not named on the command line stays simulated. Opt-in:
+``--kiwispec URL`` uses an already-running (real) KiwiSpec service instead
+of the simulated one (only ``GET /status`` is checked first; never
+``/restart_camera`` or ``/backlight``), and ``--catalog-guide`` makes the
+simulated FAU cameras show the real catalog star field around each target
+at the real FAU's geometry (docs/demo.md).
 
 * **Real time.** The clock runs at real speed from now, so the real mounts
   point by the real sidereal time. The plan is made now: ``SPECTRUM``
@@ -200,6 +205,17 @@ class RehearsalSettings:
     scale: float = 1.0
     #: The end action's slew bound (s).
     end_slew_timeout: float = 240.0
+    #: An already-running KiwiSpec service (``--kiwispec URL``: the REAL
+    #: spectrograph) instead of the simulated one: the guiders' flux
+    #: reports and the spectra go to it. Never sent ``/restart_camera`` or
+    #: ``/backlight`` (the guiders' backlight stays simulated).
+    kiwispec_url: str | None = None
+    #: ``--catalog-guide``: the simulated FAU guide cameras show the real
+    #: catalog star field around each target (robofast.testing.skysim.GuiderSky)
+    #: at the FAU's sensor, plate scale and fiber position; this is the
+    #: catalog's config (robofast.catalog.catalog_from_config). None: one
+    #: synthetic star (the default).
+    catalog_guide: dict[str, Any] | None = None
 
     def __post_init__(self) -> None:
         unknown = set(self.real) - set(NAMES)
@@ -218,6 +234,73 @@ class RehearsalSettings:
 
 class RehearsalRefused(Exception):
     """The rehearsal will not start (the message says why)."""
+
+
+#: The MINERVA FAU guide camera (ZWO ASI174; sites/minerva/README.md):
+#: sensor (nx, ny) pixels. Its plate scale and fiber position come from
+#: sites/minerva/guider_tN.example.json.
+FAU_SENSOR = (1936, 1216)
+#: ``--catalog-guide``: the simulated pointing error (pixels from the
+#: fiber), so the acquisition has to move the target onto the fiber.
+FAU_POINTING_OFFSET = (6.0, -4.0)
+#: ``--catalog-guide``: a target this close (arcsec) to a catalog star is
+#: that star (the extra targets' positions are rounded to about an arcmin).
+CATALOG_MATCH_RADIUS = 90.0
+
+
+def check_kiwispec(url: str, timeout: float = 10.0) -> dict[str, Any]:
+    """``GET /status`` of an external KiwiSpec service (refuses if it does
+    not answer). Nothing else is sent."""
+    try:
+        with httpx.Client(trust_env=False, timeout=timeout) as c:
+            r = c.get(url.rstrip("/") + "/status")
+            r.raise_for_status()
+            st = r.json()
+    except Exception as exc:
+        raise RehearsalRefused(f"--kiwispec {url}: GET /status failed ({exc!r})") from exc
+    if not isinstance(st, dict):
+        raise RehearsalRefused(f"--kiwispec {url}: /status is not a JSON object: {st!r}")
+    return st
+
+
+def fau_example(name: str) -> dict[str, Any]:
+    """The FAU's fiber position and plate scale from
+    ``sites/minerva/guider_<name>.example.json``."""
+    cfg = json.loads((SITES / f"guider_{name}.example.json").read_text())
+    g = cfg["guide"]
+    return {"fiber": [float(v) for v in g["target"]], "plate_scale": float(g["plate_scale"])}
+
+
+def warm_catalog(cfg: dict[str, Any], targets: list[dict[str, Any]], note: Any = print) -> int:
+    """Query the catalog around every target (filling its cache, so the
+    guiders never wait for a download); refuses with the reason if it
+    cannot answer. Returns the number of fields."""
+    from robofast.catalog import catalog_from_config
+
+    try:
+        cat = catalog_from_config(cfg)
+    except Exception as exc:
+        raise RehearsalRefused(f"--catalog-guide: no catalog ({exc!r})") from exc
+    nx, ny = FAU_SENSOR
+    # What a guider asks (GuiderSky: the sensor's far corner from the fiber),
+    # with room for the target's match.
+    radius = (0.6 * math.hypot(nx, ny) * 0.265 + CATALOG_MATCH_RADIUS + 20.0) / 3600.0
+    now = datetime.now(UTC)
+    for i, t in enumerate(targets):
+        t0 = time.monotonic()
+        try:
+            s = cat.cone(float(t["ra"]), float(t["dec"]), radius, epoch=now)
+        except Exception as exc:
+            raise RehearsalRefused(
+                f"--catalog-guide: the catalog ({cfg}) cannot answer around {t['name']}"
+                f" ({exc!r}); fill its cache (scripts/build_catalog.py) or choose a source that"
+                " is reachable (--catalog-source)"
+            ) from exc
+        note(
+            f"catalog field {i + 1}/{len(targets)}: {t['name']}: {len(s)} stars"
+            f" ({time.monotonic() - t0:.1f} s)"
+        )
+    return len(targets)
 
 
 @dataclass
@@ -678,8 +761,62 @@ class Rehearsal(SimulatedNight):
     # -- the services ----------------------------------------------------------------
 
     async def start(self) -> None:
-        self.outcome.preflight = await asyncio.to_thread(preflight, self.r)
+        r = self.r
+        self.outcome.t_start = time.monotonic()
+        if r.kiwispec_url:
+            st = await asyncio.to_thread(check_kiwispec, r.kiwispec_url)
+            self._note(
+                f"KiwiSpec: EXTERNAL service at {r.kiwispec_url} -- the REAL spectrograph takes"
+                f" the spectra (state {st.get('state')!r}); no simulated KiwiSpec is started"
+            )
+        if r.catalog_guide is not None:
+            start = self.clock()
+            targets = observable(
+                catalog(),
+                start,
+                start + timedelta(seconds=r.duration * r.scale),
+                ignore_twilight=r.ignore_twilight,
+                az_window=_az_intersection(r),
+            )
+            self._note(
+                f"--catalog-guide: catalog {r.catalog_guide}; checking {len(targets)} fields"
+            )
+            await asyncio.to_thread(warm_catalog, r.catalog_guide, targets, self._note)
+        self.outcome.preflight = await asyncio.to_thread(preflight, r)
         await super().start()
+
+    async def _start_spectrograph(self) -> None:
+        if not self.r.kiwispec_url:
+            await super()._start_spectrograph()
+            return
+        self.kiwi_sim = None  # the real spectrograph: nothing simulated
+
+    def _spectrograph_url(self) -> str:
+        return (self.r.kiwispec_url or "").rstrip("/") or super()._spectrograph_url()
+
+    def _guider_config(self, name: str, cfg: dict[str, Any]) -> dict[str, Any]:
+        if self.r.catalog_guide is None:
+            return cfg
+        # The real FAU's geometry; full-frame acquisition, like the real one.
+        fau = fau_example(name)
+        fx, fy = fau["fiber"]
+        dx, dy = FAU_POINTING_OFFSET
+        cfg["guide"].pop("acq_roi", None)
+        cfg["guide"]["plate_scale"] = fau["plate_scale"]
+        cfg["sim"].update(
+            sensor=list(FAU_SENSOR),
+            star=[fx + dx, fy + dy],
+            fiber={**cfg["sim"]["fiber"], "x": fx, "y": fy},
+            sky={
+                # Cached by warm_catalog: the guider never downloads.
+                "catalog": {**self.r.catalog_guide, "fetch": False},
+                "plate_scale": fau["plate_scale"],
+                "pointing_offset": [dx, dy],
+                "match_radius": CATALOG_MATCH_RADIUS,
+                "site": [MINERVA.latitude, MINERVA.longitude],
+            },
+        )
+        return cfg
 
     def _start_telescopes(self) -> None:
         devices: dict[str, Any] = {}
@@ -901,10 +1038,11 @@ class Rehearsal(SimulatedNight):
             await self._until(lambda: self.aqawan_sim.closed(), 60, "the simulated roof closed")
         o.t_end = time.monotonic()
         o.dome_log = list(self.aqawan_sim.log)
-        o.spectrograph_files = {
-            k: {kk: vv for kk, vv in v.items() if kk != "data"}
-            for k, v in self.kiwi_sim.files.items()
-        }
+        if self.kiwi_sim is not None:
+            o.spectrograph_files = {
+                k: {kk: vv for kk, vv in v.items() if kk != "data"}
+                for k, v in self.kiwi_sim.files.items()
+            }
         for f in sorted((self.out / "plans").glob("*.jsonl")):
             o.plan_record += read_record(f)
         return o
@@ -1255,6 +1393,19 @@ def _az_windows(specs: list[str], real: dict[str, Any]) -> dict[str, tuple[float
     return out
 
 
+def _catalog_config(args: argparse.Namespace) -> dict[str, Any] | None:
+    source = getattr(args, "catalog_source", None)
+    cache = getattr(args, "catalog_dir", None)
+    if not getattr(args, "catalog_guide", False):
+        if source or cache:
+            raise RehearsalRefused("--catalog-source/--catalog-dir need --catalog-guide")
+        return None
+    cfg: dict[str, Any] = {"source": source or "gaia"}
+    if cache:
+        cfg["cache_dir"] = str(Path(cache).resolve())
+    return cfg
+
+
 def settings_from_args(args: argparse.Namespace) -> RehearsalSettings:
     if not args.i_know_the_enclosure_is_closed:
         raise RehearsalRefused(
@@ -1295,6 +1446,8 @@ def settings_from_args(args: argparse.Namespace) -> RehearsalSettings:
             spectra=args.spectra,
             ignore_twilight=args.ignore_twilight,
             console_port=None if args.console_port < 0 else args.console_port,
+            kiwispec_url=getattr(args, "kiwispec", None),
+            catalog_guide=_catalog_config(args),
         )
     except ValueError as exc:
         raise RehearsalRefused(str(exc)) from exc
@@ -1362,6 +1515,27 @@ def main(argv: list[str] | None = None) -> int:
     )
     ap.add_argument(
         "--console-port", type=int, default=0, help="observer console port (0 any, -1 none)"
+    )
+    ap.add_argument(
+        "--kiwispec",
+        metavar="URL",
+        help="use this already-running KiwiSpec service (the REAL spectrograph) instead of the"
+        " simulated one; only GET /status is checked first (never /restart_camera, /backlight)",
+    )
+    ap.add_argument(
+        "--catalog-guide",
+        action="store_true",
+        help="the simulated FAU guide cameras show the real catalog star field around each"
+        " target (fails at once if the catalog cannot answer)",
+    )
+    ap.add_argument(
+        "--catalog-source",
+        help="--catalog-guide's catalog: gaia (default), ucac4 or 2mass (robofast.catalog)",
+    )
+    ap.add_argument(
+        "--catalog-dir",
+        help="--catalog-guide's catalog cache directory (default $ROBOFAST_CATALOG_DIR, else"
+        " ~/.cache/robofast/catalog)",
     )
     ap.add_argument("--log-level", default="WARNING")
     args = ap.parse_args(argv)

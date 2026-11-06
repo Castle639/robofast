@@ -53,6 +53,7 @@ from robofast.testing.starfield import Detector, Frame, SimOptics, Star, render
 log = logging.getLogger(__name__)
 
 __all__ = [
+    "GuiderSky",
     "SkyCamera",
     "SkyFocusScene",
     "SkyScene",
@@ -417,3 +418,129 @@ def sky_world_stars(
     main = (stars[k].x, stars[k].y, stars[k].flux)
     others = [(s.x, s.y, s.flux) for i, s in enumerate(stars) if i != k]
     return main, others
+
+
+@dataclass
+class GuiderSky:
+    """Real catalog stars for the guider simulator, re-pointed at each
+    target (opt-in: the guider service's ``sim.sky`` section; the hardware
+    rehearsal's ``--catalog-guide``, docs/demo.md).
+
+    When the guider is started on a target (``target_radec``), the
+    :class:`~robofast.guider.sim.SimWorld`'s star field becomes the catalog
+    around that target at the guide camera's plate scale, PA and parity: the
+    pointing (the target) lands at ``centre`` (the fiber plus a pointing
+    error, so acquisition has to move it), the target is the world's main
+    star with the world's ``flux``, and every other catalog star within the
+    sensor is an ``other`` with that flux scaled by its G magnitude
+    difference. A target the catalog lacks (nothing within
+    ``match_radius`` arcsec) is still put at ``centre``, with G
+    ``target_g``; one it has is the brightest star within ``match_radius``,
+    put at ``centre`` with the field around it. Only the brightest
+    ``max_stars`` field stars are kept (rendering speed)."""
+
+    catalog: Catalog | Stars
+    #: (nx, ny) pixels, as the guide camera's ``sensor``.
+    sensor: tuple[int, int]
+    plate_scale: float
+    #: 0-based pixel where the target lands.
+    centre: tuple[float, float]
+    pa: float = 0.0
+    flip: bool = False
+    mag_limit: float | None = 16.0
+    target_g: float = 6.0
+    match_radius: float = 3.0
+    max_stars: int = 300
+    site: tuple[float, float] = (31.680407, -110.878977)
+
+    @classmethod
+    def from_config(
+        cls, spec: dict[str, Any], *, sensor: tuple[int, int], fiber: tuple[float, float] | None
+    ) -> GuiderSky:
+        """From a guider ``sim.sky`` section::
+
+        {"catalog": {...robofast.catalog.catalog_from_config...},
+         "plate_scale": 0.265, "pa": 0, "flip": false,
+         "pointing_offset": [dx, dy] px (from the fiber; default [6, -4]),
+         "mag_limit": 16, "target_g": 6, "max_stars": 300, "site": [lat, lon]}
+        """
+        from robofast.catalog import catalog_from_config
+
+        s = dict(spec)
+        known = {"catalog", "plate_scale", "pa", "flip", "pointing_offset", "mag_limit"}
+        known |= {"target_g", "match_radius", "max_stars", "site"}
+        if set(s) - known:
+            raise ValueError(f"guider sim.sky: unknown keys {sorted(set(s) - known)}")
+        dx, dy = (float(v) for v in s.get("pointing_offset", (6.0, -4.0)))
+        nx, ny = sensor
+        fx, fy = fiber if fiber is not None else ((nx - 1) / 2.0, (ny - 1) / 2.0)
+        return cls(
+            catalog_from_config(s.get("catalog")),
+            sensor=(int(nx), int(ny)),
+            plate_scale=float(s["plate_scale"]),
+            centre=(fx + dx, fy + dy),
+            pa=float(s.get("pa", 0.0)),
+            flip=bool(s.get("flip", False)),
+            mag_limit=None if s.get("mag_limit") is None else float(s.get("mag_limit", 16.0)),
+            target_g=float(s.get("target_g", 6.0)),
+            match_radius=float(s.get("match_radius", 3.0)),
+            max_stars=int(s.get("max_stars", 300)),
+            site=tuple(s.get("site", cls.site)),  # type: ignore[arg-type]
+        )
+
+    def scene(self) -> SkyScene:
+        nx, ny = self.sensor
+        cam = SkyCamera(
+            (ny, nx),
+            self.plate_scale,
+            pa=self.pa,
+            flip=self.flip,
+            crpix=self.centre,
+            detector=Detector(shape=(ny, nx)),
+        )
+        return SkyScene(self.catalog, cam, site=self.site, mag_limit=self.mag_limit)
+
+    def field(
+        self, ra: float, dec: float, when: datetime, flux: float
+    ) -> tuple[tuple[float, float, float], list[tuple[float, float, float]], dict[str, Any]]:
+        """The main star (the target at ``centre``) and the field stars, as
+        (x, y, e-/s), for a target at (``ra``, ``dec``) deg; and a summary.
+        Raises :class:`~robofast.catalog.CatalogUnavailable` when the
+        catalog cannot answer."""
+        from robofast.catalog import separation
+
+        _, rows, x, y = self.scene().stars(ra % 360.0, dec, when)
+        g_t = self.target_g
+        keep = np.ones(len(rows), dtype=bool)
+        matched = False
+        x, y = np.asarray(x, dtype=float), np.asarray(y, dtype=float)
+        if len(rows):
+            d = separation(ra, dec, rows.ra, rows.dec) * 3600.0
+            near = np.flatnonzero(d <= self.match_radius)
+            if len(near):
+                # The brightest star that close is the target (a rounded
+                # position may be off by more than a faint neighbour's).
+                k = int(near[np.argmin(np.asarray(rows.g)[near])])
+                g_t, matched = float(rows.g[k]), True
+                keep[k] = False
+                x = x - x[k] + self.centre[0]
+                y = y - y[k] + self.centre[1]
+        nx, ny = self.sensor
+        keep &= (x > -30) & (x < nx + 30) & (y > -30) & (y < ny + 30)
+        g = np.asarray(rows.g, dtype=float)[keep]
+        order = np.argsort(g)[: self.max_stars]
+        xs, ys = x[keep][order], y[keep][order]
+        rel = 10.0 ** (-0.4 * (g[order] - g_t))
+        others = [
+            (float(a), float(b), float(flux * r)) for a, b, r in zip(xs, ys, rel, strict=True)
+        ]
+        main = (self.centre[0], self.centre[1], float(flux))
+        info = {
+            "ra": ra,
+            "dec": dec,
+            "target_g": g_t,
+            "target_in_catalog": matched,
+            "field_stars": len(others),
+            "centre": list(self.centre),
+        }
+        return main, others, info
