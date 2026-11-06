@@ -27,8 +27,9 @@ spectrum's sidecar records them (docs/kiwispec.md, "The raw file").
 
 What makes the file illegal is taken from legacy ``fix_fits.py`` (which
 reads the file with ``ignore_missing_end`` and rebuilds 16-bit pixels from
-byte pairs, high byte first); the simulator writes the same form. It has
-not been checked against a raw file from the current camera software.
+byte pairs, high byte first); the simulator writes the same form. Checked
+on the hardware (2026-11-05): on a raw bias from SI Image SGL E, the pixels
+are identical to legacy ``fix_fits``'s.
 """
 
 from __future__ import annotations

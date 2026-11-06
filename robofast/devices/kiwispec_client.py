@@ -35,6 +35,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import math
 import re
 import struct
 import time
@@ -565,38 +566,38 @@ def parse_si_packet(raw: bytes) -> SIPacket:
                 raise KiwiSpecProtocolError(f"SI done packet of length {length}")
             func = struct.unpack(DONE_FMT, raw)[6]
             return SIPacket(PKT_DATA, err_code=err, data_type=dtype, func=func)
-        payload = raw[struct.calcsize(DATA_FMT) :].rstrip(b"\x00")
+        payload = raw[struct.calcsize(DATA_FMT) :]
         return SIPacket(PKT_DATA, err_code=err, data_type=dtype, payload=payload)
     if pid == PKT_IMAGE:
         return SIPacket(PKT_IMAGE, payload=raw)
     raise KiwiSpecProtocolError(f"SI packet id {pid}")
 
 
-def parse_camera_status(text: str) -> dict[str, str]:
-    """``GetStatusFromCamera`` text -> {name: value}.
-
-    The real format is not in the legacy code (it only ever printed it); this
-    accepts lines of ``name,value`` or ``group,name,value`` (the format of
-    ``GetCameraParameter``, which legacy parsed that way). See the open
-    questions in ``docs/kiwispec.md``.
-    """
-    out: dict[str, str] = {}
-    for line in text.replace("\r", "\n").split("\n"):
-        parts = [p.strip() for p in line.split(",")]
-        if len(parts) >= 2 and parts[-2]:
-            out[parts[-2]] = parts[-1]
-    return out
+#: ``GetStatusFromCamera`` (data type 2002) is binary: big-endian float32s,
+#: 16 of them from SI Image SGL E. Read on the hardware (2026-11-05): [0] the
+#: CCD temperature, [1] the backplate temperature (C); the rest were 0 except
+#: [10] (1.0), meaning not yet known.
+STATUS_FIELDS = ("CCD Temperature", "Backplate Temperature")
 
 
-def ccd_temperature(status: dict[str, str]) -> float:
-    for key, value in status.items():
-        k = key.lower()
-        if "ccd" in k and "temp" in k and "set" not in k:
-            try:
-                return float(value)
-            except ValueError:
-                break
-    raise KiwiSpecProtocolError(f"no CCD temperature in camera status {sorted(status)}")
+def parse_camera_status(payload: bytes) -> dict[str, float]:
+    """``GetStatusFromCamera`` payload -> {name: value}; the unnamed values
+    are kept as ``status[i]``."""
+    if len(payload) < 8 or len(payload) % 4:
+        raise KiwiSpecProtocolError(f"camera status of {len(payload)} bytes")
+    # float32 on the wire: round off its noise (-80.6 arrives as -80.59999847).
+    values = [round(v, 4) for v in struct.unpack(f">{len(payload) // 4}f", payload)]
+    return {
+        STATUS_FIELDS[i] if i < len(STATUS_FIELDS) else f"status[{i}]": v
+        for i, v in enumerate(values)
+    }
+
+
+def ccd_temperature(status: dict[str, float]) -> float:
+    temp = status.get("CCD Temperature")
+    if temp is None or not math.isfinite(temp):
+        raise KiwiSpecProtocolError(f"no CCD temperature in camera status {status}")
+    return temp
 
 
 class SIAcquisition:
@@ -799,15 +800,11 @@ class SICameraClient:
     async def set_cooler(self, on: bool) -> None:
         await self.command(FN_SET_COOLER, struct.pack(">B", 1 if on else 0))
 
-    async def status(self) -> dict[str, str]:
+    async def status(self) -> dict[str, float]:
         pkt = await self.command(FN_GET_STATUS, expect=DATA_STATUS)
         if pkt.err_code:
             raise KiwiSpecFailed(f"GetStatusFromCamera: error code {pkt.err_code}")
-        try:
-            text = pkt.payload.decode("ascii")
-        except UnicodeDecodeError:
-            raise KiwiSpecProtocolError("camera status is not ASCII") from None
-        return parse_camera_status(text)
+        return parse_camera_status(pkt.payload)
 
     async def ccd_temperature(self) -> float:
         return ccd_temperature(await self.status())

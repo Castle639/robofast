@@ -775,13 +775,10 @@ class KiwiSpecSim:
         elif func in (FN_SET_READOUT_MODE, FN_SET_CCD_FORMAT):
             pass
         elif func == FN_GET_STATUS:
-            text = (
-                f"CCD Temperature,{self.ccd_temp():.1f}\n"
-                f"Backplate Temperature,{self.config.backplate_temp:.1f}\n"
-                f"CCD Temperature Setpoint,{self.config.ccd_setpoint:.1f}\n"
-                f"Cooler,{'On' if self.cooler_on else 'Off'}\n"
-            )
-            await self._send(w, self._data(DATA_STATUS, text.encode() + b"\x00"))
+            # The real camera's form: 16 big-endian float32s (kiwispec_client).
+            values = [0.0] * 16
+            values[0], values[1], values[10] = self.ccd_temp(), self.config.backplate_temp, 1.0
+            await self._send(w, self._data(DATA_STATUS, struct.pack(">16f", *values)))
             return
         elif func == FN_ACQUIRE:
             acq = {

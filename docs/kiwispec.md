@@ -121,7 +121,7 @@ are big-endian:
 | header | `>IBB` length, id, camera id (1) | |
 | command (id 128) | `>IBBHH` + params: length, 128, 1, function, param length | |
 | ack (id 129) | `>IBBH` + accept | sent for every command except `TerminateAcquisition` |
-| data (id 131) | `>IBBiHH` + payload: error code, data type, byte length | type 2007 "Done" carries `>H` function number; 2002 status text; 2006 image header; 2009 camera parameters |
+| data (id 131) | `>IBBiHH` + payload: error code, data type, byte length | type 2007 "Done" carries `>H` function number; 2002 status (16 big-endian float32s: [0] CCD, [1] backplate temperature, C); 2006 image header; 2009 camera parameters |
 | image (id 132) | `>IBBiHHHHHHII` + pixels | only for `RetrieveImage`, unused |
 
 Functions legacy uses: `SetAcquisitionMode` 1034 (`>B` 0 = single frame),
@@ -129,8 +129,8 @@ Functions legacy uses: `SetAcquisitionMode` 1034 (`>B` 0 = single frame),
 1035 (`>I` ms), `Acquire` 1037 (`>HHHBB` 4, 1, 0, 73, 0), 
 `TerminateAcquisition` 1018, `SetReadoutMode` 1042 (`>B`; legacy 3),
 `SetCCDFormatParameters` 1043 (`>6i`; legacy 50, 2090, 1, 0, 2052, 1),
-`SetCooler` 1046 (`>B`), `GetStatusFromCamera` 1011 (status text; never
-parsed by legacy). The client waits for the ack, then for a Done (or the
+`SetCooler` 1046 (`>B`), `GetStatusFromCamera` 1011 (binary floats, above;
+never parsed by legacy). The client waits for the ack, then for a Done (or the
 expected data packet). `Acquire`'s Done comes after the exposure **and the
 readout**; the frame is then in `C:/IMAGES/I` on the PC, and the
 spectrograph server's `save_image` moves it into place.
@@ -483,7 +483,12 @@ switch the pump or its valves.
   the spectrograph. `backlight_on` / `backlight_off` on the legacy server,
   `POST /backlight` here; with `"aux"`, the aux server's backlight Switch
   (docs/kiwispec_aux.md: no Alpaca device type fits it). The simulator
-  models the arm (`backlight_arm`).
+  models the arm (`backlight_arm`). `"backlight": false` in the config
+  says there is no working backlight: no frame sends "backlight off" and
+  `POST /backlight` is refused (409), and the guiders use the fiber
+  positions in their configs. MINERVA runs that way while the servo is
+  silent: the legacy server then answers `backlight_off` with `fail`
+  (seen 2026-11-05), which would fail every frame.
 * **The iodine stage** is the iodine cell selector: it moves the iodine
   cell into (`in`) and out of (`out`) the light path, and also carries the
   slit-flat lamp (`flat`), which is dead. `flat` stays among the named
@@ -608,15 +613,17 @@ Answered (JDE, 2026-10-31 to 2026-11-02), and how robofast follows:
    power-cycle the stage by itself (legacy did, after two failed moves)?
    (The positions are answered: the live server's values are correct, and
    robofast reads them from it; see "The iodine stage's positions".)
-5. **Does a second connection to SI Image work**, and what does
-   `GetStatusFromCamera` return (format, CCD temperature field)? The
-   simulator assumes `name,value` lines.
+5. **Does a second connection to SI Image work?** (`GetStatusFromCamera`
+   is answered: 16 big-endian float32s, [0] the CCD and [1] the backplate
+   temperature; read on the hardware 2026-11-05.)
 6. **After `TerminateAcquisition`,** does SI Image read out and keep the
    frame (as the simulator assumes), and is the file at `C:/IMAGES/I`
    complete when `Acquire`'s Done arrives? Is the SI header's `TIME` the
    shutter open/close, so the midpoint can be referred to it?
-7. **CCD temperature limits** to refuse an exposure (assumed -95..-85 C,
-   from PARAM62/PARAM63)? ~~The pressure alarm~~ **Answered:** 0.006 mbar,
+7. **CCD temperature limits** to refuse an exposure (default -95..-85 C,
+   from PARAM62/PARAM63)? MINERVA's site config uses -95..-78: the setpoint
+   is to be -80 C (JDE 2026-11-05), since the cooler holds about -80.5 with
+   the current coolant (-84 in April 2026; it has not reached the old -90). ~~The pressure alarm~~ **Answered:** 0.006 mbar,
    configurable, and downgradable to a warning while the spectrograph is
    isolated from its pump ("Vacuum").
 8. ~~The PC's clock~~ **MST without daylight saving** (`pc_utc_offset_hours`).
