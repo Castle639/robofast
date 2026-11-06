@@ -65,7 +65,7 @@
         "binning": [1, 1],
         "bias_level": 300,
         "saturation": 60000,
-        "fiber": [949.0, 617.0],
+        "fiber": [949.3, 618.8],
         "center": [968, 608],
         "acquisition_tolerance": 3.0
       },
@@ -120,7 +120,7 @@
         "binning": [1, 1],
         "bias_level": 300,
         "saturation": 60000,
-        "fiber": [948.0, 626.0],
+        "fiber": [951.0, 623.3],
         "center": [968, 608],
         "acquisition_tolerance": 3.0
       },
