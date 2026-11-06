@@ -1035,6 +1035,7 @@ class DispatchScheduler:
                 continue
             cand.demoted = self._night_limit(req, now, "soft") or ""
             plans.append((cand, parts))
+            self._place_moving(parts)
             for c, t0, t1 in parts:
                 if c.light:
                     rows.append((c.target.ra_hours, c.target.dec_deg, [t0, t0 + (t1 - t0) / 2, t1]))
@@ -1058,6 +1059,17 @@ class DispatchScheduler:
         self.errors.append((now, req.id, repr(exc)))
         del self.errors[:-1000]
         log.error("evaluating %s: %r (excluded)", req.id, exc)
+
+    def _place_moving(self, parts: list[tuple[Configuration, datetime, datetime]]) -> None:
+        """Put each moving (ORBITAL_ELEMENTS) target of ``parts`` at its
+        place from the site at the middle of its planned time, so the
+        altitude, hour-angle and Moon checks, and the observation made from
+        it, read where the object will be. (Over one configuration's few
+        minutes to an hour, a comet or main-belt asteroid moves well under
+        an arcminute; the sequencer recomputes the place at each exposure.)"""
+        for c, t0, t1 in parts:
+            if c.light and c.target.moving:
+                c.target.update_place(t0 + (t1 - t0) / 2, self.site.location)
 
     def _altitudes(self, rows: list[tuple[float, float, list[datetime]]]) -> list[list[float]]:
         """Altitudes for every row; a row whose computation raises is all
@@ -1446,6 +1458,7 @@ class DispatchScheduler:
                 # remaining instrument configs matter, but checking all of it
                 # is the conservative choice.
                 if not cand.reasons:
+                    self._place_moving(parts)
                     rows = [
                         (c.target.ra_hours, c.target.dec_deg, [t0, t0 + (t1 - t0) / 2, t1])
                         for c, t0, t1 in parts
@@ -1556,6 +1569,7 @@ class DispatchScheduler:
                 lead=visit_lead,
             )
             if not cand.reasons:
+                self._place_moving(parts)
                 rows = [
                     (c.target.ra_hours, c.target.dec_deg, [t0, t0 + (t1 - t0) / 2, t1])
                     for c, t0, t1 in parts
@@ -1595,6 +1609,16 @@ class DispatchScheduler:
             params=params,
         )
         obs = Observation(**c.kind.observation(mapping))
+        if c.target.moving and obs.light:
+            assert c.target.orbit is not None
+            obs.follow = {
+                "orbit": c.target.orbit.to_dict(),
+                "site": {
+                    "latitude": self.site.latitude,
+                    "longitude": self.site.longitude,
+                    "elevation": self.site.elevation,
+                },
+            }
         if obs.guide and c.guide_on != "annulus":
             plan = visit.guide.get(c.id)
             if plan is None:
