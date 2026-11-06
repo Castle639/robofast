@@ -293,6 +293,12 @@ class KiwiSpecConfig:
     #: ``led: true`` are allowed. Off by default: legacy stopped slit flats in
     #: 2023 ("Slit flat lamp is dead, skipping slit flats", control.specCalib).
     slit_flat_led: bool = False
+    #: The FAU backlight works. False: the service never sends a backlight
+    #: command (frames skip "backlight off", ``POST /backlight`` is refused);
+    #: the guiders use their configured fiber positions instead. MINERVA's
+    #: servo stopped answering in 2026-11 and the legacy server then answers
+    #: ``backlight_off`` with ``fail``, which would fail every frame.
+    backlight: bool = True
     #: Lamp frames (``thar``, ``fiberflat``) this spectrograph can take; the
     #: service switches no lamp. Default none: MINERVA's KiwiSpec is iodine
     #: only ("There are no ThAr lamps or a way to robotically switch over.
@@ -400,6 +406,8 @@ class KiwiSpecConfig:
             raise ValueError(f"lamp_frames: a list of {list(LAMP_KINDS)}, not {lamps!r}")
         if not isinstance(d.get("slit_flat_led", False), bool):
             raise ValueError("slit_flat_led must be true or false")
+        if not isinstance(d.get("backlight", True), bool):
+            raise ValueError("backlight must be true or false")
         if d.get("flux_source", "fau") not in FLUX_SOURCES:
             raise ValueError(f"flux_source: one of {list(FLUX_SOURCES)}, not {d['flux_source']!r}")
         if d.get("pressure_alarm", "alarm") not in ("alarm", "warning"):
@@ -757,6 +765,8 @@ class KiwiSpec:
     async def set_backlight(self, on: bool) -> None:
         """The FAU backlight: an LED disk on an arm that swings in over the
         fiber (on) and out again (off)."""
+        if not self.config.backlight:
+            raise Refused("no backlight (config backlight false)")
         meter = self.config.flux_source == "expmeter"
         if on:
             # The backlight would saturate the exposure meter: pause it first
@@ -1178,7 +1188,7 @@ class KiwiSpec:
             raise
 
         job.phase = f"{f.kind}: configuring"
-        if self.backlight is not False:
+        if c.backlight and self.backlight is not False:
             await self.set_backlight(False)
         await self.set_led(led)
         if f.kind == "science":

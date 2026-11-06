@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import json
 import math
+import struct
 import time
 
 import httpx
@@ -28,8 +29,11 @@ from robofast.devices.kiwispec_client import (
     KiwiSpecUnreachable,
     SICameraClient,
     SpecServerClient,
+    ccd_temperature,
     format_command,
     header_chunks,
+    parse_camera_status,
+    parse_si_packet,
 )
 from robofast.devices.kiwispec_service import (
     KiwiSpecConfig,
@@ -283,6 +287,22 @@ async def test_fail_reply_is_final(sim):
 
 
 # -- the SI camera protocol ------------------------------------------------------------
+
+
+def test_camera_status_real_bytes():
+    """A GetStatusFromCamera reply as the real SI Image sent it (2026-11-05):
+    binary floats, ending in zeros that must not be stripped."""
+    values = [-80.5, 25.7] + [0.0] * 8 + [1.0] + [0.0] * 5
+    payload = struct.pack(">16f", *values)
+    raw = struct.pack(">IBBiHH", 14 + len(payload), 131, 1, 0, 2002, len(payload)) + payload
+    pkt = parse_si_packet(raw)
+    assert pkt.payload == payload
+    status = parse_camera_status(pkt.payload)
+    assert ccd_temperature(status) == -80.5
+    assert status["Backplate Temperature"] == pytest.approx(25.7)
+    assert status["status[10]"] == 1.0
+    with pytest.raises(KiwiSpecProtocolError):
+        parse_camera_status(b"CCD Temperature,-90.0\n")
 
 
 async def test_camera_client(sim):
@@ -569,6 +589,23 @@ async def test_backlight_pauses_the_exposure_meter(http, sim):
     assert not sim.expmeter_tripped
     await http.post("/backlight", json={"on": False})
     assert not sim.backlight_on and sim.expmeter_logging
+
+
+async def test_no_backlight_never_commands_it(sim):
+    """backlight false: frames do not send "backlight off" (a dead servo makes
+    the legacy server answer fail), and /backlight is refused."""
+    sim.backlight_arm = "in"  # would be moved out if the service touched it
+    server = await KiwiSpecServer(service_config(sim, backlight=False)).start(status_loop=False)
+    try:
+        async with httpx.AsyncClient(base_url=server.url, timeout=10) as http:
+            job = await run_job(http, "/expose", {"kind": "bias"})
+            assert job["state"] == "done", job
+            assert sim.backlight_arm == "in"
+            r = await http.post("/backlight", json={"on": True})
+            assert r.status_code == 409 and "no backlight" in r.json()["error"]
+            assert not sim.backlight_on
+    finally:
+        await server.stop()
 
 
 async def test_expmeter_disabled_falls_back_to_time(sim):
