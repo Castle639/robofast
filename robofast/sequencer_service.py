@@ -156,6 +156,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
 import json
 import logging
 import os
@@ -681,7 +682,9 @@ async def run(
     assert task is not None
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGTERM, signal.SIGINT):
-        loop.add_signal_handler(sig, task.cancel)
+        # Windows' loops have none: Ctrl-C reaches asyncio.run, which cancels.
+        with contextlib.suppress(NotImplementedError):
+            loop.add_signal_handler(sig, task.cancel)
     # A plan's background task (the dispatch scheduler's ToO intake), if any.
     serve = getattr(seq.plan, "serve", None)
     background = [asyncio.create_task(serve(), name="plan-serve")] if serve else []
