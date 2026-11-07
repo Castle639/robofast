@@ -1,0 +1,55 @@
+# First light on Windows and macOS (room 117; for the fork branch
+# room117/windows-ci only, never for the branch that goes to Jason).
+# ubuntu-latest runs the same steps as the control.
+name: First light on other systems
+
+on:
+  push:
+    branches: [room117/windows-ci]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  first-light:
+    name: first light (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: room117/plug-and-run
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Plain pip install of the branch, with the test group
+        run: |
+          python -m pip install --upgrade "pip>=25.1"
+          python -m pip install . --group test
+          python -m pip list
+      - name: The first-light and sky-device tests
+        run: python -m pytest -p no:cacheprovider -v tests/core/test_first_light.py tests/core/test_sky_device.py
+      - name: The command, from outside the repository, on the simulated telescope
+        run: |
+          cd "$RUNNER_TEMP"
+          python -u -m robofast.testing.sky_device --discovery-port 0 --catalog-dir "$RUNNER_TEMP/sky" > device.out 2> device.err &
+          for i in $(seq 1 60); do [ -s device.out ] && break; sleep 1; done
+          cat device.out
+          port=$(python -c "import json; print(json.load(open('device.out'))['discovery_port'])")
+          status=0
+          python -u -m robofast --site 42.38,-71.13 --no-enclosure --yes \
+            --address 127.0.0.1 --discovery-port "$port" \
+            --plugin robofast.testing.sky_device:register --catalog synthetic \
+            --catalog-dir "$RUNNER_TEMP/sky" --exptime 1 --timeout 600 || status=$?
+          pid=$(python -c "import json; print(json.load(open('device.out'))['pid'])")
+          kill "$pid" 2>/dev/null || taskkill //F //PID "$pid" 2>/dev/null || true
+          echo "--- device stderr (last 40 lines)"; tail -40 device.err
+          exit $status
