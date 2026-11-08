@@ -322,3 +322,29 @@ async def test_a_lease_revoked_before_it_opened_still_parks_a_dead_sequencers_te
     await asyncio.wait_for(sup._enforce_once(), 30)
     await await_until(lambda: tel._parked, timeout=30)
     assert any("revoked and not released" in a for a in sup.alarms), list(sup.alarms)
+
+
+async def test_every_orphaned_lease_is_parked_not_only_the_first():
+    """One orphan parked; an operator clears it; a second lease revoked in
+    its first pass, its sequencer dead too: parked as well (the park is
+    remembered per lease, not once for good)."""
+    tl = Timeline()
+    tel = FakeTelescope()
+    sup = SafetySupervisor(
+        "classroom",
+        dome=None,
+        safety_monitor=None,
+        telescopes=[DeviceOwner("t1.telescope", lambda: tel, tl, default_timeout=0.5)],
+        timeline=tl,
+        config=SafetyConfig(**{**SAFETY, "park_wait": 4.0}),
+    )
+    for n in (1, 2):
+        sup.duty_on("teacher", "first light")
+        lease = await asyncio.wait_for(sup.request_open("seq"), 10)
+        tel.Unpark()
+        tel.Tracking = True
+        sup.duty_off("teacher", "gone")  # revoked; the sequencer dies
+        await asyncio.wait_for(sup._enforce_once(), 30)
+        assert tel._parked, f"lease {n} left the telescope unparked"
+        assert await sup.clear(lease.id, "teacher", "the telescope is parked")  # the operator
+        assert sup.outstanding() is None, lease

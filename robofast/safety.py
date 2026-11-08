@@ -610,6 +610,9 @@ class SafetySupervisor:
         #: The id of the last lease revoked for not being renewed (its holder
         #: is silent: no cleanup will come; "No enclosure" in the module doc).
         self._lapsed: int | None = None
+        #: The id of the last lease whose telescopes the supervisor parked
+        #: itself, with no enclosure (each orphaned lease is parked once).
+        self._parked_orphan: int | None = None
         #: The park-before-close interlock (``require_park_before_close``):
         #: an operator's emergency close (why; cleared once closed), and a
         #: routine close held back by unparked telescopes (why, since when,
@@ -1467,7 +1470,6 @@ class SafetySupervisor:
         if lease is None or not lease.live:
             self._emergency_close = None  # its revocation was the whole close
         if self._want_open(now) and lease is not None and not lease.opened.is_set():
-            self._parked_for_close = False
             lease.opened.set()
             self.timeline.event(self.name, "sky_open", lease=lease.id, reason=NO_ENCLOSURE_TEXT)
 
@@ -1481,8 +1483,14 @@ class SafetySupervisor:
         heard from) is parked at once; one revoked for another reason gives
         the sequencer's cleanup ``park_wait / 2`` first."""
         lease = self._lease
-        if lease is None or lease.live or lease.released.is_set() or self._parked_for_close:
+        if (
+            lease is None
+            or lease.live
+            or lease.released.is_set()
+            or self._parked_orphan == lease.id
+        ):
             return
+        self._parked_orphan = lease.id
         lapsed = self._lapsed == lease.id
         self._alarm(
             f"lease #{lease.id} ({lease.holder}) revoked and not released"
