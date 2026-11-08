@@ -183,36 +183,36 @@ def session(timeout: float = 5.0):
                     _alpaca(client, d, "Connected", "false")
 
 
-def _read(client: httpx.Client, d: Device, members: list[str]) -> list[Any]:
-    """Read ``members`` of ``d``; a device that reports itself not
-    connected is connected for the reads and disconnected after (inside a
-    :func:`session`: when it ends)."""
-    open_session = _SESSION.get()
-    if open_session is not None:
-        client, seen, opened = open_session
-        key = f"{d.type} {d.spec}"
-        if key not in seen:
-            seen.add(key)
-            if _alpaca(client, d, "Connected") is not True:
-                _alpaca(client, d, "Connected", "true")
-                opened[key] = d
-        return [_alpaca(client, d, m) for m in members]
-    connect = _alpaca(client, d, "Connected") is not True
-    if connect:
-        _alpaca(client, d, "Connected", "true")
-    try:
-        return [_alpaca(client, d, m) for m in members]
-    finally:
-        if connect:
-            _alpaca(client, d, "Connected", "false")
+@contextlib.contextmanager
+def _open(timeout: float):
+    """The open :func:`session`, or one for these reads alone."""
+    if _SESSION.get() is not None:
+        yield
+    else:
+        with session(timeout):
+            yield
+
+
+def _read(d: Device, members: list[str]) -> list[Any]:
+    """Read ``members`` of ``d`` in the open :func:`session`; a device that
+    reports itself not connected is connected at its first read and
+    disconnected when the session ends."""
+    client, seen, opened = _SESSION.get()  # type: ignore[misc]
+    key = f"{d.type} {d.spec}"
+    if key not in seen:
+        seen.add(key)
+        if _alpaca(client, d, "Connected") is not True:
+            _alpaca(client, d, "Connected", "true")
+            opened[key] = d
+    return [_alpaca(client, d, m) for m in members]
 
 
 def read_members(d: Device, members: list[str], timeout: float = 5.0) -> list[Any]:
     """Read ``members`` of ``d`` (connected for the reads if it is not, as
     :func:`read_optics` does); :class:`OpticsUnavailable` naming the one
     that cannot be read."""
-    with httpx.Client(timeout=timeout, trust_env=False) as client:
-        return _read(client, d, members)
+    with _open(timeout):
+        return _read(d, members)
 
 
 def read_optics(telescope: Device, camera: Device, timeout: float = 5.0) -> dict[str, float]:
@@ -220,9 +220,9 @@ def read_optics(telescope: Device, camera: Device, timeout: float = 5.0) -> dict
     from the telescope's ``FocalLength`` (m) and the camera's ``PixelSizeX``
     and ``PixelSizeY`` (um); :class:`OpticsUnavailable` naming the device
     and member that cannot report one."""
-    with httpx.Client(timeout=timeout, trust_env=False) as client:
-        (focal_m,) = _read(client, telescope, ["FocalLength"])
-        px, py = _read(client, camera, ["PixelSizeX", "PixelSizeY"])
+    with _open(timeout):
+        (focal_m,) = _read(telescope, ["FocalLength"])
+        px, py = _read(camera, ["PixelSizeX", "PixelSizeY"])
     what = f"Telescope {telescope.spec} ({telescope.name}) FocalLength"
     if not isinstance(focal_m, (int, float)) or not focal_m > 0:
         raise OpticsUnavailable(f"{what}: {focal_m!r} m, not a focal length")
@@ -295,13 +295,14 @@ def starter_config(
     images: dict[str, Any] = {"data_root": "data", "site": name}
     if optics:
         by_spec = {(d.type, d.spec): d for d in devices}
-        images["telescopes"] = {
-            t: read_optics(
-                by_spec["Telescope", entry["telescope"]], by_spec["Camera", entry["camera"]]
-            )
-            for t, entry in telescopes.items()
-            if "camera" in entry
-        }
+        with _open(5.0):  # one connect a device, whatever the telescopes share
+            images["telescopes"] = {
+                t: read_optics(
+                    by_spec["Telescope", entry["telescope"]], by_spec["Camera", entry["camera"]]
+                )
+                for t, entry in telescopes.items()
+                if "camera" in entry
+            }
     return {
         "_note": notes,
         "name": name,
