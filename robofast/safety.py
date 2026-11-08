@@ -1466,19 +1466,14 @@ class SafetySupervisor:
     async def _park_orphaned(self) -> None:
         """No enclosure: a lease revoked and not released (its sequencer dead
         or stuck) leaves no one to park the telescopes, and nothing closes
-        over them: the supervisor parks them itself, as before a roll-off
-        roof closes (:meth:`_park_before_close`), once per lease, with an
+        over them (opened or not: the sequencer unparks and tracks as soon
+        as it holds the lease): the supervisor parks them itself, as before a
+        roll-off roof closes (:meth:`_park_before_close`), once per lease, with an
         alarm at once. A lease that lapsed (not renewed: its holder is not
         heard from) is parked at once; one revoked for another reason gives
         the sequencer's cleanup ``park_wait / 2`` first."""
         lease = self._lease
-        if (
-            lease is None
-            or lease.live
-            or lease.released.is_set()
-            or not lease.opened.is_set()
-            or self._parked_for_close
-        ):
+        if lease is None or lease.live or lease.released.is_set() or self._parked_for_close:
             return
         lapsed = self._lapsed == lease.id
         self._alarm(

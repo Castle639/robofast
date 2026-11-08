@@ -295,3 +295,30 @@ async def test_a_dead_sequencer_leaves_no_telescope_unparked(tmp_path):
         for s in services:
             s.stop()
         server.stop()
+
+
+async def test_a_lease_revoked_before_it_opened_still_parks_a_dead_sequencers_telescope():
+    """The sequencer unparks and tracks as soon as it holds the lease, before
+    the supervisor's pass that opens it: a lease revoked within that first
+    pass, its sequencer dead in it, leaves an unparked mount the supervisor
+    must park itself."""
+    tl = Timeline()
+    tel = FakeTelescope()
+    sup = SafetySupervisor(
+        "classroom",
+        dome=None,
+        safety_monitor=None,
+        telescopes=[DeviceOwner("t1.telescope", lambda: tel, tl, default_timeout=0.5)],
+        timeline=tl,
+        config=SafetyConfig(**{**SAFETY, "park_wait": 4.0}),
+    )
+    sup.duty_on("teacher", "first light")
+    lease = await asyncio.wait_for(sup.request_open("seq"), 10)
+    assert not lease.opened.is_set()  # no pass has run since the grant
+    tel.Unpark()  # what the sequencer does next, before waiting for the open
+    tel.Tracking = True
+    sup.duty_off("teacher", "gone")  # revoked; the sequencer dies: never released
+    assert lease.revoked.is_set() and not lease.released.is_set()
+    await asyncio.wait_for(sup._enforce_once(), 30)
+    await await_until(lambda: tel._parked, timeout=30)
+    assert any("revoked and not released" in a for a in sup.alarms), list(sup.alarms)
