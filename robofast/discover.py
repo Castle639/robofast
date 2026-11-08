@@ -45,6 +45,8 @@ docs/discover.md walks a first exposure from it.
 from __future__ import annotations
 
 import argparse
+import contextlib
+import contextvars
 import json
 import socket
 import sys
@@ -156,9 +158,45 @@ def _alpaca(client: httpx.Client, d: Device, member: str, value: Any = None) -> 
     return body.get("Value")
 
 
+#: The open :func:`session`: its client and the devices it has connected.
+_SESSION: contextvars.ContextVar[tuple[httpx.Client, set[str], dict[str, Device]] | None] = (
+    contextvars.ContextVar("discover_session", default=None)
+)
+
+
+@contextlib.contextmanager
+def session(timeout: float = 5.0):
+    """One connected session for several reads (:func:`read_members`,
+    :func:`read_optics` inside it): a device that reports itself not
+    connected is connected once, at its first read, and disconnected once,
+    when the session ends (a connect can take seconds, and some mounts home
+    on it)."""
+    with httpx.Client(timeout=timeout, trust_env=False) as client:
+        opened: dict[str, Device] = {}
+        token = _SESSION.set((client, set(), opened))
+        try:
+            yield
+        finally:
+            _SESSION.reset(token)
+            for d in opened.values():
+                with contextlib.suppress(OpticsUnavailable):
+                    _alpaca(client, d, "Connected", "false")
+
+
 def _read(client: httpx.Client, d: Device, members: list[str]) -> list[Any]:
     """Read ``members`` of ``d``; a device that reports itself not
-    connected is connected for the reads and disconnected after."""
+    connected is connected for the reads and disconnected after (inside a
+    :func:`session`: when it ends)."""
+    open_session = _SESSION.get()
+    if open_session is not None:
+        client, seen, opened = open_session
+        key = f"{d.type} {d.spec}"
+        if key not in seen:
+            seen.add(key)
+            if _alpaca(client, d, "Connected") is not True:
+                _alpaca(client, d, "Connected", "true")
+                opened[key] = d
+        return [_alpaca(client, d, m) for m in members]
     connect = _alpaca(client, d, "Connected") is not True
     if connect:
         _alpaca(client, d, "Connected", "true")
