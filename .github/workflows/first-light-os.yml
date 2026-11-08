@@ -53,3 +53,21 @@ jobs:
           kill "$pid" 2>/dev/null || taskkill //F //PID "$pid" 2>/dev/null || true
           echo "--- device stderr (last 40 lines)"; tail -40 device.err
           exit $status
+      - name: The command without --site (the site read from the simulated telescope)
+        run: |
+          cd "$RUNNER_TEMP"
+          python -u -m robofast.testing.sky_device --discovery-port 0 --catalog-dir "$RUNNER_TEMP/sky" > device2.out 2> device2.err &
+          for i in $(seq 1 60); do [ -s device2.out ] && break; sleep 1; done
+          cat device2.out
+          port=$(python -c "import json; print(json.load(open('device2.out'))['discovery_port'])")
+          status=0
+          python -u -m robofast --no-enclosure --yes --dir first-light-own-site \
+            --address 127.0.0.1 --discovery-port "$port" \
+            --plugin robofast.testing.sky_device:register --catalog synthetic \
+            --catalog-dir "$RUNNER_TEMP/sky" --exptime 1 --timeout 600 > own-site.out || status=$?
+          cat own-site.out
+          grep -q "the telescope's (--site to change it)" own-site.out || status=1
+          pid=$(python -c "import json; print(json.load(open('device2.out'))['pid'])")
+          kill "$pid" 2>/dev/null || taskkill //F //PID "$pid" 2>/dev/null || true
+          echo "--- device stderr (last 40 lines)"; tail -40 device2.err
+          exit $status
