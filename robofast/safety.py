@@ -613,6 +613,8 @@ class SafetySupervisor:
         #: The id of the last lease whose telescopes the supervisor parked
         #: itself, with no enclosure (each orphaned lease is parked once).
         self._parked_orphan: int | None = None
+        #: The id of the last orphaned lease alarmed (the alarm said once).
+        self._orphan_alarmed: int | None = None
         #: The park-before-close interlock (``require_park_before_close``):
         #: an operator's emergency close (why; cleared once closed), and a
         #: routine close held back by unparked telescopes (why, since when,
@@ -1490,15 +1492,20 @@ class SafetySupervisor:
             or self._parked_orphan == lease.id
         ):
             return
-        self._parked_orphan = lease.id
         lapsed = self._lapsed == lease.id
-        self._alarm(
-            f"lease #{lease.id} ({lease.holder}) revoked and not released"
-            f"{' (not renewed: its sequencer is silent)' if lapsed else ''}: no enclosure,"
-            " so the supervisor parks the telescopes",
-            "critical",
-        )
-        await self._park_before_close(wait_cleanup=not lapsed)
+        first = self._orphan_alarmed != lease.id
+        if first:
+            self._orphan_alarmed = lease.id
+            self._alarm(
+                f"lease #{lease.id} ({lease.holder}) revoked and not released"
+                f"{' (not renewed: its sequencer is silent)' if lapsed else ''}: no enclosure,"
+                " so the supervisor parks the telescopes",
+                "critical",
+            )
+        # Marked parked only once every telescope confirmed it: a mount that
+        # did not answer is parked on a later pass.
+        if await self._park_before_close(wait_cleanup=first and not lapsed):
+            self._parked_orphan = lease.id
 
     def _note_would_open(self, now: float) -> None:
         """A mode that may not open: record when it *would* open or close
@@ -1631,10 +1638,11 @@ class SafetySupervisor:
                 shutter=None if status is None else Shutter(status).name,
             )
 
-    async def _park_before_close(self, *, wait_cleanup: bool = True) -> None:
+    async def _park_before_close(self, *, wait_cleanup: bool = True) -> bool:
         """Roll-off roofs: give the sequencer's cleanup a bounded chance to
         park (``wait_cleanup``), then park every telescope ourselves (in
-        parallel), then close regardless."""
+        parallel), then close regardless. True if every telescope confirmed
+        parked."""
         cfg = self.config
         lease = self._lease
         if wait_cleanup and lease is not None and not lease.released.is_set():
@@ -1643,20 +1651,23 @@ class SafetySupervisor:
             except TimeoutError:
                 self._alarm("sequencer did not finish cleanup before close")
 
-        async def park(tel: Grant) -> None:
+        async def park(tel: Grant) -> bool:
             try:
                 async with asyncio.timeout(cfg.park_wait / 2):
                     if self._want_open(time.monotonic()):
-                        return  # a new live lease: its sequencer has the telescopes
+                        return True  # a new live lease: its sequencer has the telescopes
                     if not await tel.get("AtPark"):
                         await tel.call("Park", timeout=cfg.park_wait / 2)
                         while not await tel.get("AtPark"):
                             await asyncio.sleep(0.2)
+                    return True
             except (DeviceError, TimeoutError) as exc:
                 self._alarm(f"{tel.owner.name} not confirmed parked before close: {exc!r}")
+                return False
 
-        await asyncio.gather(*(park(t) for t in self._tels))
+        parked = await asyncio.gather(*(park(t) for t in self._tels))
         self._parked_for_close = True
+        return all(parked)
 
     def emergency(self) -> str | None:
         """Why a close now would be an emergency (None: a routine close),
