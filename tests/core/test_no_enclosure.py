@@ -348,3 +348,33 @@ async def test_every_orphaned_lease_is_parked_not_only_the_first():
         assert tel._parked, f"lease {n} left the telescope unparked"
         assert await sup.clear(lease.id, "teacher", "the telescope is parked")  # the operator
         assert sup.outstanding() is None, lease
+
+
+async def test_an_orphan_park_that_failed_is_tried_again_and_said_once():
+    """The mount does not answer when the supervisor first parks for a dead
+    sequencer: the park is tried again on later passes, until it is
+    confirmed, and the alarm for the lease is said once, not every pass."""
+    tl = Timeline()
+    tel = FakeTelescope()
+    sup = SafetySupervisor(
+        "classroom",
+        dome=None,
+        safety_monitor=None,
+        telescopes=[DeviceOwner("t1.telescope", lambda: tel, tl, default_timeout=0.5)],
+        timeline=tl,
+        config=SafetyConfig(**{**SAFETY, "park_wait": 2.0}),
+    )
+    sup.duty_on("teacher", "first light")
+    await asyncio.wait_for(sup.request_open("seq"), 10)
+    tel.Unpark()
+    tel.Tracking = True
+    tel.fail("mount unreachable")
+    sup.duty_off("teacher", "gone")  # revoked; the sequencer dies
+    for _ in range(2):
+        await asyncio.wait_for(sup._enforce_once(), 30)
+    assert not tel._parked
+    tel.unfail()
+    await asyncio.wait_for(sup._enforce_once(), 30)
+    assert tel._parked, list(sup.alarms)
+    said = [a for a in sup.alarms if "revoked and not released" in a]
+    assert len(said) == 1, said
